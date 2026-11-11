@@ -27,7 +27,6 @@
   let approvalTimer = null;
   let cloudFetchRequest = 0;
   let lastSyncError = "";
-  let currentView = "dashboard";
   let requestedScreen = "auth";
 
   function toLocalDateValue(date) {
@@ -507,8 +506,8 @@
 
   function showView(viewName, activeLink = navLinkForView(viewName)) {
     const clientsVisible = viewName === "clients";
-    if (viewName !== currentView) clearListFilters();
-    currentView = viewName;
+    const previousView = $("#clients-view").hidden ? "dashboard" : "clients";
+    if (viewName !== previousView) clearListFilters();
     $("#dashboard-view").hidden = clientsVisible;
     $("#clients-view").hidden = !clientsVisible;
     document.querySelectorAll(".main-nav [data-view]").forEach((link) => {
