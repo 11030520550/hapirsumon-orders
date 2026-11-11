@@ -3,10 +3,17 @@
 -- Expected baseline: supabase-schema.sql plus updated_at columns/triggers from
 -- supabase-reliability-migration.sql. Run only after a read-only preflight and
 -- backup of the live database. No client/order rows are deleted or re-imported.
+-- PHASE 1 only: this migration intentionally preserves the existing direct
+-- orders/payments write grants so the current UI does not abruptly lose writes.
+-- Deploy and validate the RPC-based UI, then run
+-- supabase-business-upgrade-cutover.sql during a short write-freeze to revoke
+-- those grants. Never run the cutover while the current direct-write UI is live.
 
 begin;
 
 do $preflight$
+declare
+  v_has_order_number_conflict boolean;
 begin
   if current_setting('server_version_num')::integer < 150000 then
     raise exception 'This migration requires PostgreSQL 15 or newer for security-invoker reporting views.';
@@ -67,13 +74,19 @@ begin
     select 1
     from (values
       ('public.clients'::regclass, 'id', 'text'::regtype),
+      ('public.clients'::regclass, 'name', 'text'::regtype),
+      ('public.clients'::regclass, 'created_at', 'timestamp with time zone'::regtype),
+      ('public.clients'::regclass, 'updated_at', 'timestamp with time zone'::regtype),
       ('public.orders'::regclass, 'id', 'text'::regtype),
       ('public.orders'::regclass, 'client_id', 'text'::regtype),
       ('public.orders'::regclass, 'payment_status', 'text'::regtype),
       ('public.payments'::regclass, 'order_id', 'text'::regtype),
       ('public.orders'::regclass, 'amount', 'numeric'::regtype),
       ('public.payments'::regclass, 'amount', 'numeric'::regtype),
-      ('public.orders'::regclass, 'publication_date', 'date'::regtype)
+      ('public.orders'::regclass, 'publication_date', 'date'::regtype),
+      ('public.orders'::regclass, 'section', 'text'::regtype),
+      ('public.orders'::regclass, 'created_at', 'timestamp with time zone'::regtype),
+      ('public.orders'::regclass, 'updated_at', 'timestamp with time zone'::regtype)
     ) as expected_columns(relation_id, column_name, data_type)
     where not exists (
       select 1
@@ -86,6 +99,35 @@ begin
   ) then
     raise exception 'Legacy table column types differ from the expected text/numeric/date schema. Review before migration.';
   end if;
+  if exists (
+    select 1
+    from (values
+      ('public.clients'::regclass, 'id'),
+      ('public.clients'::regclass, 'name'),
+      ('public.clients'::regclass, 'created_at'),
+      ('public.clients'::regclass, 'updated_at'),
+      ('public.orders'::regclass, 'id'),
+      ('public.orders'::regclass, 'client_id'),
+      ('public.orders'::regclass, 'publication_date'),
+      ('public.orders'::regclass, 'section'),
+      ('public.orders'::regclass, 'amount'),
+      ('public.orders'::regclass, 'payment_status'),
+      ('public.orders'::regclass, 'created_at'),
+      ('public.orders'::regclass, 'updated_at'),
+      ('public.payments'::regclass, 'order_id'),
+      ('public.payments'::regclass, 'amount')
+    ) as required_columns(relation_id, column_name)
+    where not exists (
+      select 1
+      from pg_catalog.pg_attribute as actual
+      where actual.attrelid = required_columns.relation_id
+        and actual.attname = required_columns.column_name
+        and actual.attnotnull
+        and not actual.attisdropped
+    )
+  ) then
+    raise exception 'A required legacy column is nullable. Review the live schema before migration.';
+  end if;
   if not exists (
     select 1 from pg_catalog.pg_constraint
     where conrelid = 'public.orders'::regclass
@@ -93,6 +135,49 @@ begin
       and contype = 'c'
   ) then
     raise exception 'Expected the original positive-amount constraint orders_amount_check. Inspect constraints before migration.';
+  end if;
+  if not exists (
+    select 1
+    from pg_catalog.pg_constraint as constraints
+    where constraints.conrelid = 'public.orders'::regclass
+      and constraints.confrelid = 'public.clients'::regclass
+      and constraints.contype = 'f'
+      and constraints.conkey = array[(
+        select attribute.attnum
+        from pg_catalog.pg_attribute as attribute
+        where attribute.attrelid = 'public.orders'::regclass
+          and attribute.attname = 'client_id'
+          and not attribute.attisdropped
+      )]::smallint[]
+      and constraints.confkey = array[(
+        select attribute.attnum
+        from pg_catalog.pg_attribute as attribute
+        where attribute.attrelid = 'public.clients'::regclass
+          and attribute.attname = 'id'
+          and not attribute.attisdropped
+      )]::smallint[]
+  ) or not exists (
+    select 1
+    from pg_catalog.pg_constraint as constraints
+    where constraints.conrelid = 'public.payments'::regclass
+      and constraints.confrelid = 'public.orders'::regclass
+      and constraints.contype = 'f'
+      and constraints.conkey = array[(
+        select attribute.attnum
+        from pg_catalog.pg_attribute as attribute
+        where attribute.attrelid = 'public.payments'::regclass
+          and attribute.attname = 'order_id'
+          and not attribute.attisdropped
+      )]::smallint[]
+      and constraints.confkey = array[(
+        select attribute.attnum
+        from pg_catalog.pg_attribute as attribute
+        where attribute.attrelid = 'public.orders'::regclass
+          and attribute.attname = 'id'
+          and not attribute.attisdropped
+      )]::smallint[]
+  ) then
+    raise exception 'Expected client/order and payment/order foreign keys are missing or target different columns.';
   end if;
   if not exists (
     select 1 from pg_catalog.pg_attribute
@@ -148,9 +233,79 @@ begin
   end if;
   if exists (
     select 1 from public.orders
-    where payment_status not in ('paid', 'pending')
+    where payment_status is null
+       or payment_status not in ('paid', 'pending')
   ) then
     raise exception 'Legacy orders contain an unknown payment_status. Review them before migration.';
+  end if;
+  if exists (
+    select 1 from public.orders
+    where amount is null or amount < 0 or amount > 99999999
+  ) then
+    raise exception 'Legacy orders contain a null or out-of-range amount. Reconcile them before migration.';
+  end if;
+  if exists (
+    select 1
+    from public.orders as orders
+    left join public.clients as clients on clients.id = orders.client_id
+    where clients.id is null
+  ) then
+    raise exception 'Orphan order rows exist. Reconcile client links before migration.';
+  end if;
+  if exists (
+    select 1
+    from public.payments as payments
+    left join public.orders as orders on orders.id = payments.order_id
+    where orders.id is null
+  ) then
+    raise exception 'Orphan payment rows exist. Reconcile them before migration.';
+  end if;
+  if exists (
+    select 1
+    from public.orders as orders
+    join public.payments as payments on payments.order_id = orders.id
+    where orders.amount = 0
+  ) then
+    raise exception 'Zero-amount orders have payment rows. Reconcile them before migration.';
+  end if;
+  if exists (
+    select 1
+    from pg_catalog.pg_attribute
+    where attrelid = 'public.orders'::regclass
+      and attname = 'order_number'
+      and not attisdropped
+  ) then
+    if exists (
+    select 1
+    from pg_catalog.pg_attribute
+    where attrelid = 'public.orders'::regclass
+      and attname = 'order_number'
+      and atttypid <> 'bigint'::regtype
+      and not attisdropped
+    ) then
+    raise exception 'Existing order_number has an unexpected type. Review it before migration.';
+    end if;
+    execute $check_numbers$
+    select exists (
+      select 1
+        from public.orders
+        where order_number is not null and order_number <= 0
+      ) or exists (
+        select 1
+        from public.orders
+        where order_number is not null
+        group by order_number
+        having count(*) > 1
+      ) or (
+        coalesce(max(order_number), 0)::numeric
+          + count(*) filter (where order_number is null)
+          >= 9223372036854775807::numeric
+      )
+      from public.orders
+    $check_numbers$ into v_has_order_number_conflict;
+    if v_has_order_number_conflict then
+      raise exception 'Existing order numbers are non-positive, duplicated, or would overflow during assignment. Reconcile them before migration.';
+    end if;
   end if;
 end;
 $preflight$;
@@ -181,10 +336,10 @@ alter table public.orders
   add column if not exists product_name_snapshot text,
   add column if not exists product_dimensions_snapshot text,
   add column if not exists product_price_snapshot numeric(12, 2),
-  add column if not exists product_credit_cost_snapshot integer,
+  add column if not exists product_credit_cost_snapshot numeric(12, 2),
   add column if not exists billing_mode text not null default 'legacy',
   add column if not exists cash_amount_before_vat numeric(12, 2),
-  add column if not exists credits_used integer,
+  add column if not exists credits_used numeric(12, 2),
   add column if not exists vat_rate_snapshot numeric(5, 4);
 
 update public.orders
@@ -195,11 +350,19 @@ alter table public.orders
   alter column entered_at set default current_date,
   alter column entered_at set not null;
 
-with numbered_orders as (
-  select id,
-         row_number() over (order by created_at, id) as assigned_number
+-- Keep the existing text ID as the immutable record key. Assign the separate
+-- business-facing sequence only to rows that do not already have a number.
+with current_max as (
+  select coalesce(max(order_number), 0) as last_number
   from public.orders
-  where order_number is null
+),
+numbered_orders as (
+  select orders.id,
+         current_max.last_number
+           + row_number() over (order by orders.created_at, orders.id) as assigned_number
+  from public.orders
+  cross join current_max
+  where orders.order_number is null
 )
 update public.orders as existing
 set order_number = numbered_orders.assigned_number
@@ -231,15 +394,14 @@ security definer
 set search_path = ''
 as $function$
 begin
-  if new.order_number is null then
-    update private.order_number_counters
-    set last_number = last_number + 1
-    where counter_name = 'orders'
-    returning last_number into new.order_number;
+  update private.order_number_counters
+  set last_number = last_number + 1
+  where counter_name = 'orders'
+    and last_number < 9223372036854775807
+  returning last_number into new.order_number;
 
-    if new.order_number is null then
-      raise exception 'Order number counter is unavailable.';
-    end if;
+  if new.order_number is null then
+    raise exception 'Order number counter is unavailable or exhausted.';
   end if;
   return new;
 end;
@@ -254,6 +416,10 @@ create trigger orders_assign_business_order_number
 
 alter table public.orders
   alter column order_number set not null;
+
+alter table public.orders
+  add constraint orders_business_order_number_positive_check
+  check (order_number > 0);
 
 create unique index if not exists orders_order_number_uidx
   on public.orders (order_number);
@@ -292,6 +458,7 @@ alter table public.orders
       (billing_mode = 'credits'
         and cash_amount_before_vat is null
         and credits_used > 0
+        and credits_used = round(credits_used, 2)
         and amount = 0)
     );
 
@@ -312,7 +479,7 @@ create table if not exists public.product_catalog (
   dimensions text not null default '',
   base_price_before_vat numeric(12, 2)
     check (base_price_before_vat is null or base_price_before_vat > 0),
-  credit_cost integer
+  credit_cost numeric(12, 2)
     check (credit_cost is null or credit_cost > 0),
   is_active boolean not null default false,
   created_at timestamptz not null default pg_catalog.now(),
@@ -341,7 +508,8 @@ create table if not exists public.package_catalog (
   id uuid primary key default gen_random_uuid(),
   package_code text not null unique,
   name text not null check (length(btrim(name)) between 1 and 120),
-  credits integer not null check (credits > 0),
+  credits numeric(12, 2) not null
+    check (credits > 0 and credits = round(credits, 2)),
   term_months integer not null check (term_months > 0),
   total_price_before_vat numeric(12, 2) not null
     check (total_price_before_vat > 0),
@@ -399,7 +567,8 @@ create table if not exists public.customer_packages (
   client_id text not null references public.clients (id) on update cascade on delete restrict,
   package_id uuid references public.package_catalog (id) on delete set null,
   package_name_snapshot text not null check (length(btrim(package_name_snapshot)) > 0),
-  credits_granted integer not null check (credits_granted > 0),
+  credits_granted numeric(12, 2) not null
+    check (credits_granted > 0 and credits_granted = round(credits_granted, 2)),
   term_months integer not null check (term_months > 0),
   price_before_vat numeric(12, 2) not null check (price_before_vat > 0),
   vat_rate_snapshot numeric(5, 4) not null check (vat_rate_snapshot between 0 and 1),
@@ -509,6 +678,7 @@ select orders.id, orders.amount, null, orders.payment_status, true,
        null, null, null
 from public.orders as orders
 where orders.billing_mode = 'legacy'
+  and orders.amount > 0
 on conflict (order_id) do nothing;
 
 create table if not exists public.business_payment_events (
@@ -536,7 +706,7 @@ create index if not exists business_payment_events_obligation_idx
 create table if not exists public.credit_ledger (
   id uuid primary key default gen_random_uuid(),
   client_id text not null references public.clients (id) on update cascade on delete restrict,
-  delta integer not null check (delta <> 0),
+  delta numeric(12, 2) not null check (delta <> 0),
   entry_type text not null check (
     entry_type in ('package_grant', 'order_consumption', 'correction', 'conversion_reversal')
   ),
@@ -589,7 +759,8 @@ create table if not exists public.credit_cash_conversions (
   id uuid primary key default gen_random_uuid(),
   order_id text not null unique
     references public.orders (id) on update cascade on delete restrict,
-  original_credits integer not null check (original_credits > 0),
+  original_credits numeric(12, 2) not null
+    check (original_credits > 0 and original_credits = round(original_credits, 2)),
   approved_price_before_vat numeric(12, 2) not null
     check (approved_price_before_vat > 0),
   vat_rate_snapshot numeric(5, 4) not null check (vat_rate_snapshot between 0 and 1),
@@ -627,6 +798,46 @@ create table if not exists private.business_operations (
   response jsonb,
   created_at timestamptz not null default pg_catalog.now()
 );
+
+do $private_column_privileges$
+declare
+  v_table text;
+  v_column text;
+begin
+  foreach v_table in array array[
+    'approved_users', 'order_number_counters', 'business_operations'
+  ]
+  loop
+    if pg_catalog.to_regclass('private.' || v_table) is null then
+      continue;
+    end if;
+    execute pg_catalog.format(
+      'revoke all on table private.%I from public, anon, authenticated',
+      v_table
+    );
+    for v_column in
+      select attribute.attname
+      from pg_catalog.pg_attribute as attribute
+      where attribute.attrelid = pg_catalog.to_regclass('private.' || v_table)
+        and attribute.attnum > 0
+        and not attribute.attisdropped
+    loop
+      execute pg_catalog.format(
+        'revoke insert (%I) on table private.%I from public, anon, authenticated',
+        v_column, v_table
+      );
+      execute pg_catalog.format(
+        'revoke update (%I) on table private.%I from public, anon, authenticated',
+        v_column, v_table
+      );
+      execute pg_catalog.format(
+        'revoke references (%I) on table private.%I from public, anon, authenticated',
+        v_column, v_table
+      );
+    end loop;
+  end loop;
+end;
+$private_column_privileges$;
 
 alter table private.business_operations enable row level security;
 alter table private.business_operations force row level security;
@@ -847,7 +1058,7 @@ create or replace function public.save_product_catalog_item(
   p_name text,
   p_dimensions text,
   p_base_price_before_vat numeric,
-  p_credit_cost integer,
+  p_credit_cost numeric,
   p_is_active boolean
 )
 returns uuid
@@ -867,11 +1078,15 @@ begin
   if p_is_active and (p_base_price_before_vat is null or p_credit_cost is null) then
     raise exception 'אי אפשר להפעיל מוצר לפני שמחירו ועלות הקרדיטים שלו הוזנו ממקור מאומת.';
   end if;
-  if p_base_price_before_vat is not null and p_base_price_before_vat <= 0 then
-    raise exception 'מחיר הבסיס חייב להיות חיובי.';
+  if p_base_price_before_vat is not null
+     and (p_base_price_before_vat <= 0
+       or p_base_price_before_vat > 99999999
+       or round(p_base_price_before_vat, 2) <> p_base_price_before_vat) then
+    raise exception 'מחיר הבסיס חייב להיות חיובי, בטווח המותר ובדיוק שתי ספרות אחרי הנקודה.';
   end if;
-  if p_credit_cost is not null and p_credit_cost <= 0 then
-    raise exception 'עלות הקרדיטים חייבת להיות חיובית.';
+  if p_credit_cost is not null
+     and (p_credit_cost <= 0 or round(p_credit_cost, 2) <> p_credit_cost) then
+    raise exception 'עלות הקרדיטים חייבת להיות חיובית ובדיוק של שתי ספרות אחרי הנקודה.';
   end if;
 
   if p_product_id is null then
@@ -902,16 +1117,16 @@ begin
 end;
 $function$;
 
-revoke all on function public.save_product_catalog_item(uuid, text, text, numeric, integer, boolean)
+revoke all on function public.save_product_catalog_item(uuid, text, text, numeric, numeric, boolean)
   from public, anon;
-grant execute on function public.save_product_catalog_item(uuid, text, text, numeric, integer, boolean)
+grant execute on function public.save_product_catalog_item(uuid, text, text, numeric, numeric, boolean)
   to authenticated;
 
 create or replace function public.save_package_catalog_item(
   p_package_id uuid,
   p_package_code text,
   p_name text,
-  p_credits integer,
+  p_credits numeric,
   p_term_months integer,
   p_total_price_before_vat numeric,
   p_installment_count integer,
@@ -932,10 +1147,15 @@ begin
   end if;
   if p_name is null or length(btrim(p_name)) not between 1 and 120
      or p_credits is null or p_credits <= 0
+     or round(p_credits, 2) <> p_credits
      or p_term_months is null or p_term_months <= 0
      or p_total_price_before_vat is null or p_total_price_before_vat <= 0
+     or p_total_price_before_vat > 99999999
+     or round(p_total_price_before_vat, 2) <> p_total_price_before_vat
      or p_installment_count not between 1 and 60
      or p_installment_before_vat is null or p_installment_before_vat <= 0
+     or p_installment_before_vat > 99999999
+     or round(p_installment_before_vat, 2) <> p_installment_before_vat
      or p_benefits is null or jsonb_typeof(p_benefits) <> 'array' then
     raise exception 'פרטי החבילה אינם תקינים.';
   end if;
@@ -976,9 +1196,9 @@ begin
 end;
 $function$;
 
-revoke all on function public.save_package_catalog_item(uuid, text, text, integer, integer, numeric, integer, numeric, jsonb, boolean)
+revoke all on function public.save_package_catalog_item(uuid, text, text, numeric, integer, numeric, integer, numeric, jsonb, boolean)
   from public, anon;
-grant execute on function public.save_package_catalog_item(uuid, text, text, integer, integer, numeric, integer, numeric, jsonb, boolean)
+grant execute on function public.save_package_catalog_item(uuid, text, text, numeric, integer, numeric, integer, numeric, jsonb, boolean)
   to authenticated;
 
 create or replace function public.set_business_vat_rate(p_vat_rate numeric)
@@ -1019,8 +1239,8 @@ declare
   v_product public.product_catalog%rowtype;
   v_client public.clients%rowtype;
   v_vat numeric(5, 4);
-  v_cash numeric(12, 2);
-  v_credits integer;
+  v_cash numeric;
+  v_credits numeric;
   v_amount numeric(12, 2);
   v_status text;
   v_id text;
@@ -1028,7 +1248,7 @@ declare
   v_obligation_id uuid;
   v_result jsonb := '[]'::jsonb;
   v_actor_label text;
-  v_balance bigint;
+  v_balance numeric;
   v_count integer := 0;
   v_sheet text;
   v_publication_date date;
@@ -1082,9 +1302,14 @@ begin
     end if;
 
     v_cash := nullif(v_row ->> 'cash_amount_before_vat', '')::numeric;
-    v_credits := nullif(v_row ->> 'credits_used', '')::integer;
+    if v_cash is not null
+       and (v_cash <= 0 or v_cash > 99999999 or round(v_cash, 2) <> v_cash) then
+      raise exception 'המחיר בשורה % חייב להיות חיובי, עד 99,999,999 ש"ח, ובדיוק שתי ספרות אחרי הנקודה.', v_count;
+    end if;
+    v_credits := nullif(v_row ->> 'credits_used', '')::numeric;
     if (v_cash is not null and v_cash <= 0)
-       or (v_credits is not null and v_credits <= 0)
+       or (v_credits is not null and
+         (v_credits <= 0 or round(v_credits, 2) <> v_credits))
        or ((v_cash is null) = (v_credits is null)) then
       raise exception 'בכל שורה יש למלא בדיוק ערך חיובי אחד: מחיר לפני מע"מ או קרדיטים.';
     end if;
@@ -1213,7 +1438,7 @@ create or replace function public.purchase_customer_package(
   p_client_id text,
   p_package_id uuid,
   p_custom_name text,
-  p_credits integer,
+  p_credits numeric,
   p_term_months integer,
   p_price_before_vat numeric,
   p_starts_on date,
@@ -1233,13 +1458,13 @@ declare
   v_client public.clients%rowtype;
   v_template public.package_catalog%rowtype;
   v_package_name text;
-  v_credits integer;
+  v_credits numeric;
   v_term integer;
-  v_price numeric(12, 2);
+  v_price numeric;
   v_benefits jsonb;
   v_vat numeric(5, 4);
   v_count integer;
-  v_sum numeric(12, 2);
+  v_sum numeric;
   v_gross numeric(12, 2);
   v_package_id uuid;
   v_item jsonb;
@@ -1304,7 +1529,9 @@ begin
   end if;
 
   if v_package_name is null or v_credits is null or v_credits <= 0
+     or round(v_credits, 2) <> v_credits
      or v_term is null or v_term <= 0 or v_price is null or v_price <= 0
+     or v_price > 99999999 or round(v_price, 2) <> v_price
      or v_benefits is null or jsonb_typeof(v_benefits) <> 'array' then
     raise exception 'פרטי החבילה או ההסכם האישי אינם תקינים.';
   end if;
@@ -1316,6 +1543,9 @@ begin
   if v_count <> jsonb_array_length(p_installments)
      or abs(v_sum - v_price) > 0.01 then
     raise exception 'סכום התשלומים לפני מע"מ חייב להיות שווה למחיר החבילה.';
+  end if;
+  if v_gross <= 0 or v_gross > 99999999 then
+    raise exception 'סכום התשלומים הכולל לאחר מע"מ חורג מהטווח המותר.';
   end if;
 
   v_actor_label := coalesce(
@@ -1353,7 +1583,11 @@ begin
   loop
     v_index := v_index + 1;
     if nullif(v_item ->> 'due_on', '') is null
-       or (v_item ->> 'amount_before_vat')::numeric <= 0 then
+       or nullif(v_item ->> 'amount_before_vat', '') is null
+       or (v_item ->> 'amount_before_vat')::numeric <= 0
+       or (v_item ->> 'amount_before_vat')::numeric > 99999999
+       or round((v_item ->> 'amount_before_vat')::numeric, 2)
+            <> (v_item ->> 'amount_before_vat')::numeric then
       raise exception 'פרטי התשלום % אינם תקינים.', v_index;
     end if;
 
@@ -1422,9 +1656,9 @@ begin
 end;
 $function$;
 
-revoke all on function public.purchase_customer_package(text, uuid, text, integer, integer, numeric, date, date, jsonb, jsonb, text, uuid)
+revoke all on function public.purchase_customer_package(text, uuid, text, numeric, integer, numeric, date, date, jsonb, jsonb, text, uuid)
   from public, anon;
-grant execute on function public.purchase_customer_package(text, uuid, text, integer, integer, numeric, date, date, jsonb, jsonb, text, uuid)
+grant execute on function public.purchase_customer_package(text, uuid, text, numeric, integer, numeric, date, date, jsonb, jsonb, text, uuid)
   to authenticated;
 
 create or replace function public.adjust_package_benefit(
@@ -1513,7 +1747,7 @@ create or replace function public.update_business_order(
   p_sheet_number text,
   p_legacy_amount numeric,
   p_cash_amount_before_vat numeric,
-  p_credits_used integer,
+  p_credits_used numeric,
   p_product_id uuid,
   p_due_on date,
   p_update_due_on boolean,
@@ -1532,9 +1766,9 @@ declare
   v_original_client_id text;
   v_legacy_amount numeric(12, 2);
   v_cash_amount numeric(12, 2);
-  v_credits integer;
+  v_credits numeric;
   v_gross_amount numeric(12, 2);
-  v_credit_delta integer;
+  v_credit_delta numeric(12, 2);
   v_updated_at timestamptz;
   v_result jsonb;
 begin
@@ -1551,7 +1785,7 @@ begin
     raise exception 'פרטי ההזמנה אינם תקינים.';
   end if;
   if p_legacy_amount is not null
-     and (p_legacy_amount <= 0 or p_legacy_amount > 99999999
+     and (p_legacy_amount < 0 or p_legacy_amount > 99999999
        or round(p_legacy_amount, 2) <> p_legacy_amount) then
     raise exception 'הסכום הכספי אינו תקין.';
   end if;
@@ -1561,8 +1795,9 @@ begin
        or round(p_cash_amount_before_vat, 2) <> p_cash_amount_before_vat) then
     raise exception 'המחיר לפני מע"מ אינו תקין.';
   end if;
-  if p_credits_used is not null and p_credits_used <= 0 then
-    raise exception 'כמות הקרדיטים חייבת להיות חיובית.';
+  if p_credits_used is not null
+     and (p_credits_used <= 0 or round(p_credits_used, 2) <> p_credits_used) then
+    raise exception 'כמות הקרדיטים חייבת להיות חיובית ובדיוק של שתי ספרות אחרי הנקודה.';
   end if;
 
   v_cached := private.claim_business_operation(
@@ -1640,6 +1875,10 @@ begin
        or p_product_id is not null then
       raise exception 'אי אפשר לשנות חיוב או מוצר של הזמנה היסטורית ללא המרתה המפורשת.';
     end if;
+    if p_update_due_on
+       and coalesce(p_legacy_amount, v_order.amount) = 0 then
+      raise exception 'להזמנה היסטורית בסכום אפס אין מועד פירעון.';
+    end if;
     if (p_legacy_amount is not null and p_legacy_amount <> v_order.amount)
        or p_update_due_on then
       select * into v_obligation
@@ -1647,31 +1886,50 @@ begin
       where order_id = v_order.id
       for update;
       if not found then
-        raise exception 'חסר חיוב להזמנה ההיסטורית; נדרשת בדיקת נתונים לפני עריכה.';
-      end if;
-      if p_legacy_amount is not null
-         and p_legacy_amount <> v_order.amount
-         and v_obligation.status <> 'pending' then
-        raise exception 'אי אפשר לשנות סכום של הזמנה שסומנה כשולמה.';
-      end if;
-      if p_legacy_amount is not null and p_legacy_amount <> v_order.amount then
-        if exists (select 1 from public.payments where order_id = v_order.id)
-           or exists (
-             select 1
-             from public.business_payment_events as events
-             where events.obligation_id = v_obligation.id
-           ) then
-          raise exception 'אי אפשר לשנות סכום לאחר שנרשמה היסטוריית תשלום; יש לבצע פעולת התאמה מתועדת.';
+        if v_order.amount <> 0 or p_legacy_amount is null
+           or p_legacy_amount <= 0 then
+          raise exception 'חסר חיוב להזמנה ההיסטורית; נדרשת בדיקת נתונים לפני עריכה.';
         end if;
-        v_legacy_amount := p_legacy_amount;
-        update public.financial_obligations
-        set amount_due = v_legacy_amount
-        where id = v_obligation.id;
-      end if;
-      if p_update_due_on then
-        update public.financial_obligations
-        set due_on = p_due_on
-        where id = v_obligation.id;
+        if exists (select 1 from public.payments where order_id = v_order.id) then
+          raise exception 'נמצאה היסטוריית תשלום להזמנת legacy בסכום אפס; נדרשת התאמה ידנית לפני שינוי.';
+        end if;
+        insert into public.financial_obligations (
+          order_id, amount_due, due_on, status, legacy_snapshot, created_by
+        )
+        values (
+          v_order.id, p_legacy_amount,
+          case when p_update_due_on then p_due_on else null end,
+          'pending', true, auth.uid()
+        );
+      else
+        if p_legacy_amount is not null
+           and p_legacy_amount <> v_order.amount
+           and v_obligation.status <> 'pending' then
+          raise exception 'אי אפשר לשנות סכום של הזמנה שסומנה כשולמה.';
+        end if;
+        if p_legacy_amount is not null and p_legacy_amount <> v_order.amount then
+          if exists (select 1 from public.payments where order_id = v_order.id)
+             or exists (
+               select 1
+               from public.business_payment_events as events
+               where events.obligation_id = v_obligation.id
+             ) then
+            raise exception 'אי אפשר לשנות סכום לאחר שנרשמה היסטוריית תשלום; יש לבצע פעולת התאמה מתועדת.';
+          end if;
+          if p_legacy_amount = 0 then
+            delete from public.financial_obligations
+            where id = v_obligation.id;
+          else
+            update public.financial_obligations
+            set amount_due = p_legacy_amount
+            where id = v_obligation.id;
+          end if;
+        end if;
+        if p_update_due_on and p_legacy_amount is distinct from 0 then
+          update public.financial_obligations
+          set due_on = p_due_on
+          where id = v_obligation.id;
+        end if;
       end if;
     end if;
   elsif v_order.billing_mode = 'cash' then
@@ -1726,7 +1984,7 @@ begin
       raise exception 'הזמנת קרדיטים אינה כוללת חיוב כספי או מועד פירעון.';
     end if;
     v_credits := coalesce(p_credits_used, v_order.credits_used);
-    if v_credits is null or v_credits <= 0 then
+    if v_credits is null or v_credits <= 0 or round(v_credits, 2) <> v_credits then
       raise exception 'כמות הקרדיטים בהזמנה אינה תקינה.';
     end if;
 
@@ -1780,6 +2038,12 @@ begin
       section = btrim(p_section),
       notes = p_notes,
       sheet_number = nullif(btrim(coalesce(p_sheet_number, '')), ''),
+      payment_status = case
+        when v_order.billing_mode = 'legacy'
+             and v_order.amount = 0
+             and p_legacy_amount > 0 then 'pending'
+        else payment_status
+      end,
       amount = case
         when v_order.billing_mode = 'legacy' and p_legacy_amount is not null
           then p_legacy_amount
@@ -1839,11 +2103,11 @@ $function$;
 
 revoke all on function public.update_business_order(
   text, timestamptz, text, date, text, text, text, numeric, numeric,
-  integer, uuid, date, boolean, uuid
+  numeric, uuid, date, boolean, uuid
 ) from public, anon;
 grant execute on function public.update_business_order(
   text, timestamptz, text, date, text, text, text, numeric, numeric,
-  integer, uuid, date, boolean, uuid
+  numeric, uuid, date, boolean, uuid
 ) to authenticated;
 
 create or replace function public.delete_business_order(
@@ -2115,11 +2379,11 @@ grant execute on function public.set_obligation_paid(uuid, boolean, text, timest
 
 create or replace function public.adjust_client_credits(
   p_client_id text,
-  p_delta integer,
+  p_delta numeric,
   p_reason text,
   p_idempotency_key uuid
 )
-returns bigint
+returns numeric
 language plpgsql
 security definer
 set search_path = ''
@@ -2127,12 +2391,12 @@ as $function$
 declare
   v_cached jsonb;
   v_client public.clients%rowtype;
-  v_balance bigint;
+  v_balance numeric;
 begin
   if auth.uid() is null or not private.is_approved_user() then
     raise exception 'החשבון אינו מורשה לבצע פעולה זו.';
   end if;
-  if p_delta is null or p_delta = 0 or p_reason is null
+  if p_delta is null or p_delta = 0 or round(p_delta, 2) <> p_delta or p_reason is null
      or length(btrim(p_reason)) < 3 then
     raise exception 'תנועת תיקון קרדיטים מחייבת כמות שאינה אפס והסבר.';
   end if;
@@ -2142,7 +2406,7 @@ begin
     pg_catalog.md5(concat_ws(':', p_client_id, p_delta, p_reason))
   );
   if v_cached is not null then
-    return (v_cached ->> 'credit_balance')::bigint;
+    return (v_cached ->> 'credit_balance')::numeric;
   end if;
 
   select * into v_client from public.clients
@@ -2165,8 +2429,8 @@ begin
 end;
 $function$;
 
-revoke all on function public.adjust_client_credits(text, integer, text, uuid) from public, anon;
-grant execute on function public.adjust_client_credits(text, integer, text, uuid) to authenticated;
+revoke all on function public.adjust_client_credits(text, numeric, text, uuid) from public, anon;
+grant execute on function public.adjust_client_credits(text, numeric, text, uuid) to authenticated;
 
 create or replace function public.convert_credit_orders_to_cash(
   p_items jsonb,
@@ -2183,7 +2447,7 @@ declare
   v_item jsonb;
   v_order public.orders%rowtype;
   v_vat numeric(5, 4);
-  v_cash numeric(12, 2);
+  v_cash numeric;
   v_gross numeric(12, 2);
   v_due_on date;
   v_obligation uuid;
@@ -2242,11 +2506,15 @@ begin
       raise exception 'הזמנה % אינה הזמנת קרדיטים שניתנת להמרה.', v_count;
     end if;
     v_cash := nullif(v_item ->> 'cash_amount_before_vat', '')::numeric;
-    if v_cash is null or v_cash <= 0 then
+    if v_cash is null or v_cash <= 0 or v_cash > 99999999
+       or round(v_cash, 2) <> v_cash then
       raise exception 'לכל הזמנה יש להזין מחיר שאושר בפועל; לא חושב מחיר המרה אוטומטי.';
     end if;
     v_due_on := nullif(v_item ->> 'due_on', '')::date;
     v_gross := round(v_cash * (1 + v_vat), 2);
+    if v_gross <= 0 or v_gross > 99999999 then
+      raise exception 'סכום ההמרה לאחר מע"מ חורג מהטווח המותר.';
+    end if;
 
     insert into public.credit_cash_conversions (
       order_id, original_credits, approved_price_before_vat,
@@ -2306,6 +2574,7 @@ grant execute on function public.convert_credit_orders_to_cash(jsonb, text, uuid
 do $policies$
 declare
   v_table text;
+  v_column text;
 begin
   foreach v_table in array array[
     'business_settings', 'product_catalog', 'package_catalog',
@@ -2323,6 +2592,27 @@ begin
     execute pg_catalog.format(
       'revoke all on table public.%I from public, anon, authenticated', v_table
     );
+    for v_column in
+      select attribute.attname
+      from pg_catalog.pg_attribute as attribute
+      where attribute.attrelid =
+        pg_catalog.to_regclass('public.' || v_table)
+        and attribute.attnum > 0
+        and not attribute.attisdropped
+    loop
+      execute pg_catalog.format(
+        'revoke insert (%I) on table public.%I from public, anon, authenticated',
+        v_column, v_table
+      );
+      execute pg_catalog.format(
+        'revoke update (%I) on table public.%I from public, anon, authenticated',
+        v_column, v_table
+      );
+      execute pg_catalog.format(
+        'revoke references (%I) on table public.%I from public, anon, authenticated',
+        v_column, v_table
+      );
+    end loop;
     execute pg_catalog.format(
       'grant select on table public.%I to authenticated', v_table
     );
@@ -2338,8 +2628,9 @@ begin
 end;
 $policies$;
 
--- Keep reads behind the existing approved-user policies. All order writes,
--- including payment status, are restricted to reviewed RPCs.
+-- Keep reads behind the existing approved-user policies. Direct order and
+-- payment writes remain temporarily available for the phase-1 compatibility
+-- window; the separate cutover script revokes them after the new UI is ready.
 alter table public.clients enable row level security;
 alter table public.clients force row level security;
 alter table public.orders enable row level security;
@@ -2347,8 +2638,7 @@ alter table public.orders force row level security;
 alter table public.payments enable row level security;
 alter table public.payments force row level security;
 
-revoke all on table public.clients, public.orders, public.payments
-  from public, anon, authenticated;
+revoke all on table public.clients from public, anon, authenticated;
 grant select on table public.clients, public.orders, public.payments
   to authenticated;
 grant insert (id, name, phone, email) on table public.clients to authenticated;
@@ -2401,6 +2691,7 @@ select
   case when orders.billing_mode = 'credits' then 0::numeric
        else coalesce(obligations.amount_due, orders.amount)::numeric end as cash_due,
   case
+    when orders.billing_mode = 'legacy' and orders.amount = 0 then 0::numeric
     when orders.billing_mode = 'credits' then 0::numeric
     when payments.payment_count + events.event_count = 0
       and obligations.legacy_snapshot
@@ -2412,6 +2703,7 @@ select
   coalesce(obligations.status, orders.payment_status) as payment_status,
   coalesce(obligations.legacy_snapshot, orders.billing_mode = 'legacy') as legacy_snapshot,
   case
+    when orders.billing_mode = 'legacy' and orders.amount = 0 then 'non_cash_order'
     when payments.payment_count > 0 and events.event_count > 0 then 'combined_records'
     when payments.payment_count > 0 then 'public_payments'
     when events.event_count > 0 then 'business_payment_events'
@@ -2420,7 +2712,10 @@ select
     else 'no_receipt_record'
   end as receipt_basis,
   payments.payment_count > 0 or events.event_count > 0 as has_payment_history,
-  obligations.id is null and orders.billing_mode <> 'credits' as missing_obligation,
+  obligations.id is null
+    and orders.billing_mode <> 'credits'
+    and not (orders.billing_mode = 'legacy' and orders.amount = 0)
+    as missing_obligation,
   (
     (coalesce(obligations.status, orders.payment_status) = 'paid'
       and case when orders.billing_mode = 'credits' then 0::numeric
@@ -2566,7 +2861,7 @@ create or replace view public.business_client_credit_balances
 with (security_invoker = true)
 as
 select clients.id as client_id,
-       coalesce(sum(ledger.delta), 0)::bigint as credit_balance
+       coalesce(sum(ledger.delta), 0)::numeric as credit_balance
 from public.clients as clients
 left join public.credit_ledger as ledger
   on ledger.client_id = clients.id

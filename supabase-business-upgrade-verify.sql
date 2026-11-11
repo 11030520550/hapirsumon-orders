@@ -1,4 +1,5 @@
--- READ-ONLY post-migration checks for supabase-business-upgrade.sql.
+-- READ-ONLY checks after supabase-business-upgrade.sql and the approved
+-- supabase-business-upgrade-cutover.sql have both been applied.
 -- Run only after an approved migration. Results contain aggregate counts and
 -- privilege metadata, not client names or identifiers. No database changes.
 
@@ -8,7 +9,16 @@ select
   (select count(*) from public.financial_obligations) as obligations_count,
   (select count(*) from public.orders where billing_mode = 'legacy') as legacy_orders_count,
   (select count(*) from public.orders
+    where billing_mode = 'legacy' and amount = 0) as legacy_zero_amount_orders,
+  (select count(*) from public.orders
+    where billing_mode = 'legacy' and amount = 0
+      and exists (
+        select 1 from public.financial_obligations as obligations
+        where obligations.order_id = orders.id
+      )) as zero_amount_legacy_orders_with_obligations,
+  (select count(*) from public.orders
     where billing_mode = 'legacy'
+      and amount > 0
       and not exists (
         select 1 from public.financial_obligations as obligations
         where obligations.order_id = orders.id
@@ -24,7 +34,20 @@ select
   (select count(*) from public.business_order_financial_summary
     where missing_obligation) as orders_missing_financial_record,
   (select count(*) from public.business_order_financial_summary
-    where payment_status_mismatch) as payment_status_mismatches;
+    where payment_status_mismatch) as payment_status_mismatches,
+  (select count(*) from public.business_order_financial_summary
+    where billing_mode = 'legacy' and cash_due = 0 and cash_received <> 0)
+    as zero_amount_legacy_cash_mismatches;
+
+select
+  (select count(*) from public.credit_ledger
+    where delta <> trunc(delta)) as fractional_credit_ledger_rows,
+  (select count(*) from public.business_client_credit_balances
+    where credit_balance < 0) as clients_with_negative_credit_balance,
+  (select count(*) from public.product_catalog
+    where credit_cost <> trunc(credit_cost)) as fractional_product_credit_costs,
+  (select count(*) from public.package_catalog
+    where credits <> trunc(credits)) as fractional_package_credit_amounts;
 
 select
   relation.relname as table_name,
@@ -72,14 +95,24 @@ order by view_name;
 select
   has_function_privilege(
     'authenticated',
-    'public.update_business_order(text,timestamptz,text,date,text,text,text,numeric,numeric,integer,uuid,date,boolean,uuid)'::regprocedure,
+    'public.update_business_order(text,timestamptz,text,date,text,text,text,numeric,numeric,numeric,uuid,date,boolean,uuid)'::regprocedure,
     'EXECUTE'
   ) as authenticated_can_edit_orders,
   has_function_privilege(
     'anon',
-    'public.update_business_order(text,timestamptz,text,date,text,text,text,numeric,numeric,integer,uuid,date,boolean,uuid)'::regprocedure,
+    'public.update_business_order(text,timestamptz,text,date,text,text,text,numeric,numeric,numeric,uuid,date,boolean,uuid)'::regprocedure,
     'EXECUTE'
   ) as anon_can_edit_orders,
+  has_function_privilege(
+    'authenticated',
+    'public.adjust_client_credits(text,numeric,text,uuid)'::regprocedure,
+    'EXECUTE'
+  ) as authenticated_can_adjust_credits,
+  has_function_privilege(
+    'anon',
+    'public.adjust_client_credits(text,numeric,text,uuid)'::regprocedure,
+    'EXECUTE'
+  ) as anon_can_adjust_credits,
   has_function_privilege(
     'authenticated',
     'public.set_obligation_paid(uuid,boolean,text,timestamptz,uuid)'::regprocedure,
@@ -100,3 +133,18 @@ select
   coalesce(sum(future_amount), 0) as total_future,
   coalesce(sum(no_due_date_amount), 0) as total_without_due_date
 from public.business_financial_summary;
+
+select
+  count(*) filter (where obligations.status = 'paid') as paid_installments,
+  count(*) filter (where obligations.status = 'pending') as pending_installments,
+  coalesce(sum(case when obligations.status = 'paid'
+                    then obligations.amount_due else 0 end), 0) as paid_installment_amount,
+  coalesce(sum(case when obligations.status = 'pending'
+                    and obligations.due_on > current_date
+                    then obligations.amount_due else 0 end), 0) as future_installment_amount,
+  coalesce(sum(case when obligations.status = 'pending'
+                    and obligations.due_on < current_date
+                    then obligations.amount_due else 0 end), 0) as overdue_installment_amount
+from public.package_installments as installments
+join public.financial_obligations as obligations
+  on obligations.package_installment_id = installments.id;
