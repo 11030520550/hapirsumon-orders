@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>כלי בדיקות — פרויקט Supabase מבודד</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: Arial, "Noto Sans Hebrew", sans-serif;
+      color: #172b4d;
+      background: #f4f7fb;
+    }
+
+    * { box-sizing: border-box; }
+
+    body { margin: 0; padding: 24px 16px; }
+
+    main {
+      width: min(100%, 840px);
+      margin: 0 auto;
+      padding: 24px;
+      border: 1px solid #dfe6ef;
+      border-radius: 12px;
+      background: #fff;
+      box-shadow: 0 8px 26px rgb(23 43 77 / 8%);
+    }
+
+    h1 { margin-top: 0; font-size: 1.55rem; }
+    h2 { margin: 26px 0 10px; font-size: 1.12rem; }
+    p { line-height: 1.6; }
+
+    .warning {
+      padding: 12px 14px;
+      border-right: 4px solid #ed9b3b;
+      border-radius: 6px;
+      background: #fff6e9;
+    }
+
+    .status {
+      padding: 12px 14px;
+      border-radius: 6px;
+      background: #edf2f8;
+      overflow-wrap: anywhere;
+    }
+
+    .status.error { color: #8a1c24; background: #fff0f0; }
+    .status.success { color: #155c3b; background: #eaf7f0; }
+
+    form { display: grid; gap: 12px; }
+
+    label { display: grid; gap: 6px; font-weight: 700; }
+
+    input[type="email"], input[type="password"] {
+      width: 100%;
+      min-height: 42px;
+      padding: 9px 11px;
+      border: 1px solid #b8c5d6;
+      border-radius: 6px;
+      font: inherit;
+    }
+
+    .confirm {
+      display: flex;
+      align-items: flex-start;
+      gap: 9px;
+      font-weight: 400;
+    }
+
+    button {
+      min-height: 42px;
+      padding: 9px 16px;
+      border: 0;
+      border-radius: 6px;
+      color: #fff;
+      background: #163d69;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    button.secondary { background: #53677f; }
+    button:disabled { opacity: .55; cursor: not-allowed; }
+
+    .actions { display: flex; flex-wrap: wrap; gap: 10px; }
+
+    ol { padding-right: 24px; }
+    li { margin: 8px 0; line-height: 1.5; }
+    .pass { color: #17613c; }
+    .fail { color: #a32129; }
+
+    @media (max-width: 520px) {
+      body { padding: 12px 8px; }
+      main { padding: 18px 14px; }
+      .actions, .actions button { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>בדיקות מערכת — Supabase</h1>
+    <p class="warning"><strong>סביבת בדיקה בלבד.</strong> ההרצה יוצרת לקוחות, מוצרים, חבילות, הזמנות ותנועות כספיות קבועות בפרויקט שמוגדר כאן. אין להשתמש בפרויקט הייצור. הנתונים אינם נמחקים אוטומטית.</p>
+
+    <h2>בדיקת הגדרות</h2>
+    <div id="environment-status" class="status" role="status" aria-live="polite">בודק את הגדרות פרויקט הבדיקה…</div>
+
+    <section id="login-section" hidden>
+      <h2>התחברות כמשתמש בדיקה מאושר</h2>
+      <form id="login-form">
+        <label>דוא״ל של משתמש הבדיקה
+          <input id="email" type="email" autocomplete="username" required>
+        </label>
+        <label>סיסמה
+          <input id="password" type="password" autocomplete="current-password" required>
+        </label>
+        <label class="confirm">
+          <input id="confirm-test-project" type="checkbox" required>
+          <span>אישרתי שמזהה הפרויקט לעיל הוא פרויקט בדיקה נפרד, ושמותר ליצור בו נתוני בדיקה.</span>
+        </label>
+        <button id="login-button" type="submit">התחברות לפרויקט הבדיקה</button>
+      </form>
+    </section>
+
+    <section id="test-section" hidden>
+      <h2>בדיקות</h2>
+      <p>לקוחות בדיקה נוצרים בהרשאות RLS; הזמנות, חבילות ותשלומים נבדקים דרך RPC. כל ההרצה תסומן TEST ONLY.</p>
+      <div class="actions">
+        <button id="run-tests" type="button">הרצת בדיקות עסקיות</button>
+        <button id="sign-out" class="secondary" type="button">התנתקות</button>
+      </div>
+    </section>
+
+    <h2>תוצאות</h2>
+    <div id="test-status" class="status" role="status" aria-live="polite">טרם בוצעו בדיקות.</div>
+    <ol id="results"></ol>
+    <p><a href="../SUPABASE-TESTING.md">הוראות הקמה וסדר הרצת קובצי SQL</a></p>
+  </main>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="test-harness.js"></script>
+</body>
+</html>

@@ -17,6 +17,8 @@ testing/supabase-test-config.js
 
 # Customer/order exports and local data
 *.json
+!testing/supabase-test-config.example.json
+testing/supabase-test-config.json
 *.json5
 *.jsonl
 *.csv

@@ -1,0 +1,6 @@
+{
+  "environment": "test",
+  "projectRef": "REPLACE_WITH_TEST_PROJECT_REF",
+  "url": "https://REPLACE_WITH_TEST_PROJECT_REF.supabase.co",
+  "publishableKey": "REPLACE_WITH_TEST_PUBLISHABLE_OR_ANON_KEY"
+}
