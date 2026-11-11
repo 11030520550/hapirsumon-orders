@@ -338,6 +338,11 @@ td { padding: 14px 16px; color: #3f4f63; font-size: 14.5px; }
 .preview-inline-note, .preview-vat-note { font-size: 13px; }
 
 /* ===== Screens ===== */
+.payment-select.neutral { color: #4f5f72; background: #eef1f5; }
+.payment-select.open { color: #2f6ea6; background: #edf5fc; }
+.sheet-stats { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+@media (max-width: 1100px) { .sheet-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 700px) { .sheet-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 /* Keeps absolutely positioned .sr-only header labels inside the scroll area (prevented page-wide sideways scroll on mobile). */
 .table-wrap { position: relative; }
 #app-shell:not(.business-on) .biz-only { display: none !important; }

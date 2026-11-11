@@ -19,7 +19,8 @@
   const state = {
     ready: false, loaded: false, vatRate: 0.18, catalog: [], allProducts: [], products: [],
     packages: [], installments: [], obligations: [], balances: new Map(),
-    loadToken: 0, clientToken: 0, modalClientId: null, keys: {}, editingProductId: null
+    loadToken: 0, clientToken: 0, modalClientId: null, keys: {}, editingProductId: null,
+    sheetStatus: new Map(), sheetsInstalled: false, presetSheet: ""
   };
 
   // ---------- helpers ----------
@@ -64,7 +65,8 @@
     button.textContent = busy ? "שומרת…" : idleText;
   }
   function pill(kind, text) {
-    return `<span class="payment-select ${kind === "paid" ? "paid" : "pending"}">${escapeHtml(text)}</span>`;
+    const tone = ["paid", "neutral", "open"].includes(kind) ? kind : "pending";
+    return `<span class="payment-select ${tone}">${escapeHtml(text)}</span>`;
   }
   function loadingRow(columns) {
     return `<tr><td colspan="${columns}" class="empty-cell">טוען נתונים מהמסד…</td></tr>`;
@@ -91,11 +93,55 @@
       q(sb().from("financial_obligations").select("id,order_id,package_installment_id,amount_due,due_on,status,updated_at")),
       q(sb().from("business_client_credit_balances").select("client_id,credit_balance"))
     ]);
+    const sheets = await loadSheetStatus();
     if (token !== state.loadToken) return false;
     Object.assign(state, { packages, installments, obligations, loaded: true });
+    state.sheetsInstalled = sheets !== null;
+    state.sheetStatus = new Map((sheets || []).map((row) => [row.sheet_number, row]));
     state.balances = new Map(balances.map((row) => [row.client_id, Number(row.credit_balance)]));
     app().rerenderClients();
     return true;
+  }
+
+  // Sheet open/closed status lives in public.sheets (supabase-sheets-and-order-numbers.sql).
+  // Returns null when that table is not installed yet; every sheet is then shown as open.
+  async function loadSheetStatus() {
+    const { data, error } = await sb().from("sheets").select("sheet_number,status,status_reason,closed_at,updated_at");
+    if (!error) return data;
+    if (["PGRST205", "42P01"].includes(String(error.code || "")) || /schema cache|does not exist/i.test(error.message || "")) return null;
+    throw error;
+  }
+
+  function sheetClosed(sheetNumber) {
+    return state.sheetStatus.get(sheetNumber)?.status === "closed";
+  }
+
+  function compareSheets(left, right) {
+    const a = Number(left); const b = Number(right);
+    if (Number.isFinite(a) && Number.isFinite(b)) return b - a;
+    return String(right).localeCompare(String(left), "he", { numeric: true });
+  }
+
+  // Groups the loaded orders by sheet number (only orders that have one).
+  function sheetGroups() {
+    const groups = new Map();
+    for (const order of app().orders()) {
+      if (!order.sheetNumber) continue;
+      const group = groups.get(order.sheetNumber) || { sheet: order.sheetNumber, orders: [], clients: new Set(), billed: 0, paid: 0, pending: 0, credits: 0 };
+      group.orders.push(order);
+      group.clients.add(order.clientId);
+      if (order.billingMode === "credits") group.credits += Number(order.creditsUsed || 0);
+      else {
+        group.billed += Number(order.amount);
+        group[order.paymentStatus === "paid" ? "paid" : "pending"] += Number(order.amount);
+      }
+      groups.set(order.sheetNumber, group);
+    }
+    return [...groups.values()].sort((left, right) => compareSheets(left.sheet, right.sheet));
+  }
+
+  function sheetStatusPill(sheetNumber) {
+    return sheetClosed(sheetNumber) ? pill("neutral", "סגור") : pill("open", "פתוח");
   }
 
   function activePackage(clientId, today = localDateValue()) {
@@ -115,7 +161,7 @@
       if (obligation.order_id) {
         const order = orders.get(obligation.order_id);
         if (!order) continue;
-        row = { clientId: order.clientId, label: `הזמנה #${order.orderNumber ?? order.id} · ${order.section}`, expected: order.updatedAt, sort: order.date };
+        row = { clientId: order.clientId, label: `הזמנה ${order.orderNumber ?? ""}${order.sheetNumber ? ` · גיליון ${order.sheetNumber}` : ""}`, expected: order.updatedAt, sort: order.orderDate };
       } else {
         const installment = installments.get(obligation.package_installment_id);
         const pkg = installment && packages.get(installment.customer_package_id);
@@ -153,6 +199,8 @@
     if (route.name === "packages") renderPackagesPage();
     if (route.name === "payments") renderPaymentsPage();
     if (route.name === "settings") renderSettings();
+    if (route.name === "sheets") renderSheetsPage();
+    if (route.name === "sheet") renderSheetPage(route.param);
   }
 
   // Client file page: summary cards + packages / payments / details tabs (orders tab is rendered by app.js).
@@ -258,10 +306,93 @@
     $("#payments-count").textContent = `${number.format(rows.length)} חיובים · ${money.format(rows.reduce((total, row) => total + row.amount, 0))}`;
   }
 
+  function renderSheetsPage() {
+    $("#sheets-status-note").hidden = !state.loaded || state.sheetsInstalled;
+    const query = $("#sheets-search").value.trim();
+    const filter = $("#sheets-filter").value;
+    const groups = sheetGroups().filter((group) => group.sheet.includes(query)
+      && (filter === "all" || (filter === "closed") === sheetClosed(group.sheet)));
+    $("#sheets-body").innerHTML = groups.map((group) => `<tr>
+      <td class="client-name"><button class="link-button" type="button" data-sheet-view="${escapeHtml(group.sheet)}">גיליון ${escapeHtml(group.sheet)}</button></td>
+      <td>${sheetStatusPill(group.sheet)}</td>
+      <td>${escapeHtml(number.format(group.orders.length))}</td>
+      <td>${escapeHtml(number.format(group.clients.size))}</td>
+      <td class="amount-cell">${escapeHtml(money.format(group.billed))}</td>
+      <td class="amount-cell">${escapeHtml(money.format(group.pending))}</td>
+      <td>${escapeHtml(number.format(group.credits))}</td>
+    </tr>`).join("");
+    $("#sheets-empty").hidden = groups.length !== 0;
+  }
+
+  function renderSheetPage(sheetNumber) {
+    const group = sheetGroups().find((item) => item.sheet === sheetNumber);
+    const closed = sheetClosed(sheetNumber);
+    $("#sheet-page-number").textContent = sheetNumber;
+    $("#sheet-page-status").outerHTML = `<span id="sheet-page-status">${sheetStatusPill(sheetNumber)}</span>`;
+    const statusRow = state.sheetStatus.get(sheetNumber);
+    $("#sheet-page-subtitle").textContent = closed
+      ? `הגיליון נסגר ב-${displayDate(String(statusRow.closed_at).slice(0, 10))}. סגירה אינה משנה תשלומים: לקוחות שטרם שילמו עדיין מופיעים כממתינים.`
+      : "סטטוס הגיליון (פתוח/סגור) נפרד מסטטוס התשלום של כל לקוח.";
+    const toggle = $("#sheet-toggle-status");
+    toggle.hidden = !state.sheetsInstalled || !group;
+    toggle.textContent = closed ? "פתיחה מחדש של הגיליון" : "סגירת הגיליון";
+    toggle.dataset.closed = closed ? "1" : "0";
+    const orders = group ? [...group.orders].sort((left, right) => (Number(left.orderNumber) || 0) - (Number(right.orderNumber) || 0)) : [];
+    $("#sheet-count").textContent = number.format(orders.length);
+    $("#sheet-clients").textContent = `${number.format(group ? group.clients.size : 0)} לקוחות`;
+    $("#sheet-billed").textContent = money.format(group ? group.billed : 0);
+    $("#sheet-paid").textContent = money.format(group ? group.paid : 0);
+    $("#sheet-pending").textContent = money.format(group ? group.pending : 0);
+    $("#sheet-credits").textContent = number.format(group ? group.credits : 0);
+    $("#sheet-orders-body").innerHTML = orders.map((order) => {
+      const credits = order.billingMode === "credits";
+      const status = credits ? pill("paid", "קרדיטים") : pill(order.paymentStatus === "paid" ? "paid" : "pending", order.paymentStatus === "paid" ? "שולם" : "ממתין לתשלום");
+      return `<tr>
+        <td class="order-number">${escapeHtml(order.orderNumber ?? "—")}</td>
+        <td class="client-name"><button class="link-button" type="button" data-client-view="${escapeHtml(order.clientId)}">${escapeHtml(clientName(order.clientId))}</button></td>
+        <td>${escapeHtml(order.product || "—")}${order.dimensions ? ` <span class="muted">· ${escapeHtml(order.dimensions)}</span>` : ""}</td>
+        <td>${credits ? escapeHtml(number.format(order.creditsUsed)) : "—"}</td>
+        <td class="amount-cell">${order.cashBeforeVat != null ? escapeHtml(money.format(order.cashBeforeVat)) : "—"}</td>
+        <td class="amount-cell">${credits ? "—" : escapeHtml(money.format(order.amount))}</td>
+        <td>${status}</td>
+        <td>${escapeHtml(order.notes || "")}</td>
+      </tr>`;
+    }).join("");
+    $("#sheet-orders-empty").hidden = orders.length !== 0;
+  }
+
+  // Closing/reopening changes only the sheet status row; orders and payments are untouched.
+  async function toggleSheetStatus() {
+    const sheetNumber = app().route().param;
+    const closing = $("#sheet-toggle-status").dataset.closed !== "1";
+    let reason = "";
+    if (closing) {
+      if (!window.confirm(`לסגור את גיליון ${sheetNumber}? ההזמנות וסטטוסי התשלום לא ישתנו.`)) return;
+      reason = "סגירת גיליון";
+    } else {
+      reason = (window.prompt("סיבת פתיחה מחדש של הגיליון:") || "").trim();
+      if (reason.length < 3) { app().toast("פתיחת הגיליון בוטלה: נדרשת סיבה (3 תווים לפחות).", true); return; }
+    }
+    const button = $("#sheet-toggle-status");
+    button.disabled = true;
+    try {
+      await q(sb().rpc("set_sheet_status", {
+        p_sheet_number: sheetNumber, p_is_closed: closing, p_reason: reason,
+        p_expected_updated_at: state.sheetStatus.get(sheetNumber)?.updated_at ?? null
+      }));
+      await afterSave(closing ? `גיליון ${sheetNumber} נסגר.` : `גיליון ${sheetNumber} נפתח מחדש.`);
+    } catch (error) {
+      console.error("עדכון סטטוס גיליון נכשל:", error);
+      app().toast(errorText(error), true);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
   async function renderReports() {
     const months = new Map();
     for (const order of app().orders()) {
-      const key = order.date.slice(0, 7);
+      const key = String(order.orderDate).slice(0, 7);
       const row = months.get(key) || { count: 0, cash: 0, paid: 0, pending: 0, credits: 0 };
       row.count += 1;
       if (order.billingMode === "credits") row.credits += Number(order.creditsUsed || 0);
@@ -500,9 +631,8 @@
   function rowMarkup(values = {}) {
     return `<tr data-order-row>
       <td class="row-number"></td>
-      <td><input name="sheet_number" maxlength="80" value="${escapeHtml(values.sheet_number || "")}" aria-label="מספר גיליון"></td>
+      <td><input name="sheet_number" maxlength="80" list="sheet-options" inputmode="numeric" value="${escapeHtml(values.sheet_number || "")}" aria-label="מספר גיליון"></td>
       <td><select name="product_id" aria-label="מוצר">${productOptions(values.product_id)}</select></td>
-      <td><input name="publication_date" type="date" value="${escapeHtml(values.publication_date || localDateValue())}" aria-label="תאריך פרסום"></td>
       <td><input name="cash_amount_before_vat" type="number" min="0.01" step="0.01" value="${escapeHtml(values.cash_amount_before_vat || "")}" aria-label="מחיר לפני מע״מ"></td>
       <td><input name="credits_used" type="number" min="0.01" step="0.01" value="${escapeHtml(values.credits_used || "")}" aria-label="קרדיטים"></td>
       <td><select name="payment_status" aria-label="סטטוס תשלום"><option value="pending">עדיין לא</option><option value="paid" ${values.payment_status === "paid" ? "selected" : ""}>שולם</option></select></td>
@@ -545,7 +675,15 @@
 
   function prepareNewOrder(clientId) {
     const body = $("#new-order-rows");
-    if (!body.children.length || (clientId && $("#new-order-client").value !== clientId)) {
+    $("#sheet-options").innerHTML = sheetGroups().filter((group) => !sheetClosed(group.sheet))
+      .map((group) => `<option value="${escapeHtml(group.sheet)}"></option>`).join("");
+    if (state.presetSheet) {
+      const sheet = state.presetSheet;
+      state.presetSheet = "";
+      $("#new-order-result").hidden = true;
+      resetNewOrder(clientId);
+      body.querySelector('[name="sheet_number"]').value = sheet;
+    } else if (!body.children.length || (clientId && $("#new-order-client").value !== clientId)) {
       $("#new-order-result").hidden = true;
       resetNewOrder(clientId);
     } else {
@@ -572,6 +710,10 @@
     });
     $("#new-order-row-count").textContent = `${number.format(rows.length)} שורות`;
     const values = rows.map(rowValues);
+    const closedSheets = [...new Set(values.map((row) => row.sheet_number).filter((sheet) => sheet && sheetClosed(sheet)))];
+    $("#new-order-sheet-warning").hidden = closedSheets.length === 0;
+    $("#new-order-sheet-warning").textContent = closedSheets.length
+      ? `שימי לב: גיליון ${closedSheets.join(", ")} מסומן כסגור. אפשר לשמור, אבל ודאי שזו הכוונה.` : "";
     const cash = values.filter((row) => Number(row.cash_amount_before_vat) > 0).reduce((sum, row) => sum + Number(row.cash_amount_before_vat), 0);
     const cashGross = values.filter((row) => Number(row.cash_amount_before_vat) > 0).reduce((sum, row) => sum + gross(Number(row.cash_amount_before_vat)), 0);
     const credits = values.reduce((sum, row) => sum + (Number(row.credits_used) || 0), 0);
@@ -609,13 +751,14 @@
       const line = `בשורה ${index + 1}: `;
       if (!row.sheet_number) { message.textContent = `${line}חסר מספר גיליון.`; return; }
       if (!row.product_id) { message.textContent = `${line}יש לבחור מוצר.`; return; }
-      if (!row.publication_date) { message.textContent = `${line}חסר תאריך פרסום.`; return; }
+      if (app().hasEncodingDamage(row.notes)) { message.textContent = `${line}ההערה נראית משובשת (בעיית קידוד עברית). הקלידי אותה מחדש.`; return; }
       const cash = row.cash_amount_before_vat; const credits = row.credits_used;
       if (Boolean(cash) === Boolean(credits)) { message.textContent = `${line}יש למלא מחיר או קרדיטים — בדיוק אחד מהם.`; return; }
       const amount = Number(cash || credits);
       if (!(amount > 0) || roundMoney(amount) !== amount) { message.textContent = `${line}הסכום חייב להיות חיובי ועד שתי ספרות אחרי הנקודה.`; return; }
       orders.push({
-        sheet_number: row.sheet_number, product_id: row.product_id, publication_date: row.publication_date,
+        // No publication dates at the newspaper: the RPC still requires the legacy column, so the order date is sent.
+        sheet_number: row.sheet_number, product_id: row.product_id, publication_date: localDateValue(),
         cash_amount_before_vat: cash ? Number(cash) : null, credits_used: credits ? Number(credits) : null,
         payment_status: credits ? "paid" : row.payment_status, due_on: credits ? null : (row.due_on || null), notes: row.notes
       });
@@ -768,6 +911,13 @@
   $("#payments-search").addEventListener("input", renderPaymentsPage);
   $("#payments-filter").addEventListener("change", renderPaymentsPage);
   $("#product-new").addEventListener("click", () => openProduct());
+  $("#sheets-search").addEventListener("input", renderSheetsPage);
+  $("#sheets-filter").addEventListener("change", renderSheetsPage);
+  $("#sheet-toggle-status").addEventListener("click", toggleSheetStatus);
+  $("#sheet-new-order").addEventListener("click", () => {
+    state.presetSheet = app().route().param;
+    app().navigate("new-order");
+  });
 
   document.addEventListener("click", (event) => {
     const route = app().route();

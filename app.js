@@ -29,18 +29,20 @@
   let lastSyncError = "";
   let requestedScreen = "auth";
   const VIEW_TITLES = {
-    dashboard: "לוח בקרה", "new-order": "הזמנה חדשה", orders: "כל ההזמנות", clients: "לקוחות",
-    client: "תיק לקוח", packages: "חבילות וקרדיטים", payments: "תשלומים וחובות",
+    dashboard: "לוח בקרה", orders: "הזמנות", "new-order": "הזמנה חדשה", sheets: "גיליונות", sheet: "גיליון",
+    clients: "לקוחות", client: "תיק לקוח", packages: "חבילות וקרדיטים", payments: "תשלומים וחובות",
     reports: "דוחות", settings: "הגדרות ומוצרים"
   };
+  // Screens without their own side-menu item highlight their parent item.
+  const NAV_PARENT = { "new-order": "orders", sheet: "sheets", client: "clients" };
   let currentView = { name: "dashboard", param: "" };
   // A deep link (e.g. #/client/<id>) is restored after the first successful login of this page load.
   let pendingRoute = /^#\/[a-z-]+/.test(location.hash) ? location.hash : null;
   // True only when supabase-business-upgrade.sql is installed; otherwise the legacy flow is used unchanged.
   let businessSchema = false;
-  const BASE_ORDER_COLUMNS = "id,client_id,publication_date,section,amount,payment_status,notes,updated_at";
-  const BUSINESS_ORDER_COLUMNS = `${BASE_ORDER_COLUMNS},order_number,billing_mode,credits_used,cash_amount_before_vat,sheet_number`;
-  const BUSINESS_REALTIME_TABLES = ["financial_obligations", "credit_ledger", "customer_packages", "package_installments"];
+  const BASE_ORDER_COLUMNS = "id,client_id,publication_date,section,amount,payment_status,notes,updated_at,created_at";
+  const BUSINESS_ORDER_COLUMNS = `${BASE_ORDER_COLUMNS},order_number,billing_mode,credits_used,cash_amount_before_vat,sheet_number,entered_at,product_name_snapshot,product_dimensions_snapshot`;
+  const BUSINESS_REALTIME_TABLES = ["financial_obligations", "credit_ledger", "customer_packages", "package_installments", "sheets"];
 
   function toLocalDateValue(date) {
     const year = date.getFullYear();
@@ -86,6 +88,7 @@
       return message || "הרשומה השתנתה אצל משתמשת אחרת. רענני את הנתונים ונסי שוב.";
     }
     if (code === "P0001" && message) return message;
+    if (error instanceof Error && !code && /קידוד|UTF-8|משובש/.test(message)) return message;
     if (code === "STALE_RECORD") {
       return "הרשומה השתנתה אצל משתמשת אחרת. הנתונים שלך לא נשמרו; רענני את הרשימה, בדקי את השינוי ונסי שוב.";
     }
@@ -179,8 +182,26 @@
       orderNumber: row.order_number ?? null,
       billingMode: row.billing_mode || "legacy",
       creditsUsed: row.credits_used == null ? null : Number(row.credits_used),
-      sheetNumber: row.sheet_number || ""
+      cashBeforeVat: row.cash_amount_before_vat == null ? null : Number(row.cash_amount_before_vat),
+      sheetNumber: row.sheet_number ? String(row.sheet_number).trim() : "",
+      // Order date = the day the order was entered (entered_at; created_at before the business upgrade).
+      orderDate: row.entered_at || (row.created_at ? toLocalDateValue(new Date(row.created_at)) : row.publication_date),
+      // Product for business orders; legacy orders only have the old free-text field.
+      product: row.product_name_snapshot || row.section || "",
+      dimensions: row.product_dimensions_snapshot || ""
     };
+  }
+
+  // DD/MM/YYYY
+  function formatOrderDate(value) {
+    if (!value) return "—";
+    const [year, month, day] = String(value).slice(0, 10).split("-");
+    return `${day}/${month}/${year}`;
+  }
+
+  function compareOrdersNewestFirst(left, right) {
+    return String(right.orderDate).localeCompare(String(left.orderDate))
+      || (Number(right.orderNumber) || 0) - (Number(left.orderNumber) || 0);
   }
 
   async function detectBusinessSchema() {
@@ -442,7 +463,7 @@
       .filter((client) => `${client.name} ${client.phone || ""}`.toLocaleLowerCase("he").includes(query));
 
     $("#clients-body").innerHTML = clients.map((client) => `<tr>
-      <td class="client-name">${escapeHtml(client.name)}${window.ModaatBusiness && window.ModaatBusiness.isPremium(client.id) ? ' <span class="premium-badge">פרימיום</span>' : ""}</td>
+      <td class="client-name">${escapeHtml(client.name)}${window.ModaatBusiness && window.ModaatBusiness.isPremium(client.id) ? ' <span class="premium-badge">פרימיום</span>' : ""}${hasEncodingDamage(client.name) ? ' <span class="payment-select pending" title="השם נשמר בקידוד שגוי. ראי supabase-hebrew-encoding-preview.sql">קידוד שגוי</span>' : ""}</td>
       <td>${escapeHtml(client.phone || "—")}</td>
       <td>${escapeHtml(client.email || "—")}</td>
       <td class="client-actions">
@@ -459,10 +480,10 @@
     const filter = $("#payment-filter").value;
     const clientsById = new Map(data.clients.map((client) => [client.id, client]));
     const orders = [...data.orders]
-      .sort((left, right) => right.date.localeCompare(left.date) || right.id.localeCompare(left.id))
+      .sort(compareOrdersNewestFirst)
       .filter((order) => {
         const client = clientsById.get(order.clientId);
-        const searchable = `${order.id} ${order.orderNumber ?? ""} ${client ? client.name : ""} ${order.section}`.toLocaleLowerCase("he");
+        const searchable = `${order.orderNumber ?? ""} ${client ? client.name : ""} ${order.sheetNumber} ${order.product}`.toLocaleLowerCase("he");
         return searchable.includes(query) && (filter === "all" || order.paymentStatus === filter);
       });
 
@@ -470,9 +491,9 @@
       const client = clientsById.get(order.clientId);
       const paid = order.paymentStatus === "paid";
       const clientName = client ? client.name : "לקוח לא זמין";
-      const label = order.orderNumber != null ? String(order.orderNumber) : order.id;
+      const label = orderLabel(order);
       const credits = order.billingMode === "credits";
-      const amountText = credits ? `${numberFormat.format(order.creditsUsed)} קרדיטים` : formatCurrency(Number(order.amount));
+      const amountText = orderChargeText(order);
       const statusCell = credits
         ? '<span class="payment-select paid">קרדיטים</span>'
         : `<select class="payment-select ${paid ? "paid" : "pending"}" data-order-id="${escapeHtml(order.id)}" aria-label="סטטוס תשלום להזמנה ${escapeHtml(label)}">
@@ -483,15 +504,16 @@
       const editButton = businessSchema && order.billingMode !== "legacy" ? "" :
         `<button class="button button-outline client-action" type="button" data-order-edit="${escapeHtml(order.id)}" aria-label="עריכת הזמנה ${escapeHtml(label)}">עריכה</button>`;
       return `<tr>
-        <td class="order-number">#${escapeHtml(label)}</td>
-        <td class="client-name">${escapeHtml(clientName)}</td>
-        <td>${escapeHtml(displayDate(order.date))}</td>
-        <td>${escapeHtml(order.section)}</td>
+        <td class="order-number">${escapeHtml(label)}</td>
+        <td>${escapeHtml(formatOrderDate(order.orderDate))}</td>
+        <td class="client-name">${client ? `<button class="link-button" type="button" data-client-view="${escapeHtml(client.id)}">${escapeHtml(clientName)}</button>` : escapeHtml(clientName)}</td>
+        <td>${order.sheetNumber ? `<button class="link-button" type="button" data-sheet-view="${escapeHtml(order.sheetNumber)}">${escapeHtml(order.sheetNumber)}</button>` : "—"}</td>
+        <td>${escapeHtml(order.product || "—")}</td>
         <td class="amount-cell">${escapeHtml(amountText)}</td>
         <td>${statusCell}</td>
         <td class="client-actions">
           ${editButton}
-          <button class="delete-order" type="button" data-delete-order="${escapeHtml(order.id)}" aria-label="מחיקת הזמנה ${escapeHtml(order.id)}" title="מחיקת הזמנה">×</button>
+          <button class="delete-order" type="button" data-delete-order="${escapeHtml(order.id)}" aria-label="מחיקת הזמנה ${escapeHtml(label)}" title="מחיקת הזמנה">×</button>
         </td>
       </tr>`;
     }).join("");
@@ -524,8 +546,6 @@
       $("#order-modal-title").textContent = "יצירת הזמנת פרסום";
       $("#order-message").textContent = "";
       renderClients();
-      const dateField = $('#order-form [name="date"]');
-      dateField.value = toLocalDateValue(new Date());
     }
     modal.showModal();
   }
@@ -559,8 +579,6 @@
     editingOrderVersion = order.updatedAt;
     const form = $("#order-form");
     form.elements.clientId.value = order.clientId;
-    form.elements.date.value = order.date;
-    form.elements.section.value = order.section;
     form.elements.amount.value = String(order.amount);
     form.elements.paymentStatus.value = order.paymentStatus;
     form.elements.notes.value = order.notes;
@@ -594,7 +612,7 @@
     document.querySelectorAll("#app-shell .page-view[data-page]").forEach((page) => {
       page.hidden = page.dataset.page !== name;
     });
-    const navName = name === "client" ? "clients" : name;
+    const navName = NAV_PARENT[name] || name;
     document.querySelectorAll(".main-nav [data-view]").forEach((link) => {
       const active = link.dataset.view === navName;
       link.classList.toggle("active", active);
@@ -618,8 +636,9 @@
     });
   }
 
+  // Business order number only; the technical ID is never shown.
   function orderLabel(order) {
-    return order.orderNumber != null ? String(order.orderNumber) : order.id;
+    return order.orderNumber != null ? String(order.orderNumber) : "—";
   }
 
   function orderChargeText(order) {
@@ -645,13 +664,12 @@
       $("#client-detail-joined").textContent = "—";
       $("#client-detail-notes").textContent = "הערות פנימיות זמינות לאחר התקנת הסכימה העסקית.";
     }
-    const orders = data.orders.filter((order) => order.clientId === clientId)
-      .sort((left, right) => right.date.localeCompare(left.date));
+    const orders = data.orders.filter((order) => order.clientId === clientId).sort(compareOrdersNewestFirst);
     $("#client-orders-body").innerHTML = orders.map((order) => `<tr>
-      <td class="order-number">#${escapeHtml(orderLabel(order))}</td>
-      <td>${escapeHtml(order.sheetNumber || "—")}</td>
-      <td>${escapeHtml(order.section)}</td>
-      <td>${escapeHtml(displayDate(order.date))}</td>
+      <td class="order-number">${escapeHtml(orderLabel(order))}</td>
+      <td>${escapeHtml(formatOrderDate(order.orderDate))}</td>
+      <td>${order.sheetNumber ? `<button class="link-button" type="button" data-sheet-view="${escapeHtml(order.sheetNumber)}">${escapeHtml(order.sheetNumber)}</button>` : "—"}</td>
+      <td>${escapeHtml(order.product || "—")}</td>
       <td class="amount-cell">${escapeHtml(orderChargeText(order))}</td>
       <td>${orderStatusPill(order)}</td>
     </tr>`).join("");
@@ -660,18 +678,19 @@
 
   function renderRecentOrders() {
     const clientsById = new Map(data.clients.map((client) => [client.id, client]));
-    const recent = [...data.orders].sort((left, right) => right.date.localeCompare(left.date)).slice(0, 8);
+    const recent = [...data.orders].sort(compareOrdersNewestFirst).slice(0, 8);
     $("#recent-orders-body").innerHTML = recent.length ? recent.map((order) => {
       const client = clientsById.get(order.clientId);
       return `<tr>
-        <td class="order-number">#${escapeHtml(orderLabel(order))}</td>
+        <td class="order-number">${escapeHtml(orderLabel(order))}</td>
+        <td>${escapeHtml(formatOrderDate(order.orderDate))}</td>
         <td class="client-name">${client ? `<button class="link-button" type="button" data-client-view="${escapeHtml(client.id)}">${escapeHtml(client.name)}</button>` : "לקוח לא זמין"}</td>
-        <td>${escapeHtml(displayDate(order.date))}</td>
-        <td>${escapeHtml(order.section)}</td>
+        <td>${escapeHtml(order.sheetNumber || "—")}</td>
+        <td>${escapeHtml(order.product || "—")}</td>
         <td class="amount-cell">${escapeHtml(orderChargeText(order))}</td>
         <td>${orderStatusPill(order)}</td>
       </tr>`;
-    }).join("") : '<tr><td colspan="6" class="empty-cell">אין הזמנות עדיין.</td></tr>';
+    }).join("") : '<tr><td colspan="7" class="empty-cell">אין הזמנות עדיין.</td></tr>';
   }
 
   function setImportPreview(message, tone = "") {
@@ -784,6 +803,15 @@
     return localBackupDownloaded || $("#confirm-external-backup").checked;
   }
 
+  // Garbled Hebrew signatures: "�" (lost letters), UTF-8 Hebrew read as Windows-1252 ("×©×¨×”"),
+  // or Windows-1255 Hebrew read as Latin-1 ("ùøä", no plain Latin letters).
+  function hasEncodingDamage(value) {
+    if (typeof value !== "string" || !value) return false;
+    if (value.includes("�")) return true;
+    if (/×[\u0080-¿ŒœŠšŸŽžƒˆ˜–—‘-„†-•…‰‹›€™]/.test(value)) return true;
+    return !/[A-Za-zא-ת]/.test(value) && (value.match(/[à-ú]/g) || []).length >= 2;
+  }
+
   function hasInvalidTextControl(value) {
     return typeof value === "string" && /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/.test(value);
   }
@@ -801,6 +829,9 @@
           (client.email != null && typeof client.email !== "string") ||
           String(client.phone || "").length > 30 || String(client.email || "").length > 100) {
         throw new Error(`פרטי הקשר של הלקוח ${client.id} אינם תקינים.`);
+      }
+      if ([client.name, client.phone, client.email].some(hasEncodingDamage)) {
+        throw new Error(`שם או פרטי הקשר של הלקוח ${client.id} נראים משובשים (בעיית קידוד עברית). אל תייבאי קובץ זה; השווי לגיבוי המקורי.`);
       }
       if (hasInvalidTextControl(client.name) || hasInvalidTextControl(client.phone) || hasInvalidTextControl(client.email)) {
         throw new Error("קובץ הגיבוי מכיל תווי בקרה חשודים בטקסט. ייתכן שהקידוד השתבש; השווי לגיבוי המקורי ואל תייבאי קובץ זה.");
@@ -915,7 +946,14 @@
     importPlan = null;
     if (!file) return;
     try {
-      const parsed = JSON.parse(await file.text());
+      let text;
+      try {
+        // Strict UTF-8: a file saved in another encoding is rejected instead of silently turning Hebrew into "�".
+        text = new TextDecoder("utf-8", { fatal: true }).decode(await file.arrayBuffer());
+      } catch {
+        throw new Error("הקובץ אינו שמור בקידוד UTF-8, ולכן העברית בו תשתבש. שמרי אותו מחדש כ-UTF-8 (או הורידי גיבוי חדש מהמערכת) ונסי שוב.");
+      }
+      const parsed = JSON.parse(text);
       const plan = await prepareImport(parsed);
       const tone = plan.conflicts.length ? "error" : "success";
       setImportPreview(describeImportPlan(plan), tone);
@@ -982,6 +1020,8 @@
 
     const viewClientButton = event.target.closest("[data-client-view]");
     if (viewClientButton) navigate("client", viewClientButton.dataset.clientView);
+    const viewSheetButton = event.target.closest("[data-sheet-view]");
+    if (viewSheetButton) navigate("sheet", viewSheetButton.dataset.sheetView);
     const editClientButton = event.target.closest("[data-client-edit]");
     if (editClientButton) {
       const detailsModal = $("#client-details-modal");
@@ -1082,6 +1122,10 @@
       $("#client-message").textContent = "יש להזין שם לקוח.";
       return;
     }
+    if (Object.values(clientDetails).some(hasEncodingDamage)) {
+      $("#client-message").textContent = "הטקסט נראה משובש (בעיית קידוד עברית). הקלידי את השם מחדש בעברית; אל תדביקי טקסט משובש.";
+      return;
+    }
     const submit = $("#client-submit-button");
     submit.disabled = true;
     try {
@@ -1140,8 +1184,6 @@
     }
     const orderFields = {
       clientId,
-      date: String(formData.get("date")),
-      section: String(formData.get("section")).trim(),
       amount,
       paymentStatus: String(formData.get("paymentStatus")),
       notes: String(formData.get("notes")).trim()
@@ -1151,12 +1193,16 @@
     try {
       const values = {
         client_id: orderFields.clientId,
-        publication_date: orderFields.date,
-        section: orderFields.section,
         amount: orderFields.amount,
         payment_status: orderFields.paymentStatus,
         notes: orderFields.notes
       };
+      // The newspaper has no sections or publication dates. The legacy columns are NOT NULL, so a new
+      // legacy order stores today's date and a neutral placeholder; editing never changes them.
+      if (!editingOrderId) {
+        values.publication_date = toLocalDateValue(new Date());
+        values.section = "ללא מדור";
+      }
       if (editingOrderId) {
         if (!editingOrderVersion) throw versionRequiredError();
         const { data: updatedRow, error } = await supabaseClient.from("orders")
@@ -1337,7 +1383,10 @@
     refresh: () => fetchCloudData(),
     rerenderClients: () => renderClientTable(),
     toast: showToast,
-    friendlyError
+    friendlyError,
+    hasEncodingDamage,
+    formatOrderDate,
+    compareOrdersNewestFirst
   });
 
   data = { clients: [], orders: [] };
