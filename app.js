@@ -27,6 +27,8 @@
   let approvalTimer = null;
   let cloudFetchRequest = 0;
   let lastSyncError = "";
+  let currentView = "dashboard";
+  let requestedScreen = "auth";
 
   function toLocalDateValue(date) {
     const year = date.getFullYear();
@@ -89,17 +91,57 @@
     return message ? `הפעולה לא הושלמה מול Supabase: ${message}` : "הפעולה נכשלה. נסי שוב.";
   }
 
+  function previewIsOpen() {
+    const preview = $("#business-preview-shell");
+    return Boolean(preview && !preview.hidden);
+  }
+
+  // Only one screen may be visible. While the isolated preview is open it owns
+  // the page; the requested screen is applied when the preview closes.
+  function applyScreen() {
+    const preview = previewIsOpen();
+    $("#auth-screen").hidden = preview || requestedScreen !== "auth";
+    $("#app-shell").hidden = preview || requestedScreen !== "app";
+  }
+
+  function closeApplicationDialogs() {
+    document.querySelectorAll("dialog[open]").forEach((dialog) => {
+      if (!dialog.id.startsWith("preview-")) dialog.close();
+    });
+    editingClientId = null;
+    editingClientVersion = null;
+    editingOrderId = null;
+    editingOrderVersion = null;
+    importPlan = null;
+  }
+
+  function clearListFilters() {
+    $("#search-input").value = "";
+    $("#payment-filter").value = "all";
+    $("#client-search-input").value = "";
+    renderOrders();
+    renderClientTable();
+  }
+
+  function resetWorkspace() {
+    closeApplicationDialogs();
+    clearListFilters();
+    showView("dashboard");
+    window.scrollTo(0, 0);
+  }
+
   function showAuth(message = "", sessionAvailable = false) {
-    $("#app-shell").hidden = true;
-    $("#auth-screen").hidden = false;
+    requestedScreen = "auth";
+    resetWorkspace();
+    applyScreen();
     $("#login-message").textContent = message;
     $("#auth-sign-out").hidden = !sessionAvailable;
     $("#auth-retry").hidden = !sessionAvailable;
   }
 
   function showApplication() {
-    $("#auth-screen").hidden = true;
-    $("#app-shell").hidden = false;
+    requestedScreen = "app";
+    applyScreen();
   }
 
   function mapClient(row) {
@@ -293,7 +335,7 @@
       showAuth();
       return;
     }
-    if (activeUserId === session.user.id && !$("#app-shell").hidden) return;
+    if (activeUserId === session.user.id && requestedScreen === "app") return;
     if (loadingUserId === session.user.id) return;
 
     loadingUserId = session.user.id;
@@ -459,8 +501,14 @@
     $("#order-message").textContent = "";
   }
 
-  function showView(viewName, activeLink) {
+  function navLinkForView(viewName) {
+    return document.querySelector(`.main-nav [data-view="${viewName}"]:not([data-scroll])`);
+  }
+
+  function showView(viewName, activeLink = navLinkForView(viewName)) {
     const clientsVisible = viewName === "clients";
+    if (viewName !== currentView) clearListFilters();
+    currentView = viewName;
     $("#dashboard-view").hidden = clientsVisible;
     $("#clients-view").hidden = !clientsVisible;
     document.querySelectorAll(".main-nav [data-view]").forEach((link) => {
@@ -766,7 +814,15 @@
       showView(viewButton.dataset.view, viewButton);
       if (viewButton.dataset.scroll) {
         window.setTimeout(() => document.getElementById(viewButton.dataset.scroll).scrollIntoView({ behavior: "smooth" }), 0);
+      } else {
+        window.scrollTo(0, 0);
       }
+    }
+    const brandLink = event.target.closest("#app-shell .brand");
+    if (brandLink) {
+      event.preventDefault();
+      showView("dashboard");
+      window.scrollTo(0, 0);
     }
     const openButton = event.target.closest("[data-open-modal]");
     if (openButton) openModal(openButton.dataset.openModal);
@@ -1038,6 +1094,7 @@
     }
   });
 
+  document.addEventListener("modaat:preview-closed", applyScreen);
   $("#search-input").addEventListener("input", renderOrders);
   $("#payment-filter").addEventListener("change", renderOrders);
   $("#client-search-input").addEventListener("input", renderClientTable);

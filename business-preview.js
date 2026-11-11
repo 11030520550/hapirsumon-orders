@@ -542,8 +542,10 @@
 
   function closePreview() {
     $("#business-preview-shell").hidden = true;
-    $("#auth-screen").hidden = false;
     document.title = "מודעת — ניהול הזמנות פרסום";
+    // app.js decides which screen to show (login or app), in case a login finished meanwhile.
+    document.dispatchEvent(new CustomEvent("modaat:preview-closed"));
+    if ($("#auth-screen").hidden && $("#app-shell").hidden) $("#auth-screen").hidden = false;
   }
 
   $("#open-business-preview").addEventListener("click", openPreview);
