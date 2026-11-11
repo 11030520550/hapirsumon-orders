@@ -28,6 +28,14 @@
   let cloudFetchRequest = 0;
   let lastSyncError = "";
   let requestedScreen = "auth";
+  const VIEW_TITLES = {
+    dashboard: "לוח בקרה", "new-order": "הזמנה חדשה", orders: "כל ההזמנות", clients: "לקוחות",
+    client: "תיק לקוח", packages: "חבילות וקרדיטים", payments: "תשלומים וחובות",
+    reports: "דוחות", settings: "הגדרות ומוצרים"
+  };
+  let currentView = { name: "dashboard", param: "" };
+  // A deep link (e.g. #/client/<id>) is restored after the first successful login of this page load.
+  let pendingRoute = /^#\/[a-z-]+/.test(location.hash) ? location.hash : null;
   // True only when supabase-business-upgrade.sql is installed; otherwise the legacy flow is used unchanged.
   let businessSchema = false;
   const BASE_ORDER_COLUMNS = "id,client_id,publication_date,section,amount,payment_status,notes,updated_at";
@@ -134,6 +142,7 @@
   function resetWorkspace() {
     closeApplicationDialogs();
     clearListFilters();
+    history.replaceState(null, "", routeHash("dashboard"));
     showView("dashboard");
     window.scrollTo(0, 0);
   }
@@ -184,6 +193,9 @@
   }
 
   function updateBusinessNote() {
+    // Business-only sections are hidden (and their "requires installation" notes shown) without the schema.
+    $("#app-shell").classList.toggle("business-on", businessSchema);
+    document.querySelectorAll("#app-shell .biz-required").forEach((note) => { note.hidden = businessSchema; });
     const note = $("#app-shell .help-card p");
     if (note) {
       note.textContent = businessSchema
@@ -384,6 +396,10 @@
       await fetchCloudData();
       activeUserId = session.user.id;
       showApplication();
+      const route = parseRoute(pendingRoute || routeHash("dashboard"));
+      pendingRoute = null;
+      history.replaceState(null, "", routeHash(route.name, route.param));
+      showView(route.name, route.param);
       startRealtimeSync();
       document.dispatchEvent(new CustomEvent("modaat:session-ready", { detail: { business: businessSchema } }));
     } catch (error) {
@@ -430,7 +446,7 @@
       <td>${escapeHtml(client.phone || "—")}</td>
       <td>${escapeHtml(client.email || "—")}</td>
       <td class="client-actions">
-        <button class="button button-outline client-action" type="button" data-client-view="${escapeHtml(client.id)}" aria-label="צפייה בפרטי ${escapeHtml(client.name)}">צפייה</button>
+        <button class="button button-outline client-action" type="button" data-client-view="${escapeHtml(client.id)}" aria-label="תיק הלקוח ${escapeHtml(client.name)}">תיק לקוח</button>
         <button class="button button-outline client-action" type="button" data-client-edit="${escapeHtml(client.id)}" aria-label="עריכת ${escapeHtml(client.name)}">עריכה</button>
       </td>
     </tr>`).join("");
@@ -487,6 +503,8 @@
     renderStats();
     renderClients();
     renderOrders();
+    renderRecentOrders();
+    if (currentView.name === "client") renderClientPage();
   }
 
   function openModal(id) {
@@ -550,23 +568,110 @@
     $("#order-message").textContent = "";
   }
 
-  function navLinkForView(viewName) {
-    return document.querySelector(`.main-nav [data-view="${viewName}"]:not([data-scroll])`);
+  // ---------- Screens (hash routing: #/orders, #/client/<id>) ----------
+  function parseRoute(hash = location.hash) {
+    const match = /^#\/([a-z-]+)(?:\/(.+))?$/.exec(hash || "");
+    if (!match || !VIEW_TITLES[match[1]]) return { name: "dashboard", param: "" };
+    return { name: match[1], param: match[2] ? decodeURIComponent(match[2]) : "" };
   }
 
-  function showView(viewName, activeLink = navLinkForView(viewName)) {
-    const clientsVisible = viewName === "clients";
-    const previousView = $("#clients-view").hidden ? "dashboard" : "clients";
-    if (viewName !== previousView) clearListFilters();
-    $("#dashboard-view").hidden = clientsVisible;
-    $("#clients-view").hidden = !clientsVisible;
+  function routeHash(name, param = "") {
+    return `#/${name}${param ? `/${encodeURIComponent(param)}` : ""}`;
+  }
+
+  function navigate(name, param = "") {
+    const hash = routeHash(name, param);
+    if (location.hash === hash) showView(name, param);
+    else location.hash = hash;
+  }
+
+  function showView(viewName, param = "") {
+    const name = VIEW_TITLES[viewName] ? viewName : "dashboard";
+    const changed = name !== currentView.name || param !== currentView.param;
+    if (name !== currentView.name) clearListFilters();
+    if (name === "client" && param !== currentView.param) selectClientTab("orders");
+    currentView = { name, param };
+    document.querySelectorAll("#app-shell .page-view[data-page]").forEach((page) => {
+      page.hidden = page.dataset.page !== name;
+    });
+    const navName = name === "client" ? "clients" : name;
     document.querySelectorAll(".main-nav [data-view]").forEach((link) => {
-      const active = link === activeLink;
+      const active = link.dataset.view === navName;
       link.classList.toggle("active", active);
       if (active) link.setAttribute("aria-current", "page");
       else link.removeAttribute("aria-current");
     });
-    $(".breadcrumbs strong").textContent = clientsVisible ? "רשימת לקוחות" : "לוח בקרה";
+    $("#page-title").textContent = VIEW_TITLES[name];
+    if (name === "client") renderClientPage();
+    if (changed) window.scrollTo(0, 0);
+    document.dispatchEvent(new CustomEvent("modaat:view", { detail: { name, param } }));
+  }
+
+  function selectClientTab(tab) {
+    document.querySelectorAll('[data-page="client"] [data-tab]').forEach((button) => {
+      const active = button.dataset.tab === tab;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-selected", String(active));
+    });
+    document.querySelectorAll('[data-page="client"] [data-tab-panel]').forEach((panel) => {
+      panel.hidden = panel.dataset.tabPanel !== tab;
+    });
+  }
+
+  function orderLabel(order) {
+    return order.orderNumber != null ? String(order.orderNumber) : order.id;
+  }
+
+  function orderChargeText(order) {
+    return order.billingMode === "credits"
+      ? `${numberFormat.format(order.creditsUsed)} קרדיטים`
+      : formatCurrency(Number(order.amount));
+  }
+
+  function orderStatusPill(order) {
+    if (order.billingMode === "credits") return '<span class="payment-select paid">קרדיטים</span>';
+    const paid = order.paymentStatus === "paid";
+    return `<span class="payment-select ${paid ? "paid" : "pending"}">${paid ? "שולם" : "ממתין לתשלום"}</span>`;
+  }
+
+  function renderClientPage() {
+    const clientId = currentView.param;
+    const client = data.clients.find((item) => item.id === clientId);
+    $("#client-page-name").textContent = client ? client.name : (data.clients.length ? "הלקוח לא נמצא" : "");
+    $("#client-page-contact").textContent = client ? ([client.phone, client.email].filter(Boolean).join(" · ") || "אין פרטי קשר") : "";
+    $("#client-detail-phone").textContent = client && client.phone ? client.phone : "לא צוין";
+    $("#client-detail-email").textContent = client && client.email ? client.email : "לא צוין";
+    if (!businessSchema) {
+      $("#client-detail-joined").textContent = "—";
+      $("#client-detail-notes").textContent = "הערות פנימיות זמינות לאחר התקנת הסכימה העסקית.";
+    }
+    const orders = data.orders.filter((order) => order.clientId === clientId)
+      .sort((left, right) => right.date.localeCompare(left.date));
+    $("#client-orders-body").innerHTML = orders.map((order) => `<tr>
+      <td class="order-number">#${escapeHtml(orderLabel(order))}</td>
+      <td>${escapeHtml(order.sheetNumber || "—")}</td>
+      <td>${escapeHtml(order.section)}</td>
+      <td>${escapeHtml(displayDate(order.date))}</td>
+      <td class="amount-cell">${escapeHtml(orderChargeText(order))}</td>
+      <td>${orderStatusPill(order)}</td>
+    </tr>`).join("");
+    $("#client-orders-empty").hidden = orders.length !== 0;
+  }
+
+  function renderRecentOrders() {
+    const clientsById = new Map(data.clients.map((client) => [client.id, client]));
+    const recent = [...data.orders].sort((left, right) => right.date.localeCompare(left.date)).slice(0, 8);
+    $("#recent-orders-body").innerHTML = recent.length ? recent.map((order) => {
+      const client = clientsById.get(order.clientId);
+      return `<tr>
+        <td class="order-number">#${escapeHtml(orderLabel(order))}</td>
+        <td class="client-name">${client ? `<button class="link-button" type="button" data-client-view="${escapeHtml(client.id)}">${escapeHtml(client.name)}</button>` : "לקוח לא זמין"}</td>
+        <td>${escapeHtml(displayDate(order.date))}</td>
+        <td>${escapeHtml(order.section)}</td>
+        <td class="amount-cell">${escapeHtml(orderChargeText(order))}</td>
+        <td>${orderStatusPill(order)}</td>
+      </tr>`;
+    }).join("") : '<tr><td colspan="6" class="empty-cell">אין הזמנות עדיין.</td></tr>';
   }
 
   function setImportPreview(message, tone = "") {
@@ -857,43 +962,26 @@
   }
 
   document.addEventListener("click", (event) => {
-    const viewButton = event.target.closest("[data-view]");
+    const viewButton = event.target.closest("[data-view], [data-go]");
     if (viewButton) {
       event.preventDefault();
-      showView(viewButton.dataset.view, viewButton);
-      if (viewButton.dataset.scroll) {
-        window.setTimeout(() => document.getElementById(viewButton.dataset.scroll).scrollIntoView({ behavior: "smooth" }), 0);
-      } else {
-        window.scrollTo(0, 0);
-      }
+      navigate(viewButton.dataset.view || viewButton.dataset.go);
     }
     const brandLink = event.target.closest("#app-shell .brand");
     if (brandLink) {
       event.preventDefault();
-      showView("dashboard");
-      window.scrollTo(0, 0);
+      navigate("dashboard");
     }
+    const tabButton = event.target.closest('[data-page="client"] [data-tab]');
+    if (tabButton) selectClientTab(tabButton.dataset.tab);
+    if (event.target.closest('[data-client-page-action="edit"]')) openClientForm(currentView.param);
     const openButton = event.target.closest("[data-open-modal]");
-    if (openButton) {
-      if (businessSchema && openButton.dataset.openModal === "order-modal") window.ModaatBusiness.openOrder();
-      else openModal(openButton.dataset.openModal);
-    }
+    if (openButton) openModal(openButton.dataset.openModal);
     if (event.target.closest("[data-close-modal]")) event.target.closest("dialog").close();
     if (event.target.matches("dialog.modal")) event.target.close();
 
     const viewClientButton = event.target.closest("[data-client-view]");
-    if (viewClientButton && businessSchema) {
-      window.ModaatBusiness.openClient(viewClientButton.dataset.clientView);
-    } else if (viewClientButton) {
-      const client = data.clients.find((item) => item.id === viewClientButton.dataset.clientView);
-      if (client) {
-        $("#client-details-title").textContent = client.name;
-        $("#client-details-phone").textContent = client.phone || "לא צוין";
-        $("#client-details-email").textContent = client.email || "לא צוין";
-        $("#client-details-edit").dataset.clientEdit = client.id;
-        $("#client-details-modal").showModal();
-      }
-    }
+    if (viewClientButton) navigate("client", viewClientButton.dataset.clientView);
     const editClientButton = event.target.closest("[data-client-edit]");
     if (editClientButton) {
       const detailsModal = $("#client-details-modal");
@@ -1162,6 +1250,11 @@
   });
 
   document.addEventListener("modaat:preview-closed", applyScreen);
+  window.addEventListener("hashchange", () => {
+    if (requestedScreen !== "app") return;
+    const route = parseRoute();
+    showView(route.name, route.param);
+  });
   $("#search-input").addEventListener("input", renderOrders);
   $("#payment-filter").addEventListener("change", renderOrders);
   $("#client-search-input").addEventListener("input", renderClientTable);
@@ -1239,6 +1332,8 @@
     clients: () => data.clients,
     orders: () => data.orders,
     isBusiness: () => businessSchema,
+    route: () => ({ ...currentView }),
+    navigate,
     refresh: () => fetchCloudData(),
     rerenderClients: () => renderClientTable(),
     toast: showToast,
