@@ -352,8 +352,9 @@ alter table public.orders
 
 -- Keep the existing text ID as the immutable record key. Assign the separate
 -- business-facing sequence only to rows that do not already have a number.
+-- Business order numbers start at 22000 (5 digits) and continue from any higher existing number.
 with current_max as (
-  select coalesce(max(order_number), 0) as last_number
+  select greatest(coalesce(max(order_number), 0), 21999) as last_number
   from public.orders
 ),
 numbered_orders as (
