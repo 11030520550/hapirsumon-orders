@@ -1212,7 +1212,7 @@ begin
     raise exception 'החשבון אינו מורשה לבצע פעולה זו.';
   end if;
   if p_vat_rate is null or p_vat_rate < 0 or p_vat_rate > 1 then
-    raise exception 'שיעור המע"מ חייב להיות בין 0% ל-100%.';
+    raise exception 'שיעור המע"מ חייב להיות בין 0%% ל-100%%.';
   end if;
   update public.business_settings
   set vat_rate = p_vat_rate, updated_by = auth.uid()
