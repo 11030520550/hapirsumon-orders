@@ -38,6 +38,7 @@
         <button class="button button-primary auth-submit" id="login-submit" type="submit">התחברות</button>
       </form>
       <button class="button button-outline prelogin-backup" id="download-prelogin-backup" type="button">הורדת גיבוי מקומי</button>
+      <button class="button button-primary prelogin-preview" id="open-business-preview" type="button">תצוגה מקדימה של הממשק החדש</button>
       <div class="auth-secondary-actions">
         <button class="button button-outline" id="auth-retry" type="button" hidden>ניסיון חוזר</button>
         <button class="button button-outline" id="auth-sign-out" type="button" hidden>התנתקות</button>
@@ -218,6 +219,214 @@
     </main>
   </div>
 
+  <div class="app-shell business-preview-shell" id="business-preview-shell" hidden>
+    <aside class="announcement-banner" role="note" aria-label="מצב תצוגה מקדימה">
+      <div class="announcement-title">
+        <strong>תצוגה מקדימה בלבד</strong>
+        <span aria-hidden="true">|</span>
+        <span>נתוני הדגמה מבודדים</span>
+        <span class="beta-badge">BETA</span>
+      </div>
+      <p>אין חיבור למסד הנתונים ואין שמירה. הנתונים והמחירים במסך זה אינם נתוני אמת.</p>
+    </aside>
+    <aside class="sidebar" aria-label="ניווט תצוגה מקדימה">
+      <a class="brand" href="#" aria-label="מודעת — תצוגה מקדימה">
+        <span class="brand-mark" aria-hidden="true">מ</span>
+        <span class="brand-copy"><strong>מודעת</strong><small>ניהול פרסום בעיתון</small></span>
+      </a>
+      <div class="sidebar-label">ממשק חדש · תצוגה בלבד</div>
+      <nav class="main-nav">
+        <button class="nav-link active" type="button" data-preview-view="clients" aria-current="page"><span class="nav-icon">♙</span>לקוחות</button>
+        <button class="nav-link" type="button" data-preview-view="orders"><span class="nav-icon">▤</span>הזמנות</button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="help-card">
+          <span class="help-icon">✳</span>
+          <strong>ממתין לחיבור מאובטח</strong>
+          <p>שמירה תופעל רק אחרי התקנת סכימת העסק וה-RPC ב-Supabase.</p>
+        </div>
+        <span class="storage-note preview-storage-note" role="status">לא מחובר · לא נשמר</span>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar">
+        <div class="breadcrumbs">תצוגה מקדימה <span>/</span> <strong id="preview-breadcrumb">לקוחות</strong></div>
+        <div class="topbar-actions">
+          <span class="today-label" id="preview-today"></span>
+          <button class="button button-outline" id="exit-business-preview" type="button">חזרה להתחברות</button>
+        </div>
+      </header>
+
+      <div class="page-content">
+        <section class="page-view" id="preview-clients-view">
+          <section class="welcome-row">
+            <div>
+              <p class="eyebrow">ניהול לקוחות · תצוגה מקדימה</p>
+              <h1>רשימת לקוחות</h1>
+              <p class="page-subtitle">חיפוש מהיר וכרטיס לקוח מפורט. הרשומות כאן הן דוגמאות בלבד.</p>
+            </div>
+            <button class="button button-primary" type="button" data-preview-action="client-save-blocked"><span class="button-plus">＋</span> הוסף לקוח</button>
+          </section>
+
+          <section class="orders-section clients-section">
+            <div class="section-heading">
+              <div><h2>כל הלקוחות</h2><p>תגית פרימיום בלבד מוצגת ברשימה</p></div>
+            </div>
+            <div class="table-toolbar">
+              <label class="search-box">
+                <span aria-hidden="true">⌕</span>
+                <input id="preview-client-search" type="search" placeholder="חיפוש לפי שם או טלפון..." aria-label="חיפוש לקוחות לפי שם או טלפון">
+              </label>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th scope="col">שם הלקוח</th><th scope="col">טלפון</th><th scope="col">דואר אלקטרוני</th><th scope="col">סטטוס</th><th scope="col"><span class="sr-only">פעולות</span></th></tr></thead>
+                <tbody id="preview-clients-body"></tbody>
+              </table>
+              <div class="empty-state" id="preview-clients-empty" hidden><span class="empty-icon">⌕</span><strong>לא נמצאו לקוחות</strong><p>נסו לחפש לפי שם או טלפון אחר.</p></div>
+            </div>
+            <div class="table-footer"><span id="preview-clients-count">0 לקוחות</span><span>נתוני דוגמה מבודדים</span></div>
+          </section>
+          <div class="preview-blocked-note" role="status">הוספה ועריכה יוצגו וייבדקו לאחר חיבור הטבלאות החדשות. שום שינוי לא יישמר במצב זה.</div>
+        </section>
+
+        <section class="page-view" id="preview-orders-view" hidden>
+          <section class="welcome-row">
+            <div>
+              <p class="eyebrow">ניהול הזמנות · תצוגה מקדימה</p>
+              <h1>הזמנות פרסום</h1>
+              <p class="page-subtitle">טפסי הזמנה רגילה ורבת־שורות לפי חוזה ה-RPC המתוכנן.</p>
+            </div>
+            <div class="preview-order-actions">
+              <button class="button button-outline" type="button" data-preview-action="open-batch">הזמנה מרובה</button>
+              <button class="button button-primary" type="button" data-preview-action="open-single"><span class="button-plus">＋</span> הזמנה חדשה</button>
+            </div>
+          </section>
+
+          <section class="orders-section">
+            <div class="section-heading">
+              <div><h2>הזמנות לדוגמה</h2><p>תצוגה בלבד — לא נוספו הזמנות למסד הנתונים</p></div>
+            </div>
+            <div class="table-toolbar">
+              <label class="search-box"><span aria-hidden="true">⌕</span><input id="preview-order-search" type="search" placeholder="חיפוש לקוח, גיליון או מוצר..." aria-label="חיפוש הזמנות לדוגמה"></label>
+              <label class="filter-label">סטטוס תשלום
+                <select id="preview-payment-filter" aria-label="סינון לפי סטטוס תשלום">
+                  <option value="all">כל הסטטוסים</option><option value="paid">שולם</option><option value="pending">עדיין לא</option>
+                </select>
+              </label>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th scope="col">מספר הזמנה</th><th scope="col">לקוח</th><th scope="col">גיליון</th><th scope="col">מוצר</th><th scope="col">חיוב</th><th scope="col">סטטוס תשלום</th></tr></thead>
+                <tbody id="preview-orders-body"></tbody>
+              </table>
+              <div class="empty-state" id="preview-orders-empty" hidden><span class="empty-icon">⌕</span><strong>לא נמצאו הזמנות</strong><p>נסו לשנות את החיפוש או הסינון.</p></div>
+            </div>
+            <div class="table-footer"><span id="preview-orders-count">0 הזמנות</span><span>נתוני דוגמה מבודדים</span></div>
+          </section>
+        </section>
+        <footer class="page-footer">מודעת <span>·</span> תצוגה מקדימה מקומית · ללא שמירה</footer>
+      </div>
+    </main>
+  </div>
+
+  <dialog class="modal preview-details-modal" id="preview-client-details" aria-labelledby="preview-client-title">
+    <div class="modal-card">
+      <div class="modal-heading">
+        <div><span class="modal-kicker">כרטיס לקוח · דוגמה</span><h2 id="preview-client-title"></h2><span class="preview-selected-premium" id="preview-client-premium" hidden>פרימיום</span></div>
+        <button class="close-button" type="button" data-preview-close aria-label="סגירה">×</button>
+      </div>
+      <dl class="client-details preview-client-details">
+        <div><dt>טלפון</dt><dd id="preview-detail-phone"></dd></div>
+        <div><dt>דואר אלקטרוני</dt><dd id="preview-detail-email"></dd></div>
+        <div><dt>תאריך הצטרפות</dt><dd id="preview-detail-joined"></dd></div>
+        <div><dt>הערות פנימיות</dt><dd id="preview-detail-notes"></dd></div>
+      </dl>
+      <section class="preview-detail-section">
+        <h3>חבילות וקרדיטים</h3>
+        <p id="preview-detail-package"></p>
+        <p id="preview-detail-credits"></p>
+      </section>
+      <section class="preview-detail-section">
+        <h3>היסטוריית הזמנות</h3>
+        <div id="preview-detail-orders" class="preview-detail-orders"></div>
+      </section>
+      <div class="preview-blocked-note">פרטי הדגמה בלבד. היסטוריית חבילות ותשלומים מלאה תוצג לאחר חיבור סכימת העסק.</div>
+      <div class="modal-actions"><button class="button button-outline" type="button" data-preview-close>סגירה</button><button class="button button-primary" type="button" data-preview-action="client-save-blocked">עריכת לקוח</button></div>
+    </div>
+  </dialog>
+
+  <dialog class="modal preview-order-modal" id="preview-single-order-modal" aria-labelledby="preview-single-title">
+    <form class="modal-card preview-order-form" id="preview-single-order-form">
+      <div class="modal-heading">
+        <div><span class="modal-kicker">הזמנה חדשה · דוגמה</span><h2 id="preview-single-title">יצירת הזמנת פרסום</h2></div>
+        <button class="close-button" type="button" data-preview-close aria-label="סגירה">×</button>
+      </div>
+      <div class="preview-blocked-note">מצב תצוגה בלבד. אפשר לבדוק את הטופס והחישובים; שמירה חסומה עד התקנת ה-SQL וחיבור ה-RPC.</div>
+      <label class="field-label">חיפוש לקוח
+        <input id="preview-single-client-search" type="search" placeholder="הקלידו שם לקוח..." autocomplete="off">
+      </label>
+      <label class="field-label">לקוח <span>*</span><select name="clientId" id="preview-single-client" required></select></label>
+      <p class="preview-selected-premium" id="preview-single-premium" hidden>פרימיום</p>
+      <div class="form-grid">
+        <label class="field-label">מספר גיליון <span>*</span><input name="sheet_number" required maxlength="80" placeholder="לדוגמה: 125"></label>
+        <label class="field-label">מוצר <span>*</span><select name="product_id" required class="preview-product-select"></select></label>
+      </div>
+      <label class="field-label">תאריך פרסום <span>*</span><input name="publication_date" type="date" required></label>
+      <div class="preview-charge-fields">
+        <label class="field-label">מחיר כספי לפני מע"מ (₪)<input name="cash_amount_before_vat" type="number" min="0.01" max="99999999" step="0.01" placeholder="השאירו ריק לשימוש בקרדיטים"></label>
+        <label class="field-label">ניצול קרדיטים<input name="credits_used" type="number" min="0.01" max="999999999" step="0.01" placeholder="השאירו ריק לחיוב כספי"></label>
+      </div>
+      <p class="preview-inline-note">יש למלא ערך חיובי בדיוק באחד משני השדות. המזכירה בוחרת — אין שיטת חיוב אוטומטית.</p>
+      <div class="preview-vat-note" id="preview-single-vat-note">המחיר כולל מע"מ יוצג כאן לאחר הזנת מחיר. שיעור מע"מ לתצוגה: 18%.</div>
+      <label class="field-label">סטטוס תשלום
+        <select name="payment_status"><option value="pending">עדיין לא</option><option value="paid">שולם</option></select>
+      </label>
+      <label class="field-label">הערות<textarea name="notes" rows="2" maxlength="300" placeholder="הערות פנימיות להזמנה"></textarea></label>
+      <div class="import-preview" id="preview-single-summary" aria-live="polite">בדיקת ההזמנה תציג סיכום בלבד; היא לא תשמור נתונים.</div>
+      <p class="form-message" id="preview-single-message" role="alert"></p>
+      <div class="modal-actions">
+        <button class="button button-outline" type="button" data-preview-close>ביטול</button>
+        <button class="button button-outline" type="button" id="preview-single-check">בדיקת הזמנה</button>
+        <button class="button button-primary" type="button" disabled title="הפעולה חסומה עד חיבור Supabase">שמירה חסומה</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="modal preview-order-modal" id="preview-batch-order-modal" aria-labelledby="preview-batch-title">
+    <div class="modal-card preview-order-form">
+      <div class="modal-heading">
+        <div><span class="modal-kicker">הזמנות מרובות · דוגמה</span><h2 id="preview-batch-title">יצירת הזמנות מרובות</h2></div>
+        <button class="close-button" type="button" data-preview-close aria-label="סגירה">×</button>
+      </div>
+      <div class="preview-blocked-note">מצב תצוגה בלבד. ניתן לבנות ולבדוק סיכום; אין שמירה חלקית או מדומה. שמירה חסומה עד התקנת ה-SQL וחיבור ה-RPC.</div>
+      <label class="field-label">חיפוש לקוח
+        <input id="preview-batch-client-search" type="search" placeholder="הקלידו שם לקוח..." autocomplete="off">
+      </label>
+      <label class="field-label">לקוח <span>*</span><select id="preview-batch-client" required></select></label>
+      <p class="preview-selected-premium" id="preview-batch-premium" hidden>פרימיום</p>
+      <div class="batch-sequence-toolbar">
+        <label class="field-label">גיליון ראשון ברצף<input id="preview-sequence-start" type="number" step="1" placeholder="מספר"></label>
+        <button class="button button-outline" type="button" id="preview-apply-sequence">בחירת רצף גיליונות</button>
+      </div>
+      <div id="preview-batch-rows" class="preview-batch-rows"></div>
+      <div class="preview-batch-actions">
+        <button class="button button-outline" type="button" id="preview-add-batch-row">הוספת שורה</button>
+        <span id="preview-batch-row-count">1 מתוך 250</span>
+      </div>
+      <div class="preview-batch-summary" id="preview-batch-summary" aria-live="polite">
+        <strong>סיכום לפני שמירה</strong><p>מלאו את השורות ובחרו "בדיקת סיכום".</p>
+      </div>
+      <p class="form-message" id="preview-batch-message" role="alert"></p>
+      <div class="modal-actions">
+        <button class="button button-outline" type="button" data-preview-close>סגירה</button>
+        <button class="button button-outline" type="button" id="preview-check-batch">בדיקת סיכום</button>
+        <button class="button button-primary" type="button" disabled title="הפעולה חסומה עד חיבור Supabase">שמירה חסומה</button>
+      </div>
+    </div>
+  </dialog>
+
   <dialog class="modal" id="client-modal" aria-labelledby="client-modal-title">
     <form class="modal-card" id="client-form">
       <div class="modal-heading">
@@ -302,5 +511,6 @@
   </dialog>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="business-preview.js" defer></script>
 </body>
 </html>
