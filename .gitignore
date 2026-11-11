@@ -1,0 +1,51 @@
+# Local credentials and environment files
+.env
+.env.*
+!.env.example
+.npmrc
+.git-credentials
+*.pem
+*.key
+*.p12
+*.pfx
+*.secret
+*service-role*
+*service_role*
+*secret-key*
+*secret_key*
+
+# Customer/order exports and local data
+*.json
+*.json5
+*.jsonl
+*.csv
+*.sqlite
+*.sqlite3
+*.db
+*backup*
+*-backup*
+*backup-*
+
+# Temporary files and local tooling output
+*.tmp
+*.temp
+*.log
+*.swp
+*.swo
+*.bak
+*.orig
+Thumbs.db
+Desktop.ini
+.DS_Store
+.vscode/
+.idea/
+.netlify/
+.vercel/
+node_modules/
+coverage/
+dist/
+build/
+orders-netlify-ready/
+
+# Internal reference material
+reference/
