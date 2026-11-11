@@ -253,6 +253,8 @@ tbody tr:hover { background: #fcfdff; }
 .preview-charge-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .preview-custom-package { display: grid; gap: 12px; }
 .preview-detail-section .preview-summary-grid { margin: 4px 0 8px; color: #657487; font-size: 11px; }
+#biz-client-modal { width: min(680px, calc(100% - 28px)); }
+#biz-client-modal .modal-card > * { min-width: 0; }
 .preview-batch-rows { display: grid; gap: 13px; }
 .preview-batch-row { display: grid; gap: 12px; padding: 14px; border: 1px solid #e9edf2; border-radius: 8px; background: #fcfcfd; }
 .preview-batch-row-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #35465a; font-size: 12px; }

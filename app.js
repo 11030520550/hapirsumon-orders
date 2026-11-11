@@ -28,6 +28,11 @@
   let cloudFetchRequest = 0;
   let lastSyncError = "";
   let requestedScreen = "auth";
+  // True only when supabase-business-upgrade.sql is installed; otherwise the legacy flow is used unchanged.
+  let businessSchema = false;
+  const BASE_ORDER_COLUMNS = "id,client_id,publication_date,section,amount,payment_status,notes,updated_at";
+  const BUSINESS_ORDER_COLUMNS = `${BASE_ORDER_COLUMNS},order_number,billing_mode,credits_used,cash_amount_before_vat,sheet_number`;
+  const BUSINESS_REALTIME_TABLES = ["financial_obligations", "credit_ledger", "customer_packages", "package_installments"];
 
   function toLocalDateValue(date) {
     const year = date.getFullYear();
@@ -69,6 +74,10 @@
     if (/email not confirmed/i.test(message)) {
       return "יש לאשר את כתובת הדוא״ל דרך הודעת האישור שנשלחה.";
     }
+    if (code === "40001") {
+      return message || "הרשומה השתנתה אצל משתמשת אחרת. רענני את הנתונים ונסי שוב.";
+    }
+    if (code === "P0001" && message) return message;
     if (code === "STALE_RECORD") {
       return "הרשומה השתנתה אצל משתמשת אחרת. הנתונים שלך לא נשמרו; רענני את הרשימה, בדקי את השינוי ונסי שוב.";
     }
@@ -132,6 +141,7 @@
   function showAuth(message = "", sessionAvailable = false) {
     requestedScreen = "auth";
     resetWorkspace();
+    document.dispatchEvent(new CustomEvent("modaat:signed-out"));
     applyScreen();
     $("#login-message").textContent = message;
     $("#auth-sign-out").hidden = !sessionAvailable;
@@ -156,8 +166,30 @@
       amount: Number(row.amount),
       paymentStatus: row.payment_status,
       notes: row.notes || "",
-      updatedAt: row.updated_at
+      updatedAt: row.updated_at,
+      orderNumber: row.order_number ?? null,
+      billingMode: row.billing_mode || "legacy",
+      creditsUsed: row.credits_used == null ? null : Number(row.credits_used),
+      sheetNumber: row.sheet_number || ""
     };
+  }
+
+  async function detectBusinessSchema() {
+    const { error } = await supabaseClient.from("business_settings").select("vat_rate").limit(1);
+    if (!error) return true;
+    const missing = ["PGRST205", "PGRST204", "42P01"].includes(String(error.code || ""))
+      || /does not exist|schema cache|could not find/i.test(error.message || "");
+    if (missing) return false;
+    throw error;
+  }
+
+  function updateBusinessNote() {
+    const note = $("#app-shell .help-card p");
+    if (note) {
+      note.textContent = businessSchema
+        ? "ממשק עסקי פעיל: חבילות, קרדיטים ותשלומים נשמרים במסד הנתונים."
+        : "נהלו הזמנות, לקוחות ותשלומים בפשטות.";
+    }
   }
 
   async function checkApproval() {
@@ -182,7 +214,7 @@
     const [clientsResult, ordersResult] = await Promise.all([
       supabaseClient.from("clients").select("id,name,phone,email,updated_at").order("name"),
       supabaseClient.from("orders")
-        .select("id,client_id,publication_date,section,amount,payment_status,notes,updated_at")
+        .select(businessSchema ? BUSINESS_ORDER_COLUMNS : BASE_ORDER_COLUMNS)
         .order("publication_date", { ascending: false })
     ]);
     if (requestId !== cloudFetchRequest) return false;
@@ -193,6 +225,7 @@
       orders: ordersResult.data.map(mapOrder)
     };
     render();
+    document.dispatchEvent(new CustomEvent("modaat:data"));
     return true;
   }
 
@@ -297,10 +330,15 @@
       return;
     }
     try {
-      realtimeChannel = supabaseClient.channel("approved-data-sync")
+      let channel = supabaseClient.channel("approved-data-sync")
         .on("postgres_changes", { event: "*", schema: "public", table: "clients" }, scheduleCloudRefresh)
-        .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, scheduleCloudRefresh)
-        .subscribe((status) => {
+        .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, scheduleCloudRefresh);
+      if (businessSchema) {
+        for (const table of BUSINESS_REALTIME_TABLES) {
+          channel = channel.on("postgres_changes", { event: "*", schema: "public", table }, scheduleCloudRefresh);
+        }
+      }
+      realtimeChannel = channel.subscribe((status) => {
           if (status === "SUBSCRIBED") {
             realtimeConnected = true;
             if (pollingTimer) window.clearInterval(pollingTimer);
@@ -341,10 +379,13 @@
     showAuth("מתחברת למסד הנתונים ובודקת הרשאות…", true);
     try {
       await checkApproval();
+      businessSchema = await detectBusinessSchema();
+      updateBusinessNote();
       await fetchCloudData();
       activeUserId = session.user.id;
       showApplication();
       startRealtimeSync();
+      document.dispatchEvent(new CustomEvent("modaat:session-ready", { detail: { business: businessSchema } }));
     } catch (error) {
       stopRealtimeSync();
       cloudFetchRequest++;
@@ -385,7 +426,7 @@
       .filter((client) => `${client.name} ${client.phone || ""}`.toLocaleLowerCase("he").includes(query));
 
     $("#clients-body").innerHTML = clients.map((client) => `<tr>
-      <td class="client-name">${escapeHtml(client.name)}</td>
+      <td class="client-name">${escapeHtml(client.name)}${window.ModaatBusiness && window.ModaatBusiness.isPremium(client.id) ? ' <span class="premium-badge">פרימיום</span>' : ""}</td>
       <td>${escapeHtml(client.phone || "—")}</td>
       <td>${escapeHtml(client.email || "—")}</td>
       <td class="client-actions">
@@ -405,7 +446,7 @@
       .sort((left, right) => right.date.localeCompare(left.date) || right.id.localeCompare(left.id))
       .filter((order) => {
         const client = clientsById.get(order.clientId);
-        const searchable = `${order.id} ${client ? client.name : ""} ${order.section}`.toLocaleLowerCase("he");
+        const searchable = `${order.id} ${order.orderNumber ?? ""} ${client ? client.name : ""} ${order.section}`.toLocaleLowerCase("he");
         return searchable.includes(query) && (filter === "all" || order.paymentStatus === filter);
       });
 
@@ -413,18 +454,27 @@
       const client = clientsById.get(order.clientId);
       const paid = order.paymentStatus === "paid";
       const clientName = client ? client.name : "לקוח לא זמין";
+      const label = order.orderNumber != null ? String(order.orderNumber) : order.id;
+      const credits = order.billingMode === "credits";
+      const amountText = credits ? `${numberFormat.format(order.creditsUsed)} קרדיטים` : formatCurrency(Number(order.amount));
+      const statusCell = credits
+        ? '<span class="payment-select paid">קרדיטים</span>'
+        : `<select class="payment-select ${paid ? "paid" : "pending"}" data-order-id="${escapeHtml(order.id)}" aria-label="סטטוס תשלום להזמנה ${escapeHtml(label)}">
+          <option value="paid" ${paid ? "selected" : ""}>שולם</option>
+          <option value="pending" ${!paid ? "selected" : ""}>ממתין לתשלום</option>
+        </select>`;
+      // Business orders are edited only through RPCs; the legacy edit form would bypass them.
+      const editButton = businessSchema && order.billingMode !== "legacy" ? "" :
+        `<button class="button button-outline client-action" type="button" data-order-edit="${escapeHtml(order.id)}" aria-label="עריכת הזמנה ${escapeHtml(label)}">עריכה</button>`;
       return `<tr>
-        <td class="order-number">#${escapeHtml(order.id)}</td>
+        <td class="order-number">#${escapeHtml(label)}</td>
         <td class="client-name">${escapeHtml(clientName)}</td>
         <td>${escapeHtml(displayDate(order.date))}</td>
         <td>${escapeHtml(order.section)}</td>
-        <td class="amount-cell">${escapeHtml(formatCurrency(Number(order.amount)))}</td>
-        <td><select class="payment-select ${paid ? "paid" : "pending"}" data-order-id="${escapeHtml(order.id)}" aria-label="סטטוס תשלום להזמנה ${escapeHtml(order.id)}">
-          <option value="paid" ${paid ? "selected" : ""}>שולם</option>
-          <option value="pending" ${!paid ? "selected" : ""}>ממתין לתשלום</option>
-        </select></td>
+        <td class="amount-cell">${escapeHtml(amountText)}</td>
+        <td>${statusCell}</td>
         <td class="client-actions">
-          <button class="button button-outline client-action" type="button" data-order-edit="${escapeHtml(order.id)}" aria-label="עריכת הזמנה ${escapeHtml(order.id)}">עריכה</button>
+          ${editButton}
           <button class="delete-order" type="button" data-delete-order="${escapeHtml(order.id)}" aria-label="מחיקת הזמנה ${escapeHtml(order.id)}" title="מחיקת הזמנה">×</button>
         </td>
       </tr>`;
@@ -824,12 +874,17 @@
       window.scrollTo(0, 0);
     }
     const openButton = event.target.closest("[data-open-modal]");
-    if (openButton) openModal(openButton.dataset.openModal);
+    if (openButton) {
+      if (businessSchema && openButton.dataset.openModal === "order-modal") window.ModaatBusiness.openOrder();
+      else openModal(openButton.dataset.openModal);
+    }
     if (event.target.closest("[data-close-modal]")) event.target.closest("dialog").close();
     if (event.target.matches("dialog.modal")) event.target.close();
 
     const viewClientButton = event.target.closest("[data-client-view]");
-    if (viewClientButton) {
+    if (viewClientButton && businessSchema) {
+      window.ModaatBusiness.openClient(viewClientButton.dataset.clientView);
+    } else if (viewClientButton) {
       const client = data.clients.find((item) => item.id === viewClientButton.dataset.clientView);
       if (client) {
         $("#client-details-title").textContent = client.name;
@@ -860,7 +915,11 @@
     const deleteButton = event.target.closest("[data-delete-order]");
     if (deleteButton) {
       const order = data.orders.find((item) => item.id === deleteButton.dataset.deleteOrder);
-      if (order && window.confirm(`למחוק את הזמנה ${order.id}?`)) deleteOrder(order.id);
+      const label = order && order.orderNumber != null ? order.orderNumber : order && order.id;
+      if (order && window.confirm(`למחוק את הזמנה ${label}?`)) {
+        if (businessSchema) window.ModaatBusiness.deleteOrder(order);
+        else deleteOrder(order.id);
+      }
     }
   });
 
@@ -1073,6 +1132,15 @@
     const previousStatus = order.paymentStatus;
     const requestedStatus = select.value;
     select.disabled = true;
+    if (businessSchema) {
+      // Payment status is owned by the financial obligation; the RPC also updates the order.
+      const saved = await window.ModaatBusiness.setOrderPaid(order, requestedStatus === "paid");
+      if (!saved) {
+        select.value = previousStatus;
+        select.disabled = false;
+      }
+      return;
+    }
     try {
       if (!order.updatedAt) throw versionRequiredError();
       const { data: updatedRow, error } = await supabaseClient.from("orders")
@@ -1164,6 +1232,18 @@
       }
     });
   }
+
+  // Narrow interface for business-app.js (RPC-based business screens).
+  window.ModaatApp = Object.freeze({
+    client: () => supabaseClient,
+    clients: () => data.clients,
+    orders: () => data.orders,
+    isBusiness: () => businessSchema,
+    refresh: () => fetchCloudData(),
+    rerenderClients: () => renderClientTable(),
+    toast: showToast,
+    friendlyError
+  });
 
   data = { clients: [], orders: [] };
   render();
