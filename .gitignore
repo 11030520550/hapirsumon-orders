@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+testing/supabase-test-config.js
 .npmrc
 .git-credentials
 *.pem
