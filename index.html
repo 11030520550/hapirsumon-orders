@@ -8,10 +8,10 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=20261111-3">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="supabase-config.js"></script>
-  <script src="app.js?v=20261111-2" defer></script>
+  <script src="app.js?v=20261111-3" defer></script>
 </head>
 <body>
   <main class="auth-screen" id="auth-screen">
@@ -344,17 +344,70 @@
         <div><dt>הערות פנימיות</dt><dd id="preview-detail-notes"></dd></div>
       </dl>
       <section class="preview-detail-section">
-        <h3>חבילות וקרדיטים</h3>
+        <h3>חבילה פעילה</h3>
         <p id="preview-detail-package"></p>
+        <div class="preview-summary-grid" id="preview-detail-package-grid"></div>
+        <p id="preview-detail-benefits"></p>
+      </section>
+      <section class="preview-detail-section">
+        <h3>יתרת קרדיטים</h3>
         <p id="preview-detail-credits"></p>
+        <div class="preview-summary-grid" id="preview-detail-credit-grid"></div>
+      </section>
+      <section class="preview-detail-section">
+        <h3>תשלומי חבילה</h3>
+        <div class="table-wrap" id="preview-detail-installments-wrap">
+          <table>
+            <thead><tr><th scope="col">תשלום</th><th scope="col">מועד</th><th scope="col">סכום כולל מע"מ</th><th scope="col">סטטוס</th></tr></thead>
+            <tbody id="preview-detail-installments"></tbody>
+          </table>
+        </div>
+        <p id="preview-detail-installments-empty" hidden>אין תשלומי חבילה ללקוח זה.</p>
+      </section>
+      <section class="preview-detail-section">
+        <h3>חובות פתוחים</h3>
+        <div id="preview-detail-debts"></div>
       </section>
       <section class="preview-detail-section">
         <h3>היסטוריית הזמנות</h3>
         <div id="preview-detail-orders" class="preview-detail-orders"></div>
       </section>
-      <div class="preview-blocked-note">פרטי הדגמה בלבד. היסטוריית חבילות ותשלומים מלאה תוצג לאחר חיבור סכימת העסק.</div>
-      <div class="modal-actions"><button class="button button-outline" type="button" data-preview-close>סגירה</button><button class="button button-primary" type="button" data-preview-action="client-save-blocked">עריכת לקוח</button></div>
+      <div class="preview-blocked-note">פרטי הדגמה בלבד. אין חיבור למסד הנתונים ושום שינוי לא נשמר.</div>
+      <div class="modal-actions"><button class="button button-outline" type="button" data-preview-close>סגירה</button><button class="button button-outline" type="button" data-preview-action="open-package">רכישת חבילה</button><button class="button button-primary" type="button" data-preview-action="client-save-blocked">עריכת לקוח</button></div>
     </div>
+  </dialog>
+
+  <dialog class="modal preview-order-modal" id="preview-package-modal" aria-labelledby="preview-package-title">
+    <form class="modal-card preview-order-form" id="preview-package-form">
+      <div class="modal-heading">
+        <div><span class="modal-kicker">רכישת חבילה · דוגמה</span><h2 id="preview-package-title">רכישת חבילה</h2></div>
+        <button class="close-button" type="button" data-preview-close aria-label="סגירה">×</button>
+      </div>
+      <div class="preview-blocked-note">מצב תצוגה בלבד. אפשר לבחור חבילה ולבדוק את לוח התשלומים; שמירה חסומה עד התקנת ה-SQL וחיבור ה-RPC.</div>
+      <p class="preview-inline-note" id="preview-package-client"></p>
+      <label class="field-label">חבילה <span>*</span><select name="package" id="preview-package-select" required></select></label>
+      <div class="preview-custom-package" id="preview-custom-package-fields" hidden>
+        <label class="field-label">שם החבילה המותאמת <span>*</span><input name="custom_name" maxlength="120" placeholder="לדוגמה: הסכם אישי"></label>
+        <div class="form-grid">
+          <label class="field-label">קרדיטים <span>*</span><input name="custom_credits" type="number" min="0.01" max="999999999" step="0.01"></label>
+          <label class="field-label">תקופה בחודשים <span>*</span><input name="custom_term" type="number" min="1" max="120" step="1"></label>
+        </div>
+        <label class="field-label">מחיר כולל לפני מע"מ (₪) <span>*</span><input name="custom_price" type="number" min="0.01" max="99999999" step="0.01"></label>
+      </div>
+      <div class="form-grid">
+        <label class="field-label">תאריך התחלה <span>*</span><input name="starts_on" type="date" required></label>
+        <label class="field-label">מספר תשלומים <span>*</span><input name="installment_count" type="number" min="1" max="60" step="1" required></label>
+      </div>
+      <div class="preview-vat-note" id="preview-package-details"></div>
+      <label class="field-label">הערות<textarea name="notes" rows="2" maxlength="300" placeholder="הערות פנימיות לרכישה"></textarea></label>
+      <div class="import-preview" id="preview-package-summary" aria-live="polite">בדיקת הרכישה תציג לוח תשלומים בלבד; היא לא תשמור נתונים.</div>
+      <p class="form-message" id="preview-package-message" role="alert"></p>
+      <div class="modal-actions">
+        <button class="button button-outline" type="button" data-preview-close>ביטול</button>
+        <button class="button button-outline" type="button" id="preview-package-check">בדיקת רכישה</button>
+        <button class="button button-primary" type="button" disabled title="הפעולה חסומה עד חיבור Supabase">שמירה חסומה</button>
+      </div>
+    </form>
   </dialog>
 
   <dialog class="modal preview-order-modal" id="preview-single-order-modal" aria-labelledby="preview-single-title">
@@ -511,6 +564,6 @@
   </dialog>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
-  <script src="business-preview.js?v=20261111-2" defer></script>
+  <script src="business-preview.js?v=20261111-3" defer></script>
 </body>
 </html>

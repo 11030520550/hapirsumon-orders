@@ -10,11 +10,7 @@
       phone: "050-000-0001",
       email: "noa@example.invalid",
       joinedAt: "2025-03-12",
-      internalNotes: "העדפה לקבלת סקיצה לפני סגירת הזמנה. (הערת הדגמה)",
-      premium: true,
-      packageName: "מינימום מקסימום",
-      packageCredits: 30,
-      creditBalance: 5.5
+      internalNotes: "העדפה לקבלת סקיצה לפני סגירת הזמנה. (הערת הדגמה)"
     },
     {
       id: "demo-client-002",
@@ -22,11 +18,7 @@
       phone: "050-000-0002",
       email: "studio@example.invalid",
       joinedAt: "2025-07-04",
-      internalNotes: "לקוח לדוגמה; אין פרטים אמיתיים.",
-      premium: false,
-      packageName: "",
-      packageCredits: null,
-      creditBalance: 0
+      internalNotes: "לקוח לדוגמה; אין פרטים אמיתיים."
     },
     {
       id: "demo-client-003",
@@ -34,11 +26,7 @@
       phone: "050-000-0003",
       email: "family@example.invalid",
       joinedAt: "2024-11-20",
-      internalNotes: "מבקשים לוודא את מספר הגיליון לפני פרסום. (הערת הדגמה)",
-      premium: true,
-      packageName: "מותג מוביל",
-      packageCredits: 60,
-      creditBalance: -2.5
+      internalNotes: "מבקשים לוודא את מספר הגיליון לפני פרסום. (הערת הדגמה)"
     },
     {
       id: "demo-client-004",
@@ -46,11 +34,7 @@
       phone: "050-000-0004",
       email: "",
       joinedAt: "2026-01-15",
-      internalNotes: "",
-      premium: false,
-      packageName: "",
-      packageCredits: null,
-      creditBalance: 0
+      internalNotes: ""
     }
   ];
   const products = [
@@ -77,6 +61,67 @@
     }
   ];
 
+  // Mirrors the opening rows of public.package_catalog in supabase-business-upgrade.sql (prices before VAT).
+  const packageCatalog = [
+    {
+      code: "minimum-maximum", name: "מינימום מקסימום", credits: 30, termMonths: 6,
+      priceBeforeVat: 2148, installmentCount: 12, installmentBeforeVat: 179,
+      benefits: [{ label: "מיקום על המפה", quantity: 6, unit: "חודשים" }]
+    },
+    {
+      code: "leading-brand", name: "מותג מוביל", credits: 60, termMonths: 12,
+      priceBeforeVat: 4188, installmentCount: 12, installmentBeforeVat: 349,
+      benefits: [
+        { label: "שיחת ייעוץ אסטרטגית", quantity: 1, unit: "שיחות" },
+        { label: "מיקום על המפה", quantity: 12, unit: "חודשים" },
+        { label: "כתבת תוכן", quantity: 1, unit: "כתבות" },
+        { label: "זכות קדימה לעמוד שמאל", quantity: 1, unit: "זכות" },
+        { label: "הנחה לרכישה בלוח שנה", quantity: 10, unit: "אחוזים" }
+      ]
+    },
+    {
+      code: "winning-ad", name: "פרסום מנצח", credits: 120, termMonths: 12,
+      priceBeforeVat: 8028, installmentCount: 12, installmentBeforeVat: 669,
+      benefits: [
+        { label: "שיחת ייעוץ אסטרטגית", quantity: 2, unit: "שיחות" },
+        { label: "מיקום על המפה", quantity: 12, unit: "חודשים" },
+        { label: "כתבת תוכן", quantity: 2, unit: "כתבות" },
+        { label: "זכות קדימה לעמוד שמאל", quantity: 1, unit: "זכות" },
+        { label: "קובייה חודשית + גב בלוח שנה", quantity: 1, unit: "הטבה" },
+        { label: "הנחה לרכישה בלוח שנה", quantity: 15, unit: "אחוזים" }
+      ]
+    }
+  ];
+
+  function demoPackage(clientId, code, startsOn, paidCount, status) {
+    const template = packageCatalog.find((item) => item.code === code);
+    return {
+      clientId, code, status, startsOn,
+      name: template.name, credits: template.credits, termMonths: template.termMonths,
+      priceBeforeVat: template.priceBeforeVat, benefits: template.benefits,
+      endsOn: packageEndDate(startsOn, template.termMonths),
+      installments: buildInstallments(template.priceBeforeVat, template.installmentCount, startsOn)
+        .map((item, index) => ({ ...item, paid: index < paidCount }))
+    };
+  }
+
+  // Demo only: package purchases, installments and credit movements for the sample clients.
+  const customerPackages = [
+    demoPackage("demo-client-001", "minimum-maximum", "2026-07-01", 5, "active"),
+    demoPackage("demo-client-003", "leading-brand", "2026-02-01", 8, "active"),
+    demoPackage("demo-client-002", "minimum-maximum", "2025-07-04", 12, "ended")
+  ];
+  const creditLedger = [
+    { clientId: "demo-client-001", date: "2026-07-01", delta: 30, kind: "grant" },
+    { clientId: "demo-client-001", date: "2026-08-20", delta: -12, kind: "usage" },
+    { clientId: "demo-client-001", date: "2026-10-05", delta: -12.5, kind: "usage" },
+    { clientId: "demo-client-003", date: "2026-02-01", delta: 60, kind: "grant" },
+    { clientId: "demo-client-003", date: "2026-09-14", delta: -60, kind: "usage" },
+    { clientId: "demo-client-003", date: "2026-10-19", delta: -2.5, kind: "usage" },
+    { clientId: "demo-client-002", date: "2025-07-04", delta: 30, kind: "grant" },
+    { clientId: "demo-client-002", date: "2025-12-20", delta: -30, kind: "usage" }
+  ];
+
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
   const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (character) => ({
@@ -84,7 +129,75 @@
   }[character]));
   const money = new Intl.NumberFormat("he-IL", { style: "currency", currency: "ILS" });
   const number = new Intl.NumberFormat("he-IL", { maximumFractionDigits: 2 });
-  const state = { previewPayload: null };
+  const state = { previewPayload: null, packageClientId: null, cardClientId: null };
+
+  function roundMoney(value) {
+    return Math.round((value + Number.EPSILON) * 100) / 100;
+  }
+
+  function grossAmount(beforeVat) {
+    return roundMoney(beforeVat * (1 + vatRate));
+  }
+
+  function addMonths(dateValue, months) {
+    const [year, month, day] = dateValue.split("-").map(Number);
+    const target = new Date(year, month - 1 + months, 1);
+    const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+    target.setDate(Math.min(day, lastDay));
+    return `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, "0")}-${String(target.getDate()).padStart(2, "0")}`;
+  }
+
+  function packageEndDate(startsOn, termMonths) {
+    const [year, month, day] = addMonths(startsOn, termMonths).split("-").map(Number);
+    const end = new Date(year, month - 1, day - 1);
+    return `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, "0")}-${String(end.getDate()).padStart(2, "0")}`;
+  }
+
+  // Equal monthly installments; the last one absorbs rounding so the sum equals the price
+  // (purchase_customer_package rejects a schedule whose sum before VAT differs from the price).
+  function buildInstallments(priceBeforeVat, count, startsOn) {
+    const base = Math.floor((priceBeforeVat / count) * 100) / 100;
+    return Array.from({ length: count }, (_, index) => ({
+      number: index + 1,
+      dueOn: addMonths(startsOn, index),
+      amountBeforeVat: index === count - 1 ? roundMoney(priceBeforeVat - base * (count - 1)) : base
+    }));
+  }
+
+  function activePackage(clientId, today = localDateValue()) {
+    return customerPackages.find((item) => item.clientId === clientId && item.status === "active"
+      && item.startsOn <= today && today <= item.endsOn) || null;
+  }
+
+  function isPremium(client) {
+    return Boolean(activePackage(client.id));
+  }
+
+  function creditSummary(clientId) {
+    const entries = creditLedger.filter((entry) => entry.clientId === clientId);
+    const granted = entries.filter((entry) => entry.delta > 0).reduce((sum, entry) => sum + entry.delta, 0);
+    const used = entries.filter((entry) => entry.delta < 0).reduce((sum, entry) => sum - entry.delta, 0);
+    return { granted: roundMoney(granted), used: roundMoney(used), balance: roundMoney(granted - used) };
+  }
+
+  // Open debts: unpaid cash orders (no due date → not overdue) and unpaid package installments.
+  function clientObligations(clientId, today = localDateValue()) {
+    const rows = [];
+    for (const order of orders.filter((item) => item.clientId === clientId && item.cashBeforeVat != null && item.paymentStatus !== "paid")) {
+      rows.push({ label: `הזמנה #${order.orderNumber}`, amount: grossAmount(order.cashBeforeVat), dueOn: null, kind: "undated" });
+    }
+    for (const pkg of customerPackages.filter((item) => item.clientId === clientId)) {
+      for (const installment of pkg.installments.filter((item) => !item.paid)) {
+        rows.push({
+          label: `${pkg.name} · תשלום ${installment.number}/${pkg.installments.length}`,
+          amount: grossAmount(installment.amountBeforeVat),
+          dueOn: installment.dueOn,
+          kind: installment.dueOn < today ? "overdue" : "future"
+        });
+      }
+    }
+    return rows;
+  }
 
   function localDateValue() {
     const now = new Date();
@@ -136,7 +249,7 @@
       <td class="client-name">${escapeHtml(client.name)}</td>
       <td>${escapeHtml(client.phone || "—")}</td>
       <td>${escapeHtml(client.email || "—")}</td>
-      <td>${client.premium ? '<span class="premium-badge">פרימיום</span>' : ""}</td>
+      <td>${isPremium(client) ? '<span class="premium-badge">פרימיום</span>' : ""}</td>
       <td class="client-actions">
         <button class="button button-outline client-action" type="button" data-preview-client-view="${escapeHtml(client.id)}">כרטיס לקוח</button>
         <button class="button button-outline client-action" type="button" data-preview-action="client-save-blocked">עריכה</button>
@@ -177,20 +290,92 @@
     $("#preview-orders-count").textContent = `${number.format(filtered.length)} ${filtered.length === 1 ? "הזמנה" : "הזמנות"}`;
   }
 
+  const summaryGrid = (pairs) => pairs.map(([label, value]) =>
+    `<span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong>`).join("");
+  const statusPill = (paid, extra = "") =>
+    `<span class="payment-select ${paid ? "paid" : "pending"}">${paid ? "שולם" : "עדיין לא"}${escapeHtml(extra)}</span>`;
+
+  function renderClientPackage(client) {
+    const pkg = activePackage(client.id);
+    const grid = $("#preview-detail-package-grid");
+    if (!pkg) {
+      const ended = customerPackages.find((item) => item.clientId === client.id);
+      $("#preview-detail-package").textContent = ended
+        ? `אין חבילה פעילה. חבילה קודמת: ${ended.name} (הסתיימה ב-${displayDate(ended.endsOn)}).`
+        : "אין חבילה פעילה ללקוח זה.";
+      grid.innerHTML = "";
+      $("#preview-detail-benefits").innerHTML = "";
+      return;
+    }
+    $("#preview-detail-package").textContent = `${pkg.name} · חבילת הדגמה`;
+    grid.innerHTML = summaryGrid([
+      ["קרדיטים בחבילה", number.format(pkg.credits)],
+      ["תקופה", `${number.format(pkg.termMonths)} חודשים`],
+      ["תוקף", `${displayDate(pkg.startsOn)} – ${displayDate(pkg.endsOn)}`],
+      ["מחיר לפני מע\"מ", money.format(pkg.priceBeforeVat)],
+      ["מחיר כולל מע\"מ (18%)", money.format(pkg.installments.reduce((sum, item) => sum + grossAmount(item.amountBeforeVat), 0))]
+    ]);
+    $("#preview-detail-benefits").textContent = pkg.benefits.length
+      ? `הטבות: ${pkg.benefits.map((item) => `${item.label} (${number.format(item.quantity)} ${item.unit})`).join(" · ")}`
+      : "";
+  }
+
+  function renderClientCredits(client) {
+    const credits = creditSummary(client.id);
+    const negative = credits.balance < 0;
+    $("#preview-detail-credits").innerHTML = `יתרה נוכחית: <strong dir="ltr">${escapeHtml(number.format(credits.balance))}</strong> קרדיטים`
+      + (negative ? ` <span class="payment-select pending">יתרה שלילית</span>` : "");
+    $("#preview-detail-credit-grid").innerHTML = summaryGrid([
+      ["הוקצו", number.format(credits.granted)],
+      ["נוצלו", number.format(credits.used)]
+    ]);
+  }
+
+  function renderClientInstallments(client) {
+    const today = localDateValue();
+    const rows = customerPackages.filter((item) => item.clientId === client.id).flatMap((pkg) =>
+      pkg.installments.map((item) => `<tr>
+        <td>${escapeHtml(`${pkg.name} ${item.number}/${pkg.installments.length}`)}</td>
+        <td>${escapeHtml(displayDate(item.dueOn))}</td>
+        <td class="amount-cell">${escapeHtml(money.format(grossAmount(item.amountBeforeVat)))}</td>
+        <td>${statusPill(item.paid, !item.paid && item.dueOn < today ? " · באיחור" : "")}</td>
+      </tr>`));
+    $("#preview-detail-installments").innerHTML = rows.join("");
+    $("#preview-detail-installments-wrap").hidden = rows.length === 0;
+    $("#preview-detail-installments-empty").hidden = rows.length !== 0;
+  }
+
+  function renderClientDebts(client) {
+    const obligations = clientObligations(client.id);
+    const total = (kind) => obligations.filter((item) => item.kind === kind).reduce((sum, item) => sum + item.amount, 0);
+    const open = obligations.filter((item) => item.kind !== "future");
+    $("#preview-detail-debts").innerHTML = `<div class="preview-summary-grid">${summaryGrid([
+      ["באיחור", money.format(total("overdue"))],
+      ["ללא מועד פירעון (לא בפיגור)", money.format(total("undated"))],
+      ["תשלומים עתידיים (אינם חוב)", money.format(total("future"))]
+    ])}</div>` + (open.length
+      ? open.map((item) => `<div class="preview-history-row">
+          <strong>${escapeHtml(item.label)}</strong>
+          <span>${escapeHtml(money.format(item.amount))} · ${item.dueOn ? `מועד ${escapeHtml(displayDate(item.dueOn))} · באיחור` : "ללא מועד פירעון"}</span>
+        </div>`).join("")
+      : '<p class="preview-inline-note">אין חובות פתוחים.</p>');
+  }
+
   function openClientCard(clientId) {
     const client = clientById(clientId);
     if (!client) return;
     const history = orders.filter((order) => order.clientId === clientId);
     $("#preview-client-title").textContent = client.name;
-    $("#preview-client-premium").hidden = !client.premium;
+    state.cardClientId = client.id;
+    $("#preview-client-premium").hidden = !isPremium(client);
     $("#preview-detail-phone").textContent = client.phone || "לא צוין";
     $("#preview-detail-email").textContent = client.email || "לא צוין";
     $("#preview-detail-joined").textContent = displayDate(client.joinedAt);
     $("#preview-detail-notes").textContent = client.internalNotes || "אין הערות בדוגמה.";
-    $("#preview-detail-package").textContent = client.premium
-      ? `${client.packageName} — ${number.format(client.packageCredits)} קרדיטים (חבילת הדגמה)`
-      : "אין חבילה לדוגמה משויכת.";
-    $("#preview-detail-credits").textContent = `יתרת קרדיטים לדוגמה: ${number.format(client.creditBalance)}`;
+    renderClientPackage(client);
+    renderClientCredits(client);
+    renderClientInstallments(client);
+    renderClientDebts(client);
     $("#preview-detail-orders").innerHTML = history.length
       ? history.map((order) => `<div class="preview-history-row">
           <strong>הזמנה #${escapeHtml(order.orderNumber)}</strong>
@@ -224,7 +409,7 @@
 
   function updatePremiumBadge(select, badge) {
     const client = clientById(select.value);
-    badge.hidden = !client?.premium;
+    badge.hidden = !client || !isPremium(client);
   }
 
   function setOrderPaymentControl(row) {
@@ -355,7 +540,7 @@
       : `${money.format(row.cashBeforeVat)} לפני מע"מ · ${money.format(row.cashBeforeVat * (1 + vatRate))} כולל מע"מ`;
     $("#preview-single-message").textContent = "";
     $("#preview-single-summary").textContent = [
-      `לקוח: ${client.name}${client.premium ? " · פרימיום" : ""}`,
+      `לקוח: ${client.name}${isPremium(client) ? " · פרימיום" : ""}`,
       `גיליון ${row.sheetNumber} · ${products.find((product) => product.id === row.productId).name}`,
       `תאריך פרסום: ${displayDate(row.publicationDate)}`,
       `חיוב: ${charge}`,
@@ -528,6 +713,92 @@
     state.previewPayload = null;
   }
 
+  function selectedPackageTemplate() {
+    return packageCatalog.find((item) => item.code === $("#preview-package-select").value) || null;
+  }
+
+  function updatePackageForm(resetCount) {
+    const form = $("#preview-package-form");
+    const template = selectedPackageTemplate();
+    const custom = $("#preview-package-select").value === "custom";
+    $("#preview-custom-package-fields").hidden = !custom;
+    for (const name of ["custom_name", "custom_credits", "custom_term", "custom_price"]) form.elements[name].required = custom;
+    if (resetCount) form.elements.installment_count.value = template ? template.installmentCount : 1;
+    $("#preview-package-details").textContent = template
+      ? `${template.name}: ${number.format(template.credits)} קרדיטים · ${number.format(template.termMonths)} חודשים · ${money.format(template.priceBeforeVat)} לפני מע"מ (${number.format(template.installmentCount)} × ${money.format(template.installmentBeforeVat)}) · הטבות: ${template.benefits.map((item) => item.label).join(", ")}`
+      : custom ? "חבילה מותאמת אישית: הזינו קרדיטים, תקופה ומחיר לפני מע\"מ. אין הטבות אוטומטיות." : "בחרו חבילה.";
+    state.previewPayload = null;
+    $("#preview-package-summary").textContent = "בדיקת הרכישה תציג לוח תשלומים בלבד; היא לא תשמור נתונים.";
+  }
+
+  function openPackagePurchase(clientId) {
+    const client = clientById(clientId);
+    if (!client) return;
+    state.packageClientId = clientId;
+    const form = $("#preview-package-form");
+    form.reset();
+    $("#preview-package-select").innerHTML = `<option value="">בחירת חבילה</option>${packageCatalog.map((item) =>
+      `<option value="${escapeHtml(item.code)}">${escapeHtml(`${item.name} — ${number.format(item.credits)} קרדיטים`)}</option>`
+    ).join("")}<option value="custom">חבילה מותאמת אישית</option>`;
+    form.elements.starts_on.value = localDateValue();
+    $("#preview-package-client").textContent = `לקוח: ${client.name}`;
+    $("#preview-package-message").textContent = "";
+    updatePackageForm(true);
+    $("#preview-package-modal").showModal();
+  }
+
+  function checkPackagePurchase() {
+    const form = $("#preview-package-form");
+    const message = $("#preview-package-message");
+    if (!form.reportValidity()) return;
+    const template = selectedPackageTemplate();
+    const custom = $("#preview-package-select").value === "custom";
+    const pkg = template
+      ? { name: template.name, credits: template.credits, termMonths: template.termMonths, priceBeforeVat: template.priceBeforeVat, benefits: template.benefits }
+      : {
+          name: form.elements.custom_name.value.trim(),
+          credits: Number(form.elements.custom_credits.value),
+          termMonths: Number(form.elements.custom_term.value),
+          priceBeforeVat: Number(form.elements.custom_price.value),
+          benefits: []
+        };
+    const count = Number(form.elements.installment_count.value);
+    if (!pkg.name || !(pkg.credits > 0) || !Number.isInteger(pkg.termMonths) || pkg.termMonths < 1
+        || !(pkg.priceBeforeVat > 0) || roundMoney(pkg.priceBeforeVat) !== pkg.priceBeforeVat
+        || !Number.isInteger(count) || count < 1 || count > 60 || pkg.priceBeforeVat / count < 0.01) {
+      message.textContent = "פרטי החבילה אינם תקינים. בדקו קרדיטים, תקופה, מחיר ומספר תשלומים (1–60).";
+      return;
+    }
+    message.textContent = "";
+    const startsOn = form.elements.starts_on.value;
+    const endsOn = packageEndDate(startsOn, pkg.termMonths);
+    const installments = buildInstallments(pkg.priceBeforeVat, count, startsOn);
+    const grossTotal = installments.reduce((sum, item) => sum + grossAmount(item.amountBeforeVat), 0);
+    state.previewPayload = {
+      p_client_id: state.packageClientId,
+      p_package_code: template ? template.code : null,
+      p_custom_name: custom ? pkg.name : null,
+      p_credits: custom ? pkg.credits : null,
+      p_term_months: custom ? pkg.termMonths : null,
+      p_price_before_vat: pkg.priceBeforeVat,
+      p_starts_on: startsOn,
+      p_ends_on: endsOn,
+      p_installments: installments.map((item) => ({ due_on: item.dueOn, amount_before_vat: item.amountBeforeVat })),
+      p_benefits: pkg.benefits,
+      p_notes: form.elements.notes.value.trim(),
+      p_idempotency_key: crypto.randomUUID()
+    };
+    $("#preview-package-summary").textContent = [
+      `חבילה: ${pkg.name}${custom ? " (מותאמת אישית)" : ""}`,
+      `קרדיטים שיוקצו מיד: ${number.format(pkg.credits)}`,
+      `תוקף: ${displayDate(startsOn)} – ${displayDate(endsOn)}`,
+      `מחיר: ${money.format(pkg.priceBeforeVat)} לפני מע"מ · ${money.format(grossTotal)} כולל מע"מ`,
+      "לוח תשלומים:",
+      ...installments.map((item) => `  ${item.number}. ${displayDate(item.dueOn)} — ${money.format(grossAmount(item.amountBeforeVat))} כולל מע"מ`),
+      "הרכישה נבדקה בלבד. לא נשלחה בקשת RPC ולא נשמר דבר."
+    ].join("\n");
+  }
+
   function openPreview() {
     $("#auth-screen").hidden = true;
     $("#app-shell").hidden = true;
@@ -609,6 +880,12 @@
   $("#preview-add-batch-row").addEventListener("click", () => addBatchRow());
   $("#preview-apply-sequence").addEventListener("click", applySheetSequence);
   $("#preview-check-batch").addEventListener("click", checkBatchOrders);
+  $("#preview-package-select").addEventListener("change", () => updatePackageForm(true));
+  $("#preview-package-form").addEventListener("input", (event) => {
+    if (event.target.id !== "preview-package-select") updatePackageForm(false);
+  });
+  $("#preview-package-form").addEventListener("submit", (event) => event.preventDefault());
+  $("#preview-package-check").addEventListener("click", checkPackagePurchase);
 
   document.addEventListener("click", (event) => {
     const viewClient = event.target.closest("[data-preview-client-view]");
@@ -618,6 +895,7 @@
     if (previewAction) {
       if (previewAction.dataset.previewAction === "open-single") openSingleOrder();
       else if (previewAction.dataset.previewAction === "open-batch") openBatchOrder();
+      else if (previewAction.dataset.previewAction === "open-package") openPackagePurchase(state.cardClientId);
       else showNotice("שמירה או עריכת נתוני לקוחות חסומות עד התקנת הגירת העסק וחיבור RPC מאובטח.", true);
     }
     if (event.target.closest("[data-preview-close]")) event.target.closest("dialog").close();
