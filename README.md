@@ -2,6 +2,14 @@
 
 אתר בעברית לניהול לקוחות, הזמנות פרסום וסטטוסי תשלום. לאחר הגדרת Supabase, לקוחות והזמנות נשמרים במסד נתונים משותף ומוגנים ב־Auth וב־RLS. נתונים מקומיים קודמים אינם נמחקים או מיובאים אוטומטית.
 
+## התחלה מהירה במחשב חדש
+
+1. `git clone https://github.com/11030520550/hapirsumon-orders.git` (Repository פרטי; התחברות דרך Git Credential Manager).
+2. דרישות ותוכנות: [`INSTALL.md`](./INSTALL.md).
+3. מצב הפרויקט, החלטות פתוחות והמשך פיתוח: [`PROJECT-HANDOFF.md`](./PROJECT-HANDOFF.md).
+4. גרסאות קודמות, כלי בדיקה וצילומי מסך: [`ARCHIVE-INDEX.md`](./ARCHIVE-INDEX.md).
+5. הפעלה מקומית: `powershell -ExecutionPolicy Bypass -File testing\browser\serve.ps1` ← `http://127.0.0.1:8000`.
+
 ## הפעלה
 
 1. לפני מעבר מגרסת `file://`, פתחו אותה במחשב שבו נשמרו הנתונים והורידו **גיבוי מקומי** ממסך ההתחברות. שמרו את קובץ ה־JSON במקום בטוח.

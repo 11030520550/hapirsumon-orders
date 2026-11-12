@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#12243a">
+  <title>מודעת — ניהול הזמנות פרסום</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="supabase-config.js"></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <main class="auth-screen" id="auth-screen">
+    <aside class="announcement-banner auth-announcement" role="note" aria-label="הודעת גרסת פיתוח">
+      <div class="announcement-title"><strong>מערכת הפרסומון</strong><span aria-hidden="true">|</span><span>גרסת פיתוח</span><span class="beta-badge">BETA</span></div>
+      <p>המערכת נמצאת בשלבי פיתוח ובדיקה. ייתכנו שינויים ותקלות.</p>
+    </aside>
+    <section class="auth-card" aria-labelledby="login-title">
+      <a class="brand auth-brand" href="#" aria-label="מודעת">
+        <span class="brand-mark" aria-hidden="true">מ</span>
+        <span class="brand-copy"><strong>מודעת</strong><small>ניהול פרסום בעיתון</small></span>
+      </a>
+      <p class="eyebrow">גישה מאובטחת למערכת</p>
+      <h1 id="login-title">התחברות</h1>
+      <p class="page-subtitle">התחברי עם חשבון שאושר לשימוש במערכת.</p>
+      <form id="login-form" class="auth-form">
+        <label class="field-label">כתובת דואר אלקטרוני
+          <input name="email" type="email" autocomplete="username" required maxlength="254" placeholder="name@example.com">
+        </label>
+        <label class="field-label">סיסמה
+          <input name="password" type="password" autocomplete="current-password" required maxlength="128" placeholder="הזנת סיסמה">
+        </label>
+        <p class="form-message auth-message" id="login-message" role="alert"></p>
+        <button class="button button-primary auth-submit" id="login-submit" type="submit">התחברות</button>
+      </form>
+      <button class="button button-outline prelogin-backup" id="download-prelogin-backup" type="button">הורדת גיבוי מקומי</button>
+      <div class="auth-secondary-actions">
+        <button class="button button-outline" id="auth-retry" type="button" hidden>ניסיון חוזר</button>
+        <button class="button button-outline" id="auth-sign-out" type="button" hidden>התנתקות</button>
+      </div>
+      <p class="auth-footnote">אין הרשמה ציבורית. יש להשתמש בחשבון שהוזמן ואושר מראש.</p>
+    </section>
+  </main>
+  <div class="app-shell" id="app-shell" hidden>
+    <aside class="announcement-banner" role="note" aria-label="הודעת גרסת פיתוח">
+      <div class="announcement-title">
+        <strong>מערכת הפרסומון</strong>
+        <span aria-hidden="true">|</span>
+        <span>גרסת פיתוח</span>
+        <span class="beta-badge">BETA</span>
+      </div>
+      <p>המערכת נמצאת בשלבי פיתוח ובדיקה. ייתכנו שינויים ותקלות.</p>
+    </aside>
+    <aside class="sidebar" aria-label="ניווט ראשי">
+      <a class="brand" href="#" aria-label="מודעת — לדף הראשי">
+        <span class="brand-mark" aria-hidden="true">מ</span>
+        <span class="brand-copy"><strong>מודעת</strong><small>ניהול פרסום בעיתון</small></span>
+      </a>
+      <div class="sidebar-label">תפריט ראשי</div>
+      <nav class="main-nav">
+        <a class="nav-link active" href="#dashboard" data-view="dashboard" aria-current="page"><span class="nav-icon">▦</span>לוח בקרה</a>
+        <a class="nav-link" href="#orders" data-view="dashboard" data-scroll="orders"><span class="nav-icon">▤</span>הזמנות פרסום</a>
+        <button class="nav-link" type="button" data-view="clients"><span class="nav-icon">♙</span>רשימת לקוחות</button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="help-card">
+          <span class="help-icon">✳</span>
+          <strong>הכול במקום אחד</strong>
+          <p>נהלו הזמנות, לקוחות ותשלומים בפשטות.</p>
+        </div>
+        <span class="storage-note"><span class="storage-dot"></span>המידע נשמר במסד נתונים משותף</span>
+      </div>
+    </aside>
+
+    <main class="main-content" id="dashboard">
+      <header class="topbar">
+        <div class="breadcrumbs">ניהול <span>/</span> <strong>לוח בקרה</strong></div>
+        <div class="topbar-actions">
+          <span class="today-label" id="today-label"></span>
+          <button class="button button-outline import-button" id="open-import" type="button">גיבוי וייבוא מקומי</button>
+          <button class="avatar" type="button" aria-label="משתמשת מנהלת">מ</button>
+          <button class="button button-outline sign-out-button" id="sign-out" type="button">התנתקות</button>
+        </div>
+      </header>
+
+      <div class="page-content">
+        <section class="page-view" id="dashboard-view">
+        <section class="welcome-row">
+          <div>
+            <p class="eyebrow">יום נעים, מנהלת</p>
+            <h1>לוח הבקרה</h1>
+            <p class="page-subtitle">כל מה שקורה בהזמנות הפרסום שלך, במבט אחד.</p>
+          </div>
+          <button class="button button-primary" type="button" data-open-modal="order-modal"><span class="button-plus">＋</span> הזמנה חדשה</button>
+        </section>
+
+        <section class="stats-grid" aria-label="סיכום הזמנות ותשלומים">
+          <article class="stat-card">
+            <div class="stat-top"><span class="stat-icon icon-blue">▤</span><span class="stat-caption">כל ההזמנות</span></div>
+            <div class="stat-value" id="stat-orders">0</div>
+            <div class="stat-foot">הזמנות פרסום במערכת</div>
+          </article>
+          <article class="stat-card">
+            <div class="stat-top"><span class="stat-icon icon-green">₪</span><span class="stat-caption">התקבלו תשלומים</span></div>
+            <div class="stat-value" id="stat-paid">₪0</div>
+            <div class="stat-foot">סכום ששולם בפועל</div>
+          </article>
+          <article class="stat-card">
+            <div class="stat-top"><span class="stat-icon icon-orange">◷</span><span class="stat-caption">ממתינות לתשלום</span></div>
+            <div class="stat-value" id="stat-pending">0</div>
+            <div class="stat-foot">הזמנות שטרם שולמו</div>
+          </article>
+          <article class="stat-card">
+            <div class="stat-top"><span class="stat-icon icon-purple">₪</span><span class="stat-caption">יתרה לגבייה</span></div>
+            <div class="stat-value" id="stat-balance">₪0</div>
+            <div class="stat-foot">סכום שעדיין ממתין לתשלום</div>
+          </article>
+        </section>
+
+        <section class="orders-section" id="orders">
+          <div class="section-heading">
+            <div>
+              <h2>הזמנות אחרונות</h2>
+              <p>מעקב וניהול של כל הזמנות הפרסום שלך</p>
+            </div>
+            <button class="button button-outline" type="button" data-open-modal="client-modal"><span class="button-plus">＋</span> הוסף לקוח</button>
+          </div>
+
+          <div class="table-toolbar">
+            <label class="search-box">
+              <span aria-hidden="true">⌕</span>
+              <input id="search-input" type="search" placeholder="חיפוש לפי לקוח, מדור או מספר הזמנה..." aria-label="חיפוש הזמנות">
+            </label>
+            <label class="filter-label">סטטוס תשלום
+              <select id="payment-filter" aria-label="סינון לפי סטטוס תשלום">
+                <option value="all">כל הסטטוסים</option>
+                <option value="paid">שולם</option>
+                <option value="pending">ממתין לתשלום</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">מספר הזמנה</th>
+                  <th scope="col">לקוח</th>
+                  <th scope="col">תאריך פרסום</th>
+                  <th scope="col">מדור</th>
+                  <th scope="col">סכום</th>
+                  <th scope="col">סטטוס תשלום</th>
+                  <th scope="col"><span class="sr-only">פעולות</span></th>
+                </tr>
+              </thead>
+              <tbody id="orders-body"></tbody>
+            </table>
+            <div class="empty-state" id="empty-state" hidden>
+              <span class="empty-icon">⌕</span>
+              <strong>לא נמצאו הזמנות</strong>
+              <p>נסו לשנות את מילות החיפוש או ליצור הזמנה חדשה.</p>
+            </div>
+          </div>
+          <div class="table-footer"><span id="orders-count">0 הזמנות</span><span>המידע נשמר במסד נתונים משותף</span></div>
+        </section>
+        </section>
+
+        <section class="page-view" id="clients-view" hidden>
+          <div class="welcome-row">
+            <div>
+              <p class="eyebrow">ניהול לקוחות</p>
+              <h1>רשימת לקוחות</h1>
+              <p class="page-subtitle">כל הלקוחות השמורים במערכת, במקום אחד.</p>
+            </div>
+            <button class="button button-primary" type="button" data-open-modal="client-modal"><span class="button-plus">＋</span> הוסף לקוח</button>
+          </div>
+
+          <section class="orders-section clients-section">
+            <div class="section-heading">
+              <div>
+                <h2>כל הלקוחות</h2>
+                <p>חיפוש, צפייה ועדכון פרטי לקוחות</p>
+              </div>
+            </div>
+            <div class="table-toolbar">
+              <label class="search-box">
+                <span aria-hidden="true">⌕</span>
+                <input id="client-search-input" type="search" placeholder="חיפוש לפי שם או טלפון..." aria-label="חיפוש לקוחות לפי שם או טלפון">
+              </label>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">שם הלקוח</th>
+                    <th scope="col">טלפון</th>
+                    <th scope="col">דואר אלקטרוני</th>
+                    <th scope="col"><span class="sr-only">פעולות</span></th>
+                  </tr>
+                </thead>
+                <tbody id="clients-body"></tbody>
+              </table>
+              <div class="empty-state" id="clients-empty-state" hidden>
+                <span class="empty-icon">⌕</span>
+                <strong>לא נמצאו לקוחות</strong>
+                <p>נסו לחפש לפי שם או טלפון אחר.</p>
+              </div>
+            </div>
+            <div class="table-footer"><span id="clients-count">0 לקוחות</span><span>המידע נשמר במסד נתונים משותף</span></div>
+          </section>
+        </section>
+        <footer class="page-footer">מודעת <span>·</span> מערכת מקומית לניהול פרסום בעיתון</footer>
+      </div>
+    </main>
+  </div>
+
+  <dialog class="modal" id="client-modal" aria-labelledby="client-modal-title">
+    <form class="modal-card" id="client-form">
+      <div class="modal-heading">
+        <div><span class="modal-kicker">ניהול לקוחות</span><h2 id="client-modal-title">הוספת לקוח חדש</h2></div>
+        <button class="close-button" type="button" data-close-modal aria-label="סגירה">×</button>
+      </div>
+      <label class="field-label">שם הלקוח <span>*</span><input name="name" required maxlength="80" placeholder="לדוגמה: ישראל ישראלי"></label>
+      <div class="form-grid">
+        <label class="field-label">טלפון<input name="phone" type="tel" maxlength="30" placeholder="050-0000000"></label>
+        <label class="field-label">דואר אלקטרוני<input name="email" type="email" maxlength="100" placeholder="name@example.com"></label>
+      </div>
+      <p class="form-message" id="client-message" role="alert"></p>
+      <div class="modal-actions"><button class="button button-outline" type="button" data-close-modal>ביטול</button><button class="button button-primary" id="client-submit-button" type="submit">שמירת לקוח</button></div>
+    </form>
+  </dialog>
+
+  <dialog class="modal" id="client-details-modal" aria-labelledby="client-details-title">
+    <div class="modal-card">
+      <div class="modal-heading">
+        <div><span class="modal-kicker">פרטי לקוח</span><h2 id="client-details-title"></h2></div>
+        <button class="close-button" type="button" data-close-modal aria-label="סגירה">×</button>
+      </div>
+      <dl class="client-details">
+        <div><dt>טלפון</dt><dd id="client-details-phone"></dd></div>
+        <div><dt>דואר אלקטרוני</dt><dd id="client-details-email"></dd></div>
+      </dl>
+      <div class="modal-actions">
+        <button class="button button-outline" type="button" data-close-modal>סגירה</button>
+        <button class="button button-primary" id="client-details-edit" type="button">עריכת פרטים</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="modal" id="order-modal" aria-labelledby="order-modal-title">
+    <form class="modal-card" id="order-form">
+      <div class="modal-heading">
+        <div><span class="modal-kicker">הזמנה חדשה</span><h2 id="order-modal-title">יצירת הזמנת פרסום</h2></div>
+        <button class="close-button" type="button" data-close-modal aria-label="סגירה">×</button>
+      </div>
+      <label class="field-label">לקוח <span>*</span>
+        <select name="clientId" id="order-client" required><option value="">בחירת לקוח</option></select>
+      </label>
+      <div class="form-grid">
+        <label class="field-label">תאריך פרסום <span>*</span><input name="date" type="date" required></label>
+        <label class="field-label">מדור בעיתון <span>*</span><input name="section" required maxlength="60" placeholder="לדוגמה: נדל״ן"></label>
+      </div>
+      <div class="form-grid">
+        <label class="field-label">סכום לתשלום (₪) <span>*</span><input name="amount" type="number" min="0.01" max="99999999" step="0.01" required placeholder="0.00"></label>
+        <label class="field-label">סטטוס תשלום
+          <select name="paymentStatus"><option value="pending">ממתין לתשלום</option><option value="paid">שולם</option></select>
+        </label>
+      </div>
+      <label class="field-label">הערות <span class="optional">(לא חובה)</span><textarea name="notes" rows="2" maxlength="300" placeholder="פרטים נוספים על ההזמנה"></textarea></label>
+      <p class="form-message" id="order-message" role="alert"></p>
+      <div class="modal-actions"><button class="button button-outline" type="button" data-close-modal>ביטול</button><button class="button button-primary" type="submit">שמירת הזמנה</button></div>
+    </form>
+  </dialog>
+
+  <dialog class="modal" id="local-import-modal" aria-labelledby="local-import-title">
+    <div class="modal-card import-card">
+      <div class="modal-heading">
+        <div><span class="modal-kicker">העברת מידע בטוחה</span><h2 id="local-import-title">גיבוי וייבוא נתונים מקומיים</h2></div>
+        <button class="close-button" type="button" data-close-modal aria-label="סגירה">×</button>
+      </div>
+      <p class="import-intro">הנתונים המקומיים נשארים בדפדפן ואינם משתנים. תחילה הורידי גיבוי, ואז בחרי קובץ JSON לייבוא. רשומות קיימות לא יידרסו.</p>
+      <button class="button button-outline backup-button" id="download-local-backup" type="button">הורדת גיבוי מקומי</button>
+      <label class="external-backup-confirm">
+        <input id="confirm-external-backup" type="checkbox">
+        <span>שמרתי עותק גיבוי נפרד של הנתונים מהמחשב או מהדפדפן המקורי.</span>
+      </label>
+      <label class="field-label">בחירת קובץ גיבוי לייבוא
+        <input id="local-import-file" type="file" accept=".json,application/json" disabled>
+      </label>
+      <div class="import-preview" id="local-import-preview" aria-live="polite">יש להוריד גיבוי לפני בחירת קובץ.</div>
+      <p class="form-message auth-message" id="local-import-message" role="alert"></p>
+      <div class="modal-actions">
+        <button class="button button-outline" type="button" data-close-modal>סגירה</button>
+        <button class="button button-primary" id="run-local-import" type="button" disabled>ייבוא רשומות חדשות בלבד</button>
+      </div>
+    </div>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

@@ -1,0 +1,11 @@
+-- FIX garbled Hebrew — REQUIRES EXPLICIT APPROVAL. Changes data.
+-- Run supabase-hebrew-encoding-preview.sql first and review its result.
+-- What this file does, in one transaction:
+--   1. Copies every row it will change into backup_hebrew_fix.changes (old value, new value, method).
+--   2. Updates ONLY values whose damage is reversible with high confidence (utf8-read-as-cp1252).
+--      "review" and "manual" rows are NOT changed: verify them against the original source and fix by hand.
+--   3. Shows a before/after table of the changes.
+--   4. Blocks new client names/contacts containing "�" (U+FFFD) with a NOT VALID check constraint
+--      (existing rows are not re-checked, so nothing fails on rows that still need manual repair).
+-- Undo: the backup table holds every previous value (see the restore query at the end).
+

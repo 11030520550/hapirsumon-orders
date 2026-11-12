@@ -1,0 +1,18 @@
+<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0}iframe{border:0;width:100vw;height:100vh}</style></head><body>
+<iframe id="f"></iframe><script>const fw = new URLSearchParams(location.search).get("w"); if (fw) { const fr = document.getElementById("f"); fr.style.width = fw + "px"; fr.style.height = "1400px"; }</script>
+<script>
+const f = document.getElementById("f"); const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const target = new URLSearchParams(location.search).get("go") || "client";
+f.onload = async () => { await sleep(900); const w = f.contentWindow, d = f.contentDocument;
+  const set = (el, v) => { el.value = v; el.dispatchEvent(new Event("input", { bubbles: true })); el.dispatchEvent(new Event("change", { bubbles: true })); };
+  w.location.hash = "#/client/c-test-0"; await sleep(400);
+  d.querySelector('[data-client-page-action="package"]').click(); await sleep(100);
+  set(d.querySelector("#biz-package-select"), "22222222-2222-4222-8222-222222222222"); d.querySelector("#biz-package-submit").click(); await sleep(700);
+  if (target === "order") { w.location.hash = "#/new-order/c-test-0"; await sleep(400);
+    const r = d.querySelector("#new-order-rows tr"); set(r.querySelector('[name="product_id"]'), "44444444-4444-4444-8444-444444444444"); set(r.querySelector('[name="credits_used"]'), "2.5"); set(r.querySelector('[name="notes"]'), "עמוד 3");
+    r.querySelector("[data-row-copy]").click(); await sleep(50); const r2 = d.querySelectorAll("#new-order-rows tr")[1]; set(r2.querySelector('[name="credits_used"]'), ""); set(r2.querySelector('[name="cash_amount_before_vat"]'), "500");
+    set(d.querySelector("#new-order-sequence"), "125"); d.querySelector("#new-order-apply-sequence").click(); }
+  else { d.querySelector('[data-tab="payments"]').click(); }
+  await sleep(300); w.scrollTo(0, 0); };
+f.src = "/__test/app.html?session=1&business=1";
+</script></body></html>

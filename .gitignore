@@ -52,3 +52,13 @@ orders-netlify-ready/
 
 # Internal reference material
 reference/
+
+# Historical code versions and dev tooling (see ARCHIVE-INDEX.md).
+# Code/docs/images only: data exports (*.json, *.csv ...), secrets and reference/ stay excluded.
+!archive/**/
+!archive/**/*.html
+!archive/**/*.js
+!archive/**/*.css
+!archive/**/*.md
+!archive/**/*.sql
+!archive/**/*.png

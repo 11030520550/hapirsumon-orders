@@ -1,0 +1,880 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#12243a">
+  <title>מודעת — ניהול הזמנות פרסום</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css?v=20261111-4">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="supabase-config.js"></script>
+  <script src="app.js?v=20261111-4" defer></script>
+  <script src="business-app.js?v=20261111-4" defer></script>
+</head>
+<body>
+  <main class="auth-screen" id="auth-screen">
+    <aside class="announcement-banner auth-announcement" role="note" aria-label="הודעת גרסת פיתוח">
+      <div class="announcement-title"><strong>מערכת הפרסומון</strong><span aria-hidden="true">|</span><span>גרסת פיתוח</span><span class="beta-badge">BETA</span></div>
+      <p>המערכת נמצאת בשלבי פיתוח ובדיקה. ייתכנו שינויים ותקלות.</p>
+    </aside>
+    <section class="auth-card" aria-labelledby="login-title">
+      <a class="brand auth-brand" href="#" aria-label="מודעת">
+        <span class="brand-mark" aria-hidden="true">מ</span>
+        <span class="brand-copy"><strong>מודעת</strong><small>ניהול פרסום בעיתון</small></span>
+      </a>
+      <p class="eyebrow">גישה מאובטחת למערכת</p>
+      <h1 id="login-title">התחברות</h1>
+      <p class="page-subtitle">התחברי עם חשבון שאושר לשימוש במערכת.</p>
+      <form id="login-form" class="auth-form">
+        <label class="field-label">כתובת דואר אלקטרוני
+          <input name="email" type="email" autocomplete="username" required maxlength="254" placeholder="name@example.com">
+        </label>
+        <label class="field-label">סיסמה
+          <input name="password" type="password" autocomplete="current-password" required maxlength="128" placeholder="הזנת סיסמה">
+        </label>
+        <p class="form-message auth-message" id="login-message" role="alert"></p>
+        <button class="button button-primary auth-submit" id="login-submit" type="submit">התחברות</button>
+      </form>
+      <button class="button button-outline prelogin-backup" id="download-prelogin-backup" type="button">הורדת גיבוי מקומי</button>
+      <button class="button button-primary prelogin-preview" id="open-business-preview" type="button">תצוגה מקדימה של הממשק החדש</button>
+      <div class="auth-secondary-actions">
+        <button class="button button-outline" id="auth-retry" type="button" hidden>ניסיון חוזר</button>
+        <button class="button button-outline" id="auth-sign-out" type="button" hidden>התנתקות</button>
+      </div>
+      <p class="auth-footnote">אין הרשמה ציבורית. יש להשתמש בחשבון שהוזמן ואושר מראש.</p>
+    </section>
+  </main>
+  <div class="app-shell" id="app-shell" hidden>
+    <aside class="announcement-banner" role="note" aria-label="הודעת גרסת פיתוח">
+      <div class="announcement-title">
+        <strong>מערכת הפרסומון</strong>
+        <span aria-hidden="true">|</span>
+        <span>גרסת פיתוח</span>
+        <span class="beta-badge">BETA</span>
+      </div>
+      <p>המערכת נמצאת בשלבי פיתוח ובדיקה. ייתכנו שינויים ותקלות.</p>
+    </aside>
+    <aside class="sidebar" aria-label="ניווט ראשי">
+      <a class="brand" href="#/dashboard" aria-label="מודעת — לוח בקרה">
+        <span class="brand-mark" aria-hidden="true">מ</span>
+        <span class="brand-copy"><strong>מודעת</strong><small>ניהול פרסום בעיתון</small></span>
+      </a>
+      <div class="sidebar-label">תפריט ראשי</div>
+      <nav class="main-nav">
+        <button class="nav-link" type="button" data-view="dashboard"><span class="nav-icon">▦</span>לוח בקרה</button>
+        <button class="nav-link" type="button" data-view="new-order"><span class="nav-icon">＋</span>הזמנה חדשה</button>
+        <button class="nav-link" type="button" data-view="orders"><span class="nav-icon">▤</span>כל ההזמנות</button>
+        <button class="nav-link" type="button" data-view="clients"><span class="nav-icon">♙</span>לקוחות</button>
+        <button class="nav-link" type="button" data-view="packages"><span class="nav-icon">◈</span>חבילות וקרדיטים</button>
+        <button class="nav-link" type="button" data-view="payments"><span class="nav-icon">₪</span>תשלומים וחובות</button>
+        <button class="nav-link" type="button" data-view="reports"><span class="nav-icon">▥</span>דוחות</button>
+        <button class="nav-link" type="button" data-view="settings"><span class="nav-icon">⚙</span>הגדרות ומוצרים</button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="help-card">
+          <span class="help-icon">✳</span>
+          <strong>הכול במקום אחד</strong>
+          <p>נהלו הזמנות, לקוחות ותשלומים בפשטות.</p>
+        </div>
+        <span class="storage-note" role="status" aria-live="polite"><span class="storage-dot"></span><span id="sync-status">מתחברת למסד הנתונים המשותף</span></span>
+      </div>
+    </aside>
+
+    <main class="main-content" id="dashboard">
+      <header class="topbar">
+        <div class="breadcrumbs">ניהול <span>/</span> <strong id="page-title">לוח בקרה</strong></div>
+        <div class="topbar-actions">
+          <span class="today-label" id="today-label"></span>
+          <button class="button button-outline import-button" id="open-import" type="button">גיבוי וייבוא</button>
+          <button class="avatar" type="button" aria-label="משתמשת מנהלת">מ</button>
+          <button class="button button-outline sign-out-button" id="sign-out" type="button">התנתקות</button>
+        </div>
+      </header>
+
+      <div class="page-content">
+        <!-- Dashboard -->
+        <section class="page-view" data-page="dashboard" id="dashboard-view">
+          <div class="welcome-row">
+            <div>
+              <p class="eyebrow">יום נעים, מנהלת</p>
+              <h1>לוח הבקרה</h1>
+              <p class="page-subtitle">תמונת מצב של ההזמנות והתשלומים.</p>
+            </div>
+            <div class="page-actions">
+              <button class="button button-outline" type="button" data-open-modal="client-modal"><span class="button-plus">＋</span> לקוח חדש</button>
+              <button class="button button-primary" type="button" data-go="new-order"><span class="button-plus">＋</span> הזמנה חדשה</button>
+            </div>
+          </div>
+          <section class="stats-grid" aria-label="סיכום הזמנות ותשלומים">
+            <article class="stat-card">
+              <div class="stat-top"><span class="stat-icon icon-blue">▤</span><span class="stat-caption">כל ההזמנות</span></div>
+              <div class="stat-value" id="stat-orders">0</div>
+              <div class="stat-foot">הזמנות פרסום במערכת</div>
+            </article>
+            <article class="stat-card">
+              <div class="stat-top"><span class="stat-icon icon-green">₪</span><span class="stat-caption">התקבלו תשלומים</span></div>
+              <div class="stat-value" id="stat-paid">₪0</div>
+              <div class="stat-foot">סכום ששולם בפועל</div>
+            </article>
+            <article class="stat-card">
+              <div class="stat-top"><span class="stat-icon icon-orange">◷</span><span class="stat-caption">ממתינות לתשלום</span></div>
+              <div class="stat-value" id="stat-pending">0</div>
+              <div class="stat-foot">הזמנות שטרם שולמו</div>
+            </article>
+            <article class="stat-card">
+              <div class="stat-top"><span class="stat-icon icon-purple">₪</span><span class="stat-caption">יתרה לגבייה</span></div>
+              <div class="stat-value" id="stat-balance">₪0</div>
+              <div class="stat-foot">סכום שעדיין ממתין לתשלום</div>
+            </article>
+          </section>
+          <section class="orders-section">
+            <div class="section-heading">
+              <div><h2>הזמנות אחרונות</h2><p>שמונה ההזמנות האחרונות לפי תאריך פרסום</p></div>
+              <button class="button button-outline" type="button" data-go="orders">לכל ההזמנות</button>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th scope="col">מספר</th><th scope="col">לקוח</th><th scope="col">תאריך פרסום</th><th scope="col">מדור / מוצר</th><th scope="col">חיוב</th><th scope="col">סטטוס</th></tr></thead>
+                <tbody id="recent-orders-body"></tbody>
+              </table>
+            </div>
+          </section>
+          <footer class="page-footer">מודעת <span>·</span> ניהול פרסום בעיתון</footer>
+        </section>
+
+        <!-- New order -->
+        <section class="page-view" data-page="new-order" hidden>
+          <div class="welcome-row">
+            <div>
+              <p class="eyebrow">הזמנות</p>
+              <h1>הזמנה חדשה</h1>
+              <p class="page-subtitle">שורה לכל פרסום. אפשר להוסיף כמה שורות ללקוח אחד ולשמור הכול יחד.</p>
+            </div>
+          </div>
+          <div class="biz-required" hidden>
+            <p>יצירת הזמנות עם מוצרים, קרדיטים ולוח תשלומים זמינה לאחר התקנת הסכימה העסקית ב-Supabase.</p>
+            <button class="button button-primary" type="button" data-open-modal="order-modal">טופס הזמנה (גרסה קודמת)</button>
+          </div>
+          <form class="orders-section page-form biz-only" id="new-order-form" novalidate>
+            <div class="form-panel">
+              <div class="form-grid">
+                <label class="field-label">חיפוש לקוח<input id="new-order-client-search" type="search" placeholder="הקלידו שם או טלפון" autocomplete="off"></label>
+                <label class="field-label">לקוח <span>*</span><select id="new-order-client" required></select></label>
+              </div>
+              <p class="field-hint" id="new-order-credit-note"></p>
+            </div>
+            <div class="table-toolbar">
+              <div class="toolbar-group">
+                <button class="button button-outline" type="button" id="new-order-add-row"><span class="button-plus">＋</span> הוספת שורה</button>
+                <span class="field-hint" id="new-order-row-count"></span>
+              </div>
+              <div class="toolbar-group">
+                <label class="filter-label">גיליון ראשון ברצף<input id="new-order-sequence" type="number" min="1" step="1" class="compact-input" placeholder="מספר"></label>
+                <button class="button button-outline" type="button" id="new-order-apply-sequence">מילוי רצף</button>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table class="entry-table">
+                <thead><tr><th scope="col">#</th><th scope="col">גיליון *</th><th scope="col">מוצר *</th><th scope="col">תאריך פרסום *</th><th scope="col">מחיר לפני מע"מ</th><th scope="col">או קרדיטים</th><th scope="col">סטטוס</th><th scope="col">מועד פירעון</th><th scope="col">הערות</th><th scope="col"><span class="sr-only">פעולות</span></th></tr></thead>
+                <tbody id="new-order-rows"></tbody>
+              </table>
+            </div>
+            <div class="form-panel">
+              <p class="field-hint">בכל שורה ממלאים מחיר <strong>או</strong> קרדיטים. הזמנה בקרדיטים נחשבת משולמת ומנכה מהיתרה.</p>
+              <div class="summary-box" id="new-order-summary" aria-live="polite"></div>
+              <p class="form-message" id="new-order-message" role="alert"></p>
+              <div class="import-preview success" id="new-order-result" hidden></div>
+              <div class="modal-actions">
+                <button class="button button-primary" type="submit" id="new-order-submit">שמירת ההזמנות</button>
+                <button class="button button-outline" type="button" id="new-order-reset">ניקוי הטופס</button>
+              </div>
+            </div>
+          </form>
+        </section>
+
+        <!-- All orders -->
+        <section class="page-view" data-page="orders" hidden>
+          <div class="welcome-row">
+            <div><p class="eyebrow">הזמנות</p><h1>כל ההזמנות</h1><p class="page-subtitle">חיפוש, סינון ועדכון סטטוס תשלום.</p></div>
+            <button class="button button-primary" type="button" data-go="new-order"><span class="button-plus">＋</span> הזמנה חדשה</button>
+          </div>
+          <section class="orders-section" id="orders">
+            <div class="table-toolbar">
+              <label class="search-box">
+                <span aria-hidden="true">⌕</span>
+                <input id="search-input" type="search" placeholder="חיפוש לפי לקוח, מדור או מספר הזמנה..." aria-label="חיפוש הזמנות">
+              </label>
+              <label class="filter-label">סטטוס תשלום
+                <select id="payment-filter" aria-label="סינון לפי סטטוס תשלום">
+                  <option value="all">כל הסטטוסים</option>
+                  <option value="paid">שולם</option>
+                  <option value="pending">ממתין לתשלום</option>
+                </select>
+              </label>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">מספר הזמנה</th>
+                    <th scope="col">לקוח</th>
+                    <th scope="col">תאריך פרסום</th>
+                    <th scope="col">מדור / מוצר</th>
+                    <th scope="col">סכום</th>
+                    <th scope="col">סטטוס תשלום</th>
+                    <th scope="col"><span class="sr-only">פעולות</span></th>
+                  </tr>
+                </thead>
+                <tbody id="orders-body"></tbody>
+              </table>
+              <div class="empty-state" id="empty-state" hidden>
+                <span class="empty-icon">⌕</span>
+                <strong>לא נמצאו הזמנות</strong>
+                <p>נסו לשנות את מילות החיפוש או ליצור הזמנה חדשה.</p>
+              </div>
+            </div>
+            <div class="table-footer"><span id="orders-count">0 הזמנות</span><span>המידע נשמר במסד נתונים משותף</span></div>
+          </section>
+        </section>
+
+        <!-- Clients -->
+        <section class="page-view" data-page="clients" id="clients-view" hidden>
+          <div class="welcome-row">
+            <div><p class="eyebrow">לקוחות</p><h1>רשימת לקוחות</h1><p class="page-subtitle">חיפוש לקוח ופתיחת תיק הלקוח.</p></div>
+            <button class="button button-primary" type="button" data-open-modal="client-modal"><span class="button-plus">＋</span> לקוח חדש</button>
+          </div>
+          <section class="orders-section clients-section">
+            <div class="table-toolbar">
+              <label class="search-box">
+                <span aria-hidden="true">⌕</span>
+                <input id="client-search-input" type="search" placeholder="חיפוש לפי שם או טלפון..." aria-label="חיפוש לקוחות לפי שם או טלפון">
+              </label>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th scope="col">שם הלקוח</th><th scope="col">טלפון</th><th scope="col">דואר אלקטרוני</th><th scope="col"><span class="sr-only">פעולות</span></th></tr></thead>
+                <tbody id="clients-body"></tbody>
+              </table>
+              <div class="empty-state" id="clients-empty-state" hidden>
+                <span class="empty-icon">⌕</span>
+                <strong>לא נמצאו לקוחות</strong>
+                <p>נסו לחפש לפי שם או טלפון אחר.</p>
+              </div>
+            </div>
+            <div class="table-footer"><span id="clients-count">0 לקוחות</span><span>המידע נשמר במסד נתונים משותף</span></div>
+          </section>
+        </section>
+
+        <!-- Client file -->
+        <section class="page-view" data-page="client" hidden>
+          <button class="back-link" type="button" data-go="clients">→ חזרה לרשימת הלקוחות</button>
+          <div class="welcome-row client-header">
+            <div>
+              <p class="eyebrow">תיק לקוח</p>
+              <h1><span id="client-page-name"></span> <span class="premium-badge" id="client-page-premium" hidden>פרימיום</span></h1>
+              <p class="page-subtitle" id="client-page-contact"></p>
+            </div>
+            <div class="page-actions">
+              <button class="button button-outline" type="button" data-client-page-action="edit">עריכת פרטים</button>
+              <button class="button button-outline biz-only" type="button" data-client-page-action="credits">התאמת קרדיטים</button>
+              <button class="button button-outline biz-only" type="button" data-client-page-action="package">רכישת חבילה</button>
+              <button class="button button-primary biz-only" type="button" data-client-page-action="order"><span class="button-plus">＋</span> הזמנה חדשה</button>
+            </div>
+          </div>
+          <p class="import-preview" id="client-page-status" role="status" hidden></p>
+          <section class="stats-grid stats-grid-3 biz-only" aria-label="סיכום תיק לקוח">
+            <article class="stat-card">
+              <div class="stat-top"><span class="stat-icon icon-blue">◈</span><span class="stat-caption">חבילה פעילה</span></div>
+              <div class="stat-value stat-value-text" id="client-kpi-package">—</div>
+              <div class="stat-foot" id="client-kpi-package-foot"></div>
+            </article>
+            <article class="stat-card">
+              <div class="stat-top"><span class="stat-icon icon-purple">✦</span><span class="stat-caption">יתרת קרדיטים</span></div>
+              <div class="stat-value" id="client-kpi-credits" dir="ltr">0</div>
+              <div class="stat-foot" id="client-kpi-credits-foot"></div>
+            </article>
+            <article class="stat-card">
+              <div class="stat-top"><span class="stat-icon icon-orange">◷</span><span class="stat-caption">חוב בפיגור</span></div>
+              <div class="stat-value" id="client-kpi-overdue">₪0</div>
+              <div class="stat-foot" id="client-kpi-overdue-foot"></div>
+            </article>
+          </section>
+          <div class="biz-required" hidden><p>חבילות, קרדיטים ותשלומים יוצגו כאן לאחר התקנת הסכימה העסקית.</p></div>
+          <div class="tabs" role="tablist" aria-label="תיק לקוח">
+            <button class="tab-button active" type="button" role="tab" data-tab="orders" aria-selected="true">הזמנות</button>
+            <button class="tab-button biz-only" type="button" role="tab" data-tab="packages" aria-selected="false">חבילות וקרדיטים</button>
+            <button class="tab-button biz-only" type="button" role="tab" data-tab="payments" aria-selected="false">תשלומים</button>
+            <button class="tab-button" type="button" role="tab" data-tab="details" aria-selected="false">פרטים והערות</button>
+          </div>
+          <section class="orders-section tab-panel" data-tab-panel="orders">
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th scope="col">מספר</th><th scope="col">גיליון</th><th scope="col">מדור / מוצר</th><th scope="col">תאריך פרסום</th><th scope="col">חיוב</th><th scope="col">סטטוס</th></tr></thead>
+                <tbody id="client-orders-body"></tbody>
+              </table>
+              <div class="empty-state" id="client-orders-empty" hidden><strong>אין הזמנות ללקוח זה</strong></div>
+            </div>
+          </section>
+          <section class="tab-panel" data-tab-panel="packages" hidden>
+            <div id="client-packages"></div>
+            <section class="orders-section">
+              <div class="section-heading"><div><h2>תנועות קרדיטים</h2><p>כל ההקצאות, הניצולים והתיקונים</p></div></div>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th scope="col">תאריך</th><th scope="col">תנועה</th><th scope="col">סוג</th><th scope="col">סיבה</th></tr></thead>
+                  <tbody id="client-ledger-body"></tbody>
+                </table>
+                <div class="empty-state" id="client-ledger-empty" hidden><strong>אין תנועות קרדיטים</strong></div>
+              </div>
+            </section>
+          </section>
+          <section class="orders-section tab-panel" data-tab-panel="payments" hidden>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th scope="col">חיוב</th><th scope="col">מועד פירעון</th><th scope="col">סכום כולל מע"מ</th><th scope="col">סטטוס</th><th scope="col"><span class="sr-only">פעולות</span></th></tr></thead>
+                <tbody id="client-payments-body"></tbody>
+              </table>
+              <div class="empty-state" id="client-payments-empty" hidden><strong>אין חיובים ללקוח זה</strong></div>
+            </div>
+          </section>
+          <section class="orders-section tab-panel" data-tab-panel="details" hidden>
+            <dl class="client-details details-grid">
+              <div><dt>טלפון</dt><dd id="client-detail-phone"></dd></div>
+              <div><dt>דואר אלקטרוני</dt><dd id="client-detail-email"></dd></div>
+              <div><dt>תאריך הצטרפות</dt><dd id="client-detail-joined"></dd></div>
+              <div class="wide"><dt>הערות פנימיות</dt><dd id="client-detail-notes"></dd></div>
+            </dl>
+          </section>
+        </section>
+
+        <!-- Packages and credits -->
+        <section class="page-view" data-page="packages" hidden>
+          <div class="welcome-row">
+            <div><p class="eyebrow">חבילות וקרדיטים</p><h1>חבילות וקרדיטים</h1><p class="page-subtitle">יתרות קרדיטים לכל לקוח, רכישת חבילה והתאמת קרדיטים.</p></div>
+          </div>
+          <div class="biz-required" hidden><p>המסך זמין לאחר התקנת הסכימה העסקית ב-Supabase.</p></div>
+          <section class="orders-section biz-only">
+            <div class="table-toolbar">
+              <label class="search-box"><span aria-hidden="true">⌕</span><input id="packages-search" type="search" placeholder="חיפוש לקוח..." aria-label="חיפוש לקוח"></label>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th scope="col">לקוח</th><th scope="col">חבילה פעילה</th><th scope="col">בתוקף עד</th><th scope="col">יתרת קרדיטים</th><th scope="col"><span class="sr-only">פעולות</span></th></tr></thead>
+                <tbody id="packages-clients-body"></tbody>
+              </table>
+            </div>
+          </section>
+          <section class="orders-section biz-only">
+            <div class="section-heading"><div><h2>קטלוג החבילות</h2><p>מחירים לפני מע"מ</p></div></div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th scope="col">חבילה</th><th scope="col">קרדיטים</th><th scope="col">תקופה</th><th scope="col">מחיר כולל</th><th scope="col">תשלומים</th></tr></thead>
+                <tbody id="package-catalog-body"></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <!-- Payments and debts -->
+        <section class="page-view" data-page="payments" hidden>
+          <div class="welcome-row">
+            <div><p class="eyebrow">כספים</p><h1>תשלומים וחובות</h1><p class="page-subtitle">כל החיובים: הזמנות ותשלומי חבילות. סימון תשלום נשמר מיד במסד הנתונים.</p></div>
+          </div>
+          <div class="biz-required" hidden><p>המסך זמין לאחר התקנת הסכימה העסקית ב-Supabase.</p></div>
+          <section class="stats-grid biz-only" aria-label="סיכום חובות">
+            <article class="stat-card"><div class="stat-top"><span class="stat-icon icon-orange">◷</span><span class="stat-caption">באיחור</span></div><div class="stat-value" id="payments-overdue">₪0</div><div class="stat-foot">מועד הפירעון עבר</div></article>
+            <article class="stat-card"><div class="stat-top"><span class="stat-icon icon-purple">₪</span><span class="stat-caption">ללא מועד פירעון</span></div><div class="stat-value" id="payments-undated">₪0</div><div class="stat-foot">פתוח, לא נחשב פיגור</div></article>
+            <article class="stat-card"><div class="stat-top"><span class="stat-icon icon-blue">▤</span><span class="stat-caption">תשלומים עתידיים</span></div><div class="stat-value" id="payments-future">₪0</div><div class="stat-foot">טרם הגיע מועדם</div></article>
+            <article class="stat-card"><div class="stat-top"><span class="stat-icon icon-green">✓</span><span class="stat-caption">שולמו</span></div><div class="stat-value" id="payments-paid">₪0</div><div class="stat-foot">חיובים שסומנו כשולמו</div></article>
+          </section>
+          <section class="orders-section biz-only">
+            <div class="table-toolbar">
+              <label class="search-box"><span aria-hidden="true">⌕</span><input id="payments-search" type="search" placeholder="חיפוש לקוח או חיוב..." aria-label="חיפוש חיובים"></label>
+              <label class="filter-label">הצגה
+                <select id="payments-filter">
+                  <option value="open">פתוחים (באיחור + ללא מועד)</option>
+                  <option value="overdue">באיחור</option>
+                  <option value="undated">ללא מועד פירעון</option>
+                  <option value="future">עתידיים</option>
+                  <option value="paid">שולמו</option>
+                  <option value="all">הכול</option>
+                </select>
+              </label>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th scope="col">לקוח</th><th scope="col">חיוב</th><th scope="col">מועד פירעון</th><th scope="col">סכום כולל מע"מ</th><th scope="col">סטטוס</th><th scope="col"><span class="sr-only">פעולות</span></th></tr></thead>
+                <tbody id="payments-body"></tbody>
+              </table>
+              <div class="empty-state" id="payments-empty" hidden><strong>אין חיובים להצגה</strong></div>
+            </div>
+            <div class="table-footer"><span id="payments-count"></span><span>הנתונים נקראים מ-Supabase</span></div>
+          </section>
+        </section>
+
+        <!-- Reports -->
+        <section class="page-view" data-page="reports" hidden>
+          <div class="welcome-row">
+            <div><p class="eyebrow">דוחות</p><h1>דוחות</h1><p class="page-subtitle">סיכום כספי ופילוח חודשי של ההזמנות.</p></div>
+          </div>
+          <section class="stats-grid biz-only" aria-label="סיכום כספי">
+            <article class="stat-card"><div class="stat-top"><span class="stat-icon icon-blue">₪</span><span class="stat-caption">סך חיובים</span></div><div class="stat-value" id="report-billed">₪0</div><div class="stat-foot">הזמנות ותשלומי חבילות</div></article>
+            <article class="stat-card"><div class="stat-top"><span class="stat-icon icon-green">₪</span><span class="stat-caption">התקבל</span></div><div class="stat-value" id="report-received">₪0</div><div class="stat-foot">לפי סימוני תשלום</div></article>
+            <article class="stat-card"><div class="stat-top"><span class="stat-icon icon-purple">₪</span><span class="stat-caption">יתרה פתוחה</span></div><div class="stat-value" id="report-outstanding">₪0</div><div class="stat-foot">כולל עתידי</div></article>
+            <article class="stat-card"><div class="stat-top"><span class="stat-icon icon-orange">◷</span><span class="stat-caption">באיחור</span></div><div class="stat-value" id="report-overdue">₪0</div><div class="stat-foot">מועד הפירעון עבר</div></article>
+          </section>
+          <section class="orders-section">
+            <div class="section-heading"><div><h2>פילוח חודשי</h2><p>לפי חודש פרסום</p></div></div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th scope="col">חודש</th><th scope="col">הזמנות</th><th scope="col">סכום כספי</th><th scope="col">שולם</th><th scope="col">ממתין</th><th scope="col">קרדיטים שנוצלו</th></tr></thead>
+                <tbody id="report-monthly-body"></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <!-- Settings and products -->
+        <section class="page-view" data-page="settings" hidden>
+          <div class="welcome-row">
+            <div><p class="eyebrow">הגדרות</p><h1>הגדרות ומוצרים</h1><p class="page-subtitle">שיעור מע"מ וקטלוג המוצרים להזמנות.</p></div>
+            <button class="button button-primary biz-only" type="button" id="product-new"><span class="button-plus">＋</span> מוצר חדש</button>
+          </div>
+          <div class="biz-required" hidden><p>המסך זמין לאחר התקנת הסכימה העסקית ב-Supabase.</p></div>
+          <section class="orders-section biz-only">
+            <div class="section-heading"><div><h2>שיעור מע"מ</h2><p>משמש לחישוב הזמנות וחבילות חדשות. הזמנות קיימות שומרות את השיעור שבו נוצרו.</p></div></div>
+            <form class="form-panel inline-form" id="vat-form">
+              <label class="field-label">שיעור מע"מ (%)<input name="vat" type="number" min="0" max="100" step="0.01" required></label>
+              <button class="button button-primary" type="submit" id="vat-submit">שמירת שיעור</button>
+              <p class="form-message" id="vat-message" role="alert"></p>
+            </form>
+          </section>
+          <section class="orders-section biz-only">
+            <div class="section-heading"><div><h2>קטלוג מוצרים</h2><p>רק מוצר פעיל עם מחיר ועלות קרדיטים זמין בהזמנה חדשה</p></div></div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th scope="col">מוצר</th><th scope="col">מידות</th><th scope="col">מחיר לפני מע"מ</th><th scope="col">עלות בקרדיטים</th><th scope="col">סטטוס</th><th scope="col"><span class="sr-only">פעולות</span></th></tr></thead>
+                <tbody id="products-body"></tbody>
+              </table>
+              <div class="empty-state" id="products-empty" hidden><strong>אין מוצרים בקטלוג</strong><p>הוסיפו מוצר כדי לאפשר יצירת הזמנות.</p></div>
+            </div>
+          </section>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <div class="app-shell business-preview-shell" id="business-preview-shell" hidden>
+    <aside class="announcement-banner" role="note" aria-label="מצב תצוגה מקדימה">
+      <div class="announcement-title">
+        <strong>תצוגה מקדימה בלבד</strong>
+        <span aria-hidden="true">|</span>
+        <span>נתוני הדגמה מבודדים</span>
+        <span class="beta-badge">BETA</span>
+      </div>
+      <p>אין חיבור למסד הנתונים ואין שמירה. הנתונים והמחירים במסך זה אינם נתוני אמת.</p>
+    </aside>
+    <aside class="sidebar" aria-label="ניווט תצוגה מקדימה">
+      <a class="brand" href="#" aria-label="מודעת — תצוגה מקדימה">
+        <span class="brand-mark" aria-hidden="true">מ</span>
+        <span class="brand-copy"><strong>מודעת</strong><small>ניהול פרסום בעיתון</small></span>
+      </a>
+      <div class="sidebar-label">ממשק חדש · תצוגה בלבד</div>
+      <nav class="main-nav">
+        <button class="nav-link active" type="button" data-preview-view="clients" aria-current="page"><span class="nav-icon">♙</span>לקוחות</button>
+        <button class="nav-link" type="button" data-preview-view="orders"><span class="nav-icon">▤</span>הזמנות</button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="help-card">
+          <span class="help-icon">✳</span>
+          <strong>ממתין לחיבור מאובטח</strong>
+          <p>שמירה תופעל רק אחרי התקנת סכימת העסק וה-RPC ב-Supabase.</p>
+        </div>
+        <span class="storage-note preview-storage-note" role="status">לא מחובר · לא נשמר</span>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar">
+        <div class="breadcrumbs">תצוגה מקדימה <span>/</span> <strong id="preview-breadcrumb">לקוחות</strong></div>
+        <div class="topbar-actions">
+          <span class="today-label" id="preview-today"></span>
+          <button class="button button-outline" id="exit-business-preview" type="button">חזרה להתחברות</button>
+        </div>
+      </header>
+
+      <div class="page-content">
+        <section class="page-view" id="preview-clients-view">
+          <section class="welcome-row">
+            <div>
+              <p class="eyebrow">ניהול לקוחות · תצוגה מקדימה</p>
+              <h1>רשימת לקוחות</h1>
+              <p class="page-subtitle">חיפוש מהיר וכרטיס לקוח מפורט. הרשומות כאן הן דוגמאות בלבד.</p>
+            </div>
+            <button class="button button-primary" type="button" data-preview-action="client-save-blocked"><span class="button-plus">＋</span> הוסף לקוח</button>
+          </section>
+
+          <section class="orders-section clients-section">
+            <div class="section-heading">
+              <div><h2>כל הלקוחות</h2><p>תגית פרימיום בלבד מוצגת ברשימה</p></div>
+            </div>
+            <div class="table-toolbar">
+              <label class="search-box">
+                <span aria-hidden="true">⌕</span>
+                <input id="preview-client-search" type="search" placeholder="חיפוש לפי שם או טלפון..." aria-label="חיפוש לקוחות לפי שם או טלפון">
+              </label>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th scope="col">שם הלקוח</th><th scope="col">טלפון</th><th scope="col">דואר אלקטרוני</th><th scope="col">סטטוס</th><th scope="col"><span class="sr-only">פעולות</span></th></tr></thead>
+                <tbody id="preview-clients-body"></tbody>
+              </table>
+              <div class="empty-state" id="preview-clients-empty" hidden><span class="empty-icon">⌕</span><strong>לא נמצאו לקוחות</strong><p>נסו לחפש לפי שם או טלפון אחר.</p></div>
+            </div>
+            <div class="table-footer"><span id="preview-clients-count">0 לקוחות</span><span>נתוני דוגמה מבודדים</span></div>
+          </section>
+          <div class="preview-blocked-note" role="status">הוספה ועריכה יוצגו וייבדקו לאחר חיבור הטבלאות החדשות. שום שינוי לא יישמר במצב זה.</div>
+        </section>
+
+        <section class="page-view" id="preview-orders-view" hidden>
+          <section class="welcome-row">
+            <div>
+              <p class="eyebrow">ניהול הזמנות · תצוגה מקדימה</p>
+              <h1>הזמנות פרסום</h1>
+              <p class="page-subtitle">טפסי הזמנה רגילה ורבת־שורות לפי חוזה ה-RPC המתוכנן.</p>
+            </div>
+            <div class="preview-order-actions">
+              <button class="button button-outline" type="button" data-preview-action="open-batch">הזמנה מרובה</button>
+              <button class="button button-primary" type="button" data-preview-action="open-single"><span class="button-plus">＋</span> הזמנה חדשה</button>
+            </div>
+          </section>
+
+          <section class="orders-section">
+            <div class="section-heading">
+              <div><h2>הזמנות לדוגמה</h2><p>תצוגה בלבד — לא נוספו הזמנות למסד הנתונים</p></div>
+            </div>
+            <div class="table-toolbar">
+              <label class="search-box"><span aria-hidden="true">⌕</span><input id="preview-order-search" type="search" placeholder="חיפוש לקוח, גיליון או מוצר..." aria-label="חיפוש הזמנות לדוגמה"></label>
+              <label class="filter-label">סטטוס תשלום
+                <select id="preview-payment-filter" aria-label="סינון לפי סטטוס תשלום">
+                  <option value="all">כל הסטטוסים</option><option value="paid">שולם</option><option value="pending">עדיין לא</option>
+                </select>
+              </label>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th scope="col">מספר הזמנה</th><th scope="col">לקוח</th><th scope="col">גיליון</th><th scope="col">מוצר</th><th scope="col">חיוב</th><th scope="col">סטטוס תשלום</th></tr></thead>
+                <tbody id="preview-orders-body"></tbody>
+              </table>
+              <div class="empty-state" id="preview-orders-empty" hidden><span class="empty-icon">⌕</span><strong>לא נמצאו הזמנות</strong><p>נסו לשנות את החיפוש או הסינון.</p></div>
+            </div>
+            <div class="table-footer"><span id="preview-orders-count">0 הזמנות</span><span>נתוני דוגמה מבודדים</span></div>
+          </section>
+        </section>
+        <footer class="page-footer">מודעת <span>·</span> תצוגה מקדימה מקומית · ללא שמירה</footer>
+      </div>
+    </main>
+  </div>
+
+  <dialog class="modal preview-details-modal" id="preview-client-details" aria-labelledby="preview-client-title">
+    <div class="modal-card">
+      <div class="modal-heading">
+        <div><span class="modal-kicker">כרטיס לקוח · דוגמה</span><h2 id="preview-client-title"></h2><span class="preview-selected-premium" id="preview-client-premium" hidden>פרימיום</span></div>
+        <button class="close-button" type="button" data-preview-close aria-label="סגירה">×</button>
+      </div>
+      <dl class="client-details preview-client-details">
+        <div><dt>טלפון</dt><dd id="preview-detail-phone"></dd></div>
+        <div><dt>דואר אלקטרוני</dt><dd id="preview-detail-email"></dd></div>
+        <div><dt>תאריך הצטרפות</dt><dd id="preview-detail-joined"></dd></div>
+        <div><dt>הערות פנימיות</dt><dd id="preview-detail-notes"></dd></div>
+      </dl>
+      <section class="preview-detail-section">
+        <h3>חבילה פעילה</h3>
+        <p id="preview-detail-package"></p>
+        <div class="preview-summary-grid" id="preview-detail-package-grid"></div>
+        <p id="preview-detail-benefits"></p>
+      </section>
+      <section class="preview-detail-section">
+        <h3>יתרת קרדיטים</h3>
+        <p id="preview-detail-credits"></p>
+        <div class="preview-summary-grid" id="preview-detail-credit-grid"></div>
+      </section>
+      <section class="preview-detail-section">
+        <h3>תשלומי חבילה</h3>
+        <div class="table-wrap" id="preview-detail-installments-wrap">
+          <table>
+            <thead><tr><th scope="col">תשלום</th><th scope="col">מועד</th><th scope="col">סכום כולל מע"מ</th><th scope="col">סטטוס</th></tr></thead>
+            <tbody id="preview-detail-installments"></tbody>
+          </table>
+        </div>
+        <p id="preview-detail-installments-empty" hidden>אין תשלומי חבילה ללקוח זה.</p>
+      </section>
+      <section class="preview-detail-section">
+        <h3>חובות פתוחים</h3>
+        <div id="preview-detail-debts"></div>
+      </section>
+      <section class="preview-detail-section">
+        <h3>היסטוריית הזמנות</h3>
+        <div id="preview-detail-orders" class="preview-detail-orders"></div>
+      </section>
+      <div class="preview-blocked-note">פרטי הדגמה בלבד. אין חיבור למסד הנתונים ושום שינוי לא נשמר.</div>
+      <div class="modal-actions"><button class="button button-outline" type="button" data-preview-close>סגירה</button><button class="button button-outline" type="button" data-preview-action="open-package">רכישת חבילה</button><button class="button button-primary" type="button" data-preview-action="client-save-blocked">עריכת לקוח</button></div>
+    </div>
+  </dialog>
+
+  <dialog class="modal preview-order-modal" id="preview-package-modal" aria-labelledby="preview-package-title">
+    <form class="modal-card preview-order-form" id="preview-package-form">
+      <div class="modal-heading">
+        <div><span class="modal-kicker">רכישת חבילה · דוגמה</span><h2 id="preview-package-title">רכישת חבילה</h2></div>
+        <button class="close-button" type="button" data-preview-close aria-label="סגירה">×</button>
+      </div>
+      <div class="preview-blocked-note">מצב תצוגה בלבד. אפשר לבחור חבילה ולבדוק את לוח התשלומים; שמירה חסומה עד התקנת ה-SQL וחיבור ה-RPC.</div>
+      <p class="preview-inline-note" id="preview-package-client"></p>
+      <label class="field-label">חבילה <span>*</span><select name="package" id="preview-package-select" required></select></label>
+      <div class="preview-custom-package" id="preview-custom-package-fields" hidden>
+        <label class="field-label">שם החבילה המותאמת <span>*</span><input name="custom_name" maxlength="120" placeholder="לדוגמה: הסכם אישי"></label>
+        <div class="form-grid">
+          <label class="field-label">קרדיטים <span>*</span><input name="custom_credits" type="number" min="0.01" max="999999999" step="0.01"></label>
+          <label class="field-label">תקופה בחודשים <span>*</span><input name="custom_term" type="number" min="1" max="120" step="1"></label>
+        </div>
+        <label class="field-label">מחיר כולל לפני מע"מ (₪) <span>*</span><input name="custom_price" type="number" min="0.01" max="99999999" step="0.01"></label>
+      </div>
+      <div class="form-grid">
+        <label class="field-label">תאריך התחלה <span>*</span><input name="starts_on" type="date" required></label>
+        <label class="field-label">מספר תשלומים <span>*</span><input name="installment_count" type="number" min="1" max="60" step="1" required></label>
+      </div>
+      <div class="preview-vat-note" id="preview-package-details"></div>
+      <label class="field-label">הערות<textarea name="notes" rows="2" maxlength="300" placeholder="הערות פנימיות לרכישה"></textarea></label>
+      <div class="import-preview" id="preview-package-summary" aria-live="polite">בדיקת הרכישה תציג לוח תשלומים בלבד; היא לא תשמור נתונים.</div>
+      <p class="form-message" id="preview-package-message" role="alert"></p>
+      <div class="modal-actions">
+        <button class="button button-outline" type="button" data-preview-close>ביטול</button>
+        <button class="button button-outline" type="button" id="preview-package-check">בדיקת רכישה</button>
+        <button class="button button-primary" type="button" disabled title="הפעולה חסומה עד חיבור Supabase">שמירה חסומה</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="modal preview-order-modal" id="preview-single-order-modal" aria-labelledby="preview-single-title">
+    <form class="modal-card preview-order-form" id="preview-single-order-form">
+      <div class="modal-heading">
+        <div><span class="modal-kicker">הזמנה חדשה · דוגמה</span><h2 id="preview-single-title">יצירת הזמנת פרסום</h2></div>
+        <button class="close-button" type="button" data-preview-close aria-label="סגירה">×</button>
+      </div>
+      <div class="preview-blocked-note">מצב תצוגה בלבד. אפשר לבדוק את הטופס והחישובים; שמירה חסומה עד התקנת ה-SQL וחיבור ה-RPC.</div>
+      <label class="field-label">חיפוש לקוח
+        <input id="preview-single-client-search" type="search" placeholder="הקלידו שם לקוח..." autocomplete="off">
+      </label>
+      <label class="field-label">לקוח <span>*</span><select name="clientId" id="preview-single-client" required></select></label>
+      <p class="preview-selected-premium" id="preview-single-premium" hidden>פרימיום</p>
+      <div class="form-grid">
+        <label class="field-label">מספר גיליון <span>*</span><input name="sheet_number" required maxlength="80" placeholder="לדוגמה: 125"></label>
+        <label class="field-label">מוצר <span>*</span><select name="product_id" required class="preview-product-select"></select></label>
+      </div>
+      <label class="field-label">תאריך פרסום <span>*</span><input name="publication_date" type="date" required></label>
+      <div class="preview-charge-fields">
+        <label class="field-label">מחיר כספי לפני מע"מ (₪)<input name="cash_amount_before_vat" type="number" min="0.01" max="99999999" step="0.01" placeholder="השאירו ריק לשימוש בקרדיטים"></label>
+        <label class="field-label">ניצול קרדיטים<input name="credits_used" type="number" min="0.01" max="999999999" step="0.01" placeholder="השאירו ריק לחיוב כספי"></label>
+      </div>
+      <p class="preview-inline-note">יש למלא ערך חיובי בדיוק באחד משני השדות. המזכירה בוחרת — אין שיטת חיוב אוטומטית.</p>
+      <div class="preview-vat-note" id="preview-single-vat-note">המחיר כולל מע"מ יוצג כאן לאחר הזנת מחיר. שיעור מע"מ לתצוגה: 18%.</div>
+      <label class="field-label">סטטוס תשלום
+        <select name="payment_status"><option value="pending">עדיין לא</option><option value="paid">שולם</option></select>
+      </label>
+      <label class="field-label">הערות<textarea name="notes" rows="2" maxlength="300" placeholder="הערות פנימיות להזמנה"></textarea></label>
+      <div class="import-preview" id="preview-single-summary" aria-live="polite">בדיקת ההזמנה תציג סיכום בלבד; היא לא תשמור נתונים.</div>
+      <p class="form-message" id="preview-single-message" role="alert"></p>
+      <div class="modal-actions">
+        <button class="button button-outline" type="button" data-preview-close>ביטול</button>
+        <button class="button button-outline" type="button" id="preview-single-check">בדיקת הזמנה</button>
+        <button class="button button-primary" type="button" disabled title="הפעולה חסומה עד חיבור Supabase">שמירה חסומה</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="modal preview-order-modal" id="preview-batch-order-modal" aria-labelledby="preview-batch-title">
+    <div class="modal-card preview-order-form">
+      <div class="modal-heading">
+        <div><span class="modal-kicker">הזמנות מרובות · דוגמה</span><h2 id="preview-batch-title">יצירת הזמנות מרובות</h2></div>
+        <button class="close-button" type="button" data-preview-close aria-label="סגירה">×</button>
+      </div>
+      <div class="preview-blocked-note">מצב תצוגה בלבד. ניתן לבנות ולבדוק סיכום; אין שמירה חלקית או מדומה. שמירה חסומה עד התקנת ה-SQL וחיבור ה-RPC.</div>
+      <label class="field-label">חיפוש לקוח
+        <input id="preview-batch-client-search" type="search" placeholder="הקלידו שם לקוח..." autocomplete="off">
+      </label>
+      <label class="field-label">לקוח <span>*</span><select id="preview-batch-client" required></select></label>
+      <p class="preview-selected-premium" id="preview-batch-premium" hidden>פרימיום</p>
+      <div class="batch-sequence-toolbar">
+        <label class="field-label">גיליון ראשון ברצף<input id="preview-sequence-start" type="number" step="1" placeholder="מספר"></label>
+        <button class="button button-outline" type="button" id="preview-apply-sequence">בחירת רצף גיליונות</button>
+      </div>
+      <div id="preview-batch-rows" class="preview-batch-rows"></div>
+      <div class="preview-batch-actions">
+        <button class="button button-outline" type="button" id="preview-add-batch-row">הוספת שורה</button>
+        <span id="preview-batch-row-count">1 מתוך 250</span>
+      </div>
+      <div class="preview-batch-summary" id="preview-batch-summary" aria-live="polite">
+        <strong>סיכום לפני שמירה</strong><p>מלאו את השורות ובחרו "בדיקת סיכום".</p>
+      </div>
+      <p class="form-message" id="preview-batch-message" role="alert"></p>
+      <div class="modal-actions">
+        <button class="button button-outline" type="button" data-preview-close>סגירה</button>
+        <button class="button button-outline" type="button" id="preview-check-batch">בדיקת סיכום</button>
+        <button class="button button-primary" type="button" disabled title="הפעולה חסומה עד חיבור Supabase">שמירה חסומה</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="modal" id="client-modal" aria-labelledby="client-modal-title">
+    <form class="modal-card" id="client-form">
+      <div class="modal-heading">
+        <div><span class="modal-kicker">ניהול לקוחות</span><h2 id="client-modal-title">הוספת לקוח חדש</h2></div>
+        <button class="close-button" type="button" data-close-modal aria-label="סגירה">×</button>
+      </div>
+      <label class="field-label">שם הלקוח <span>*</span><input name="name" required maxlength="80" placeholder="לדוגמה: ישראל ישראלי"></label>
+      <div class="form-grid">
+        <label class="field-label">טלפון<input name="phone" type="tel" maxlength="30" placeholder="050-0000000"></label>
+        <label class="field-label">דואר אלקטרוני<input name="email" type="email" maxlength="100" placeholder="name@example.com"></label>
+      </div>
+      <p class="form-message" id="client-message" role="alert"></p>
+      <div class="modal-actions"><button class="button button-outline" type="button" data-close-modal>ביטול</button><button class="button button-primary" id="client-submit-button" type="submit">שמירת לקוח</button></div>
+    </form>
+  </dialog>
+
+  <dialog class="modal" id="client-details-modal" aria-labelledby="client-details-title">
+    <div class="modal-card">
+      <div class="modal-heading">
+        <div><span class="modal-kicker">פרטי לקוח</span><h2 id="client-details-title"></h2></div>
+        <button class="close-button" type="button" data-close-modal aria-label="סגירה">×</button>
+      </div>
+      <dl class="client-details">
+        <div><dt>טלפון</dt><dd id="client-details-phone"></dd></div>
+        <div><dt>דואר אלקטרוני</dt><dd id="client-details-email"></dd></div>
+      </dl>
+      <div class="modal-actions">
+        <button class="button button-outline" type="button" data-close-modal>סגירה</button>
+        <button class="button button-primary" id="client-details-edit" type="button">עריכת פרטים</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="modal preview-order-modal" id="biz-package-modal" aria-labelledby="biz-package-title">
+    <form class="modal-card preview-order-form" id="biz-package-form">
+      <div class="modal-heading">
+        <div><span class="modal-kicker">רכישת חבילה</span><h2 id="biz-package-title">רכישת חבילה</h2></div>
+        <button class="close-button" type="button" data-close-modal aria-label="סגירה">×</button>
+      </div>
+      <p class="preview-inline-note" id="biz-package-client"></p>
+      <label class="field-label">חבילה <span>*</span><select name="package" id="biz-package-select" required></select></label>
+      <div class="preview-custom-package" id="biz-custom-package-fields" hidden>
+        <label class="field-label">שם החבילה המותאמת <span>*</span><input name="custom_name" maxlength="120" placeholder="לדוגמה: הסכם אישי"></label>
+        <div class="form-grid">
+          <label class="field-label">קרדיטים <span>*</span><input name="custom_credits" type="number" min="0.01" max="999999999" step="0.01"></label>
+          <label class="field-label">תקופה בחודשים <span>*</span><input name="custom_term" type="number" min="1" max="120" step="1"></label>
+        </div>
+        <label class="field-label">מחיר כולל לפני מע"מ (₪) <span>*</span><input name="custom_price" type="number" min="0.01" max="99999999" step="0.01"></label>
+      </div>
+      <div class="form-grid">
+        <label class="field-label">תאריך התחלה <span>*</span><input name="starts_on" type="date" required></label>
+        <label class="field-label">מספר תשלומים <span>*</span><input name="installment_count" type="number" min="1" max="60" step="1" required></label>
+      </div>
+      <div class="preview-vat-note" id="biz-package-details"></div>
+      <label class="field-label">הערות<textarea name="notes" rows="2" maxlength="300" placeholder="הערות פנימיות לרכישה"></textarea></label>
+      <div class="import-preview" id="biz-package-summary" aria-live="polite">לוח התשלומים יוצג כאן לפני השמירה.</div>
+      <p class="form-message" id="biz-package-message" role="alert"></p>
+      <div class="modal-actions">
+        <button class="button button-outline" type="button" data-close-modal>ביטול</button>
+        <button class="button button-primary" type="submit" id="biz-package-submit">שמירת רכישה</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="modal" id="biz-credit-modal" aria-labelledby="biz-credit-title">
+    <form class="modal-card" id="biz-credit-form">
+      <div class="modal-heading">
+        <div><span class="modal-kicker">קרדיטים</span><h2 id="biz-credit-title">התאמת קרדיטים</h2></div>
+        <button class="close-button" type="button" data-close-modal aria-label="סגירה">×</button>
+      </div>
+      <p class="preview-inline-note" id="biz-credit-client"></p>
+      <label class="field-label">כמות קרדיטים <span>*</span><input name="delta" type="number" step="0.01" min="-999999" max="999999" required placeholder="חיובי להענקה, שלילי להפחתה (למשל 5 או -2.5)"></label>
+      <label class="field-label">סיבה <span>*</span><input name="reason" required maxlength="200" placeholder="לדוגמה: הענקת קרדיטים כמחווה"></label>
+      <p class="form-message" id="biz-credit-message" role="alert"></p>
+      <div class="modal-actions"><button class="button button-outline" type="button" data-close-modal>ביטול</button><button class="button button-primary" type="submit" id="biz-credit-submit">שמירת תנועה</button></div>
+    </form>
+  </dialog>
+
+  <dialog class="modal" id="biz-product-modal" aria-labelledby="biz-product-title">
+    <form class="modal-card" id="biz-product-form">
+      <div class="modal-heading">
+        <div><span class="modal-kicker">קטלוג מוצרים</span><h2 id="biz-product-title">מוצר חדש</h2></div>
+        <button class="close-button" type="button" data-close-modal aria-label="סגירה">×</button>
+      </div>
+      <label class="field-label">שם המוצר <span>*</span><input name="name" required maxlength="120" placeholder="לדוגמה: עמוד מלא"></label>
+      <label class="field-label">מידות <span class="optional">(לא חובה)</span><input name="dimensions" maxlength="120" placeholder="לדוגמה: 25×35 ס״מ"></label>
+      <div class="form-grid">
+        <label class="field-label">מחיר לפני מע"מ (₪)<input name="price" type="number" min="0.01" max="99999999" step="0.01"></label>
+        <label class="field-label">עלות בקרדיטים<input name="credits" type="number" min="0.01" max="999999" step="0.01"></label>
+      </div>
+      <label class="check-label"><input name="active" type="checkbox"> מוצר פעיל (זמין בהזמנה חדשה; מחייב מחיר ועלות קרדיטים)</label>
+      <p class="form-message" id="biz-product-message" role="alert"></p>
+      <div class="modal-actions"><button class="button button-outline" type="button" data-close-modal>ביטול</button><button class="button button-primary" type="submit" id="biz-product-submit">שמירת מוצר</button></div>
+    </form>
+  </dialog>
+
+  <dialog class="modal" id="order-modal" aria-labelledby="order-modal-title">
+    <form class="modal-card" id="order-form">
+      <div class="modal-heading">
+        <div><span class="modal-kicker">הזמנה חדשה</span><h2 id="order-modal-title">יצירת הזמנת פרסום</h2></div>
+        <button class="close-button" type="button" data-close-modal aria-label="סגירה">×</button>
+      </div>
+      <label class="field-label">לקוח <span>*</span>
+        <select name="clientId" id="order-client" required><option value="">בחירת לקוח</option></select>
+      </label>
+      <div class="form-grid">
+        <label class="field-label">תאריך פרסום <span>*</span><input name="date" type="date" required></label>
+        <label class="field-label">מדור בעיתון <span>*</span><input name="section" required maxlength="60" placeholder="לדוגמה: נדל״ן"></label>
+      </div>
+      <div class="form-grid">
+        <label class="field-label">סכום לתשלום (₪) <span>*</span><input name="amount" type="number" min="0.01" max="99999999" step="0.01" required placeholder="0.00"></label>
+        <label class="field-label">סטטוס תשלום
+          <select name="paymentStatus"><option value="pending">ממתין לתשלום</option><option value="paid">שולם</option></select>
+        </label>
+      </div>
+      <label class="field-label">הערות <span class="optional">(לא חובה)</span><textarea name="notes" rows="2" maxlength="300" placeholder="פרטים נוספים על ההזמנה"></textarea></label>
+      <p class="form-message" id="order-message" role="alert"></p>
+      <div class="modal-actions"><button class="button button-outline" type="button" data-close-modal>ביטול</button><button class="button button-primary" type="submit">שמירת הזמנה</button></div>
+    </form>
+  </dialog>
+
+  <dialog class="modal" id="local-import-modal" aria-labelledby="local-import-title">
+    <div class="modal-card import-card">
+      <div class="modal-heading">
+        <div><span class="modal-kicker">העברת מידע בטוחה</span><h2 id="local-import-title">גיבוי וייבוא נתונים מקומיים</h2></div>
+        <button class="close-button" type="button" data-close-modal aria-label="סגירה">×</button>
+      </div>
+      <p class="import-intro">הנתונים נשמרים ב-Supabase ואינם מוחלפים בשקט. הורידי גיבוי עדכני מהענן לפני בחירת קובץ JSON; הייבוא מוסיף רשומות חדשות בלבד.</p>
+      <button class="button button-outline backup-button" id="download-cloud-backup" type="button">הורדת גיבוי עדכני מהענן</button>
+      <button class="button button-outline backup-button" id="download-local-backup" type="button">הורדת גיבוי מקומי</button>
+      <label class="external-backup-confirm">
+        <input id="confirm-external-backup" type="checkbox">
+        <span>שמרתי עותק גיבוי נפרד של הנתונים מהמחשב או מהדפדפן המקורי.</span>
+      </label>
+      <label class="field-label">בחירת קובץ גיבוי לייבוא
+        <input id="local-import-file" type="file" accept=".json,application/json" disabled>
+      </label>
+      <div class="import-preview" id="local-import-preview" aria-live="polite">יש להוריד גיבוי לפני בחירת קובץ.</div>
+      <p class="form-message auth-message" id="local-import-message" role="alert"></p>
+      <div class="modal-actions">
+        <button class="button button-outline" type="button" data-close-modal>סגירה</button>
+        <button class="button button-primary" id="run-local-import" type="button" disabled>ייבוא רשומות חדשות בלבד</button>
+      </div>
+    </div>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="business-preview.js?v=20261111-4" defer></script>
+</body>
+</html>

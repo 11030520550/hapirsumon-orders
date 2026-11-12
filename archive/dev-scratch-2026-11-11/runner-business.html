@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>business runner</title></head>
+<body>
+<pre id="out">RUNNING</pre>
+<iframe id="f" style="width:1200px;height:700px"></iframe>
+<script>
+"use strict";
+const out = [];
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const frame = document.getElementById("f");
+let w, d;
+const $ = (s) => d.querySelector(s);
+const $$ = (s) => [...d.querySelectorAll(s)];
+const check = (name, cond, detail = "") => out.push(`${cond ? "PASS" : "FAIL"} ${name}${detail ? " — " + detail : ""}`);
+const text = (s) => ($(s)?.textContent || "").replace(/\s+/g, " ").trim();
+const visible = (s) => { const el = $(s); return !!el && !el.hidden && w.getComputedStyle(el).display !== "none"; };
+function setVal(form, name, value) { const el = $(form).elements[name]; el.value = value; el.dispatchEvent(new w.Event("input", { bubbles: true })); el.dispatchEvent(new w.Event("change", { bubbles: true })); }
+async function load(params) {
+  await new Promise((resolve) => { frame.onload = resolve; frame.src = `/__test/app.html?${params}&t=${Math.random()}`; });
+  w = frame.contentWindow; d = w.document; await sleep(300);
+}
+async function login() {
+  $('#login-form [name="email"]').value = "user@example.invalid";
+  $('#login-form [name="password"]').value = "x";
+  $("#login-form").requestSubmit(); await sleep(600);
+}
+const db = () => w.__mock.db;
+const calls = (name) => w.__mock.state.rpcCalls.filter((n) => n === name).length;
+
+async function run() {
+  // ---- Legacy mode (schema not installed): old flow untouched
+  await load("session=0&business=0");
+  await login();
+  check("L1 legacy: app shown", visible("#app-shell"));
+  check("L2 legacy: original help text", text("#app-shell .help-card p") === "נהלו הזמנות, לקוחות ותשלומים בפשטות.");
+  $('[data-open-modal="order-modal"]').click(); await sleep(50);
+  check("L3 legacy: old order form opens", $("#order-modal").open && !$("#biz-order-modal").open);
+  $("#order-modal").close();
+  $('.main-nav [data-view="clients"]').click(); await sleep(50);
+  $('[data-client-view="c-test-0"]').click(); await sleep(50);
+  check("L4 legacy: old client details opens", $("#client-details-modal").open && !$("#biz-client-modal").open);
+  $("#client-details-modal").close();
+
+  // ---- Business mode
+  await load("session=0&business=1");
+  await login();
+  check("B1 business detected", text("#app-shell .help-card p").includes("ממשק עסקי פעיל"));
+  check("B2 order numbers shown", text("#orders-body").includes("#30"));
+  $('.main-nav [data-view="clients"]').click(); await sleep(50);
+  $('[data-client-view="c-test-0"]').click(); await sleep(300);
+  check("B3 client file opens with live data", $("#biz-client-modal").open && text("#biz-client-title") === "לקוח בדיקה 1" && $("#biz-client-status").hidden, text("#biz-client-status"));
+  check("B4 no package yet, not premium", $("#biz-client-premium").hidden && text("#biz-detail-package").includes("אין חבילה פעילה"));
+
+  // Package purchase
+  $('[data-biz-action="package"]').click(); await sleep(50);
+  check("P1 package dialog: 3 packages + custom", $("#biz-package-modal").open && $("#biz-package-select").options.length === 5);
+  setVal("#biz-package-form", "package", "11111111-1111-4111-8111-111111111111");
+  await sleep(20);
+  check("P2 schedule preview 12 rows", (text("#biz-package-summary").match(/ \d+\. /g) || []).length === 12, text("#biz-package-summary").slice(0, 80));
+  $("#biz-package-submit").click(); await sleep(400);
+  check("P3 saved via RPC once, dialog closed", calls("purchase_customer_package") === 1 && !$("#biz-package-modal").open, text("#biz-package-message"));
+  check("P4 success toast after save", text("#toast").includes("נשמרה"), text("#toast"));
+  check("P5 file shows package + premium", !$("#biz-client-premium").hidden && text("#biz-detail-package").includes("מינימום מקסימום"));
+  check("P6 12 installments with pay buttons", $$("#biz-installments tr").length === 12 && $$("#biz-installments [data-biz-pay]").length === 12);
+  check("P7 credits granted 30", text("#biz-detail-credits").includes("30"), text("#biz-detail-credits"));
+  check("P8 premium badge in client list", $$("#clients-body .premium-badge").length === 1);
+
+  // Credit adjustment
+  $('[data-biz-action="credits"]').click(); await sleep(50);
+  setVal("#biz-credit-form", "delta", "-2.5"); setVal("#biz-credit-form", "reason", "בדיקת הפחתה");
+  $("#biz-credit-submit").click(); await sleep(400);
+  check("C1 credit adjustment saved, balance 27.5", text("#biz-detail-credits").includes("27.5") && text("#toast").includes("27.5"), text("#biz-detail-credits"));
+
+  // Order paid with credits -> negative balance
+  $('[data-biz-action="order"]').click(); await sleep(100);
+  check("O1 order dialog preselects client", $("#biz-order-modal").open && $("#biz-order-client").value === "c-test-0");
+  check("O2 shows current credit balance", text("#biz-order-credit-note").includes("27.5"), text("#biz-order-credit-note"));
+  setVal("#biz-order-form", "product_id", "44444444-4444-4444-8444-444444444444");
+  setVal("#biz-order-form", "sheet_number", "125");
+  setVal("#biz-order-form", "credits_used", "30");
+  check("O3 credits mode locks payment status", $('#biz-order-form [name="payment_status"]').disabled);
+  $("#biz-order-submit").click(); await sleep(400);
+  check("O4 credit order saved, balance -2.5", !$("#biz-order-modal").open && /-2\.5/.test(text("#biz-detail-credits")) && text("#biz-detail-credits").includes("יתרה שלילית"), text("#biz-detail-credits"));
+  check("O5 dashboard row shows credits", text("#orders-body").includes("30 קרדיטים"));
+
+  // Cash order: network fails AFTER commit, retry must not duplicate
+  $("#biz-client-modal").close();
+  $('.main-nav [data-view="dashboard"]:not([data-scroll])').click(); await sleep(50);
+  $('[data-open-modal="order-modal"]').click(); await sleep(100);
+  check("O6 'new order' opens business form", $("#biz-order-modal").open && !$("#order-modal").open);
+  setVal("#biz-order-form", "clientId", "c-test-0");
+  setVal("#biz-order-form", "product_id", "44444444-4444-4444-8444-444444444444");
+  setVal("#biz-order-form", "sheet_number", "126");
+  setVal("#biz-order-form", "cash_amount_before_vat", "500");
+  const before = db().orders.length;
+  w.__mock.failNext("after");
+  $("#biz-order-submit").click(); await sleep(300);
+  check("O7 network error shown, dialog stays open, no fake success", $("#biz-order-modal").open && text("#biz-order-message").includes("לא ניתן להגיע"), text("#biz-order-message"));
+  $("#biz-order-submit").click(); await sleep(400);
+  check("O8 retry reuses key: exactly one order created", db().orders.length === before + 1 && !$("#biz-order-modal").open, `${before} -> ${db().orders.length}`);
+  check("O9 gross 590 shown in dashboard", text("#orders-body").includes("590"));
+
+  // Payments from the client file
+  $('.main-nav [data-view="clients"]').click(); await sleep(50);
+  $('[data-client-view="c-test-0"]').click(); await sleep(300);
+  check("D1 undated debt 590 listed", text("#biz-detail-debts").includes("590") && text("#biz-detail-debts").includes("ללא מועד פירעון"));
+  const debtButtons = $$("#biz-detail-debts [data-biz-pay]");
+  const legacyDebt = debtButtons.length;
+  $$("#biz-detail-debts .preview-history-row").find((row) => row.textContent.includes("590")).querySelector("[data-biz-pay]").click(); await sleep(400);
+  check("D2 cash order marked paid", !text("#biz-detail-debts").includes("590.00") && db().orders.find((o) => o.sheet_number === "126").payment_status === "paid", `buttons before=${legacyDebt}`);
+  $("#biz-installments [data-biz-pay]").click(); await sleep(400);
+  check("D3 first installment marked paid", $$("#biz-installments .paid").length === 1);
+  w.prompt = () => "בדיקת פתיחה מחדש";
+  $('#biz-installments [data-biz-paid="0"]').click(); await sleep(400);
+  check("D4 reopen with reason", $$("#biz-installments .paid").length === 0);
+  w.prompt = () => "";
+  $("#biz-installments [data-biz-pay]").click(); await sleep(400);
+  $('#biz-installments [data-biz-paid="0"]').click(); await sleep(400);
+  check("D5 reopen without reason is refused", $$("#biz-installments .paid").length === 1 && text("#toast").includes("נדרשת סיבה"));
+  $("#biz-client-modal").close();
+
+  // Dashboard payment select uses the RPC, and stale versions are rejected
+  $('.main-nav [data-view="dashboard"]:not([data-scroll])').click(); await sleep(50);
+  const target = db().orders.find((o) => o.id === "o-test-1");
+  const sel = $('[data-order-id="o-test-1"]');
+  sel.value = "paid"; sel.dispatchEvent(new w.Event("change", { bubbles: true })); await sleep(400);
+  check("S1 dashboard status via set_obligation_paid", target.payment_status === "paid" && calls("set_obligation_paid") >= 4);
+  target.updated_at = "2099-01-01T00:00:00Z"; // changed elsewhere, app not refreshed yet
+  const sel2 = $('[data-order-id="o-test-1"]');
+  sel2.value = "pending"; w.prompt = () => "בדיקה"; sel2.dispatchEvent(new w.Event("change", { bubbles: true })); await sleep(300);
+  check("S2 stale version rejected, nothing changed", target.payment_status === "paid" && text("#toast").includes("השתנה"), text("#toast"));
+
+  // Data reload from the store reflects everything
+  await w.ModaatApp.refresh(); await sleep(100);
+  check("R1 reload keeps business orders", text("#orders-body").includes("30 קרדיטים") && text("#orders-body").includes("590"));
+
+  // No products in catalog
+  await load("session=0&business=1&noproducts=1");
+  await login();
+  $('[data-open-modal="order-modal"]').click(); await sleep(100);
+  check("N1 no products: save disabled with clear message", $("#biz-order-submit").disabled && text("#biz-order-message").includes("אין מוצרים פעילים"));
+}
+run().catch((e) => out.push("ERROR " + (e && e.stack || e))).finally(() => {
+  const fails = out.filter((l) => !l.startsWith("PASS")).length;
+  document.getElementById("out").textContent = `RESULT ${fails ? "FAILED" : "OK"} (${out.length - fails}/${out.length})\n` + out.join("\n") + "\nDONE";
+});
+</script>
+</body></html>

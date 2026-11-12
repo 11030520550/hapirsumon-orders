@@ -1,0 +1,12 @@
+<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0}iframe{border:0;width:1280px;height:1500px}</style></head><body>
+<iframe id="f" src="/__test/app.html?session=1&business=1"></iframe>
+<script>
+const f = document.getElementById("f"); const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+f.onload = async () => { await sleep(800); const w = f.contentWindow, d = f.contentDocument;
+  w.ModaatBusiness.openClient("c-test-0"); await sleep(300);
+  d.querySelector('[data-biz-action="package"]').click(); await sleep(50);
+  const s = d.querySelector("#biz-package-select"); s.value = "22222222-2222-4222-8222-222222222222"; s.dispatchEvent(new Event("change"));
+  d.querySelector("#biz-package-submit").click(); await sleep(500);
+  d.querySelector("#biz-installments [data-biz-pay]").click(); await sleep(500);
+  const m = d.querySelector("#biz-client-modal"); m.style.maxHeight = "none"; m.querySelector(".modal-card").style.maxHeight = "none"; };
+</script></body></html>

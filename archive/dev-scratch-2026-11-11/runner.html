@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>runner</title></head>
+<body>
+<pre id="out">RUNNING</pre>
+<iframe id="f" style="width:1200px;height:500px"></iframe>
+<script>
+"use strict";
+const target = new URLSearchParams(location.search).get("target") || "app.html";
+const out = [];
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const frame = document.getElementById("f");
+let w, d;
+const $ = (s) => d.querySelector(s);
+const visible = (s) => { const el = $(s); return !!el && !el.hidden && w.getComputedStyle(el).display !== "none"; };
+
+function load(params) {
+  return new Promise((resolve) => {
+    frame.onload = async () => { w = frame.contentWindow; d = w.document; await sleep(300); resolve(); };
+    frame.src = `/__test/${target}?${params}&t=${Math.random()}`;
+  });
+}
+async function login() {
+  $('#login-form [name="email"]').value = "user@example.invalid";
+  $('#login-form [name="password"]').value = "x";
+  $("#login-form").requestSubmit();
+  await sleep(500);
+}
+function check(name, cond, detail = "") { out.push(`${cond ? "PASS" : "FAIL"} ${name}${detail ? " — " + detail : ""}`); }
+function type(sel, value) { const el = $(sel); el.value = value; el.dispatchEvent(new w.Event("input", { bubbles: true })); }
+const rows = (sel) => d.querySelectorAll(`${sel} tr`).length;
+
+async function run() {
+  // Issue 1: reset on sign-out and re-login
+  await load("session=0");
+  await login();
+  check("1a app shown after login", visible("#app-shell") && !visible("#auth-screen"));
+  type("#search-input", "בדיקה 1");
+  $("#payment-filter").value = "paid"; $("#payment-filter").dispatchEvent(new w.Event("change", { bubbles: true }));
+  $('.main-nav [data-view="clients"]').click(); await sleep(50);
+  type("#client-search-input", "לקוח בדיקה 2");
+  $("#sign-out").click(); await sleep(400);
+  check("1b auth shown after sign-out", visible("#auth-screen") && !visible("#app-shell"));
+  await login();
+  check("1c dashboard view after re-login", visible("#dashboard-view") && !visible("#clients-view"));
+  check("1d nav 'dashboard' active", $('.main-nav [data-view="dashboard"]:not([data-scroll])').classList.contains("active"));
+  check("1e searches & filter cleared", $("#search-input").value === "" && $("#client-search-input").value === "" && $("#payment-filter").value === "all",
+    `orders="${$("#search-input").value}" clients="${$("#client-search-input").value}" filter="${$("#payment-filter").value}"`);
+  check("1f all 30 orders listed", rows("#orders-body") === 30, `rows=${rows("#orders-body")}`);
+  check("1g breadcrumb", $(".breadcrumbs strong").textContent === "לוח בקרה");
+
+  // Issue 2: search + scroll reset when switching screens
+  type("#search-input", "רכב");
+  w.scrollTo(0, 600); await sleep(50);
+  const scrolledBefore = w.scrollY;
+  $('.main-nav [data-view="clients"]').click(); await sleep(50);
+  check("2a clients view shown", visible("#clients-view") && !visible("#dashboard-view"));
+  check("2b scrolled to top on switch", w.scrollY === 0, `before=${scrolledBefore} after=${w.scrollY}`);
+  type("#client-search-input", "לקוח בדיקה 3");
+  w.scrollTo(0, 600); await sleep(50);
+  $('.main-nav [data-view="dashboard"]:not([data-scroll])').click(); await sleep(50);
+  check("2c order search cleared after round-trip", $("#search-input").value === "" && rows("#orders-body") === 30, `value="${$("#search-input").value}" rows=${rows("#orders-body")}`);
+  check("2d client search cleared", $("#client-search-input").value === "" && rows("#clients-body") === 30);
+  check("2e scroll top on return", w.scrollY === 0, `y=${w.scrollY}`);
+  type("#search-input", "רכב");
+  $('.main-nav [data-scroll="orders"]').click(); await sleep(50);
+  check("2f same-view link keeps search", $("#search-input").value === "רכב");
+
+  // Both directions: clients -> dashboard -> clients
+  $('.main-nav [data-view="clients"]').click(); await sleep(50);
+  type("#client-search-input", "לקוח בדיקה 4");
+  $('.main-nav [data-view="dashboard"]:not([data-scroll])').click(); await sleep(50);
+  check("2g dashboard search empty", $("#search-input").value === "" && rows("#orders-body") === 30);
+  $('.main-nav [data-view="clients"]').click(); await sleep(50);
+  check("2h client search empty on return", $("#client-search-input").value === "" && rows("#clients-body") === 30, `value="${$("#client-search-input").value}"`);
+
+  // Issue 3: logo returns to dashboard
+  $('.main-nav [data-view="clients"]').click(); await sleep(50);
+  $("#app-shell .brand").click(); await sleep(50);
+  check("3a logo -> dashboard", visible("#dashboard-view") && !visible("#clients-view"));
+  check("3b dashboard nav active", $('.main-nav [data-view="dashboard"]:not([data-scroll])').classList.contains("active"));
+  check("3c url hash unchanged by logo", !w.location.href.endsWith("#"), w.location.hash);
+
+  // Issue 4: open dialogs closed when signed out (expired session)
+  $('[data-open-modal="client-modal"]').click(); await sleep(50);
+  const openedBefore = $("#client-modal").open;
+  w.__mock.expireSession(); await sleep(300);
+  check("4a client dialog closed on session expiry", openedBefore && !$("#client-modal").open, `before=${openedBefore} after=${$("#client-modal").open}`);
+  check("4b auth shown", visible("#auth-screen") && !visible("#app-shell"));
+  await login();
+  $('[data-order-edit]').click(); await sleep(50);
+  const orderOpen = $("#order-modal").open;
+  $("#sign-out").click(); await sleep(400);
+  check("4c order dialog closed on sign-out", orderOpen && !$("#order-modal").open);
+  check("4d no open dialogs", d.querySelectorAll("dialog[open]").length === 0);
+
+  // Issue 5: preview opened while login is still loading
+  await load("session=1&delay=1500");
+  check("5a loading shows auth screen", visible("#auth-screen"));
+  $("#open-business-preview").click(); await sleep(50);
+  check("5b preview open", visible("#business-preview-shell"));
+  await sleep(2500);
+  const shown = ["#auth-screen", "#app-shell", "#business-preview-shell"].filter(visible);
+  check("5c only preview visible after login completes", shown.length === 1 && shown[0] === "#business-preview-shell", shown.join(","));
+  $("#exit-business-preview").click(); await sleep(50);
+  const shownAfter = ["#auth-screen", "#app-shell", "#business-preview-shell"].filter(visible);
+  check("5d exit preview -> app (logged in)", shownAfter.length === 1 && shownAfter[0] === "#app-shell", shownAfter.join(","));
+
+  // Preview exit when logged out -> login screen
+  await load("session=0");
+  $("#open-business-preview").click(); await sleep(50);
+  $("#exit-business-preview").click(); await sleep(50);
+  const s6 = ["#auth-screen", "#app-shell", "#business-preview-shell"].filter(visible);
+  check("6a exit preview -> login (logged out)", s6.length === 1 && s6[0] === "#auth-screen", s6.join(","));
+
+  // Regression: basic flows still work
+  await login();
+  $('[data-open-modal="order-modal"]').click(); await sleep(50);
+  check("7a new order dialog opens with clients", $("#order-modal").open && $("#order-client").options.length === 31);
+  $("#order-modal [data-close-modal]").click(); await sleep(50);
+  $('[data-client-view]') || $('.main-nav [data-view="clients"]').click();
+  $('.main-nav [data-view="clients"]').click(); await sleep(50);
+  $("[data-client-view]").click(); await sleep(50);
+  check("7b client details opens", $("#client-details-modal").open && $("#client-details-title").textContent === "לקוח בדיקה 1");
+}
+run().catch((e) => out.push("ERROR " + (e && e.stack || e))).finally(() => {
+  const fails = out.filter((l) => !l.startsWith("PASS")).length;
+  document.getElementById("out").textContent = `RESULT ${fails ? "FAILED" : "OK"} (${out.length - fails}/${out.length})\n` + out.join("\n") + "\nDONE";
+});
+</script>
+</body></html>

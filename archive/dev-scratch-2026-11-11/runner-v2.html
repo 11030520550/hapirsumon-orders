@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>v2 runner</title></head>
+<body>
+<pre id="out">RUNNING</pre>
+<iframe id="f" style="width:1280px;height:800px"></iframe>
+<script>
+"use strict";
+const out = [];
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const frame = document.getElementById("f");
+let w, d;
+const $ = (s) => d.querySelector(s);
+const $$ = (s) => [...d.querySelectorAll(s)];
+const check = (name, cond, detail = "") => out.push(`${cond ? "PASS" : "FAIL"} ${name}${detail ? " — " + detail : ""}`);
+const text = (s) => ($(s)?.textContent || "").replace(/\s+/g, " ").trim();
+const shown = (el) => !!el && el.offsetParent !== null;
+const visible = (s) => { const el = $(s); return !!el && !el.hidden && w.getComputedStyle(el).display !== "none" && (el.offsetParent !== null || w.getComputedStyle(el).position === "fixed"); };
+const page = () => $$("#app-shell .page-view[data-page]").filter((p) => !p.hidden).map((p) => p.dataset.page).join(",");
+function setVal(el, value) { el.value = value; el.dispatchEvent(new w.Event("input", { bubbles: true })); el.dispatchEvent(new w.Event("change", { bubbles: true })); }
+async function load(params, hash = "", width = 1280) {
+  frame.style.width = width + "px";
+  await new Promise((resolve) => { frame.onload = resolve; frame.src = `/__test/app.html?${params}&t=${Math.random()}${hash}`; });
+  w = frame.contentWindow; d = w.document; await sleep(400);
+}
+async function login() {
+  $('#login-form [name="email"]').value = "user@example.invalid";
+  $('#login-form [name="password"]').value = "x";
+  $("#login-form").requestSubmit(); await sleep(700);
+}
+const nav = async (view) => { $(`.main-nav [data-view="${view}"]`).click(); await sleep(150); };
+const db = () => w.__mock.db;
+
+async function run() {
+  // ===== Legacy (schema not installed)
+  await load("session=0&business=0");
+  await login();
+  check("L1 dashboard after login", page() === "dashboard" && w.location.hash === "#/dashboard");
+  check("L2 recent orders: 8 rows", $$("#recent-orders-body tr").length === 8);
+  const views = ["new-order", "orders", "clients", "packages", "payments", "reports", "settings", "dashboard"];
+  let allOk = true;
+  for (const v of views) { await nav(v); if (page() !== v || !$(`.main-nav [data-view="${v}"]`).classList.contains("active")) allOk = false; }
+  check("L3 every nav item opens exactly its screen", allOk);
+  await nav("packages");
+  check("L4 business screen shows install notice, hides content", visible('[data-page="packages"] .biz-required') && !visible("#packages-clients-body"));
+  await nav("orders");
+  setVal($("#search-input"), "רכב");
+  const filtered = $$("#orders-body tr").length;
+  await nav("clients"); await nav("orders");
+  check("L5 search resets when leaving and returning", $("#search-input").value === "" && $$("#orders-body tr").length === 30, `filtered=${filtered}`);
+  await nav("clients");
+  $('[data-client-view="c-test-1"]').click(); await sleep(150);
+  check("L6 client opens as full page with own address", page() === "client" && w.location.hash === "#/client/c-test-1" && text("#client-page-name") === "לקוח בדיקה 2");
+  check("L7 client orders tab lists only this client", $$("#client-orders-body tr").length === 1);
+  w.history.back(); await sleep(200);
+  check("L8 browser back returns to clients", page() === "clients");
+  await nav("new-order");
+  $('[data-page="new-order"] .biz-required [data-open-modal="order-modal"]').click(); await sleep(100);
+  check("L9 legacy new order: old form available", $("#order-modal").open);
+  $("#order-modal").close();
+  $('[data-client-view="c-test-1"]') ; await nav("clients"); $('[data-client-view="c-test-2"]').click(); await sleep(100);
+  $('[data-client-page-action="edit"]').click(); await sleep(50);
+  const editOpen = $("#client-modal").open;
+  w.__mock.expireSession(); await sleep(400);
+  check("L10 session expiry closes dialogs and shows login", editOpen && !$("#client-modal").open && visible("#auth-screen"), `edit=${editOpen} open=${$("#client-modal").open} auth=${visible("#auth-screen")} page=${page()}`);
+  await login();
+  check("L11 re-login lands on dashboard", page() === "dashboard" && w.location.hash === "#/dashboard");
+
+  // ===== Business mode: client -> package -> credits -> orders -> payments
+  await load("session=0&business=1");
+  await login();
+  await nav("clients");
+  $('[data-client-view="c-test-0"]').click(); await sleep(400);
+  check("B1 client page KPIs", text("#client-kpi-package") === "אין חבילה פעילה" && text("#client-kpi-credits") === "0" && visible("#client-kpi-overdue"));
+  $('[data-client-page-action="package"]').click(); await sleep(80);
+  setVal($("#biz-package-select"), "11111111-1111-4111-8111-111111111111");
+  $("#biz-package-submit").click(); await sleep(600);
+  check("B2 package saved: KPI + premium", text("#client-kpi-package") === "מינימום מקסימום" && visible("#client-page-premium") && text("#client-kpi-credits") === "30");
+  $('[data-tab="payments"]').click(); await sleep(50);
+  check("B3 payments tab: 12 installments + legacy order", $$("#client-payments-body tr").length === 13, String($$("#client-payments-body tr").length));
+  $('[data-tab="packages"]').click(); await sleep(50);
+  check("B4 packages tab: card + ledger", $$("#client-packages .package-card").length === 1 && $$("#client-ledger-body tr").length === 1);
+  $('[data-client-page-action="credits"]').click(); await sleep(80);
+  setVal($('#biz-credit-form [name="delta"]'), "-2.5"); setVal($('#biz-credit-form [name="reason"]'), "בדיקת הפחתה");
+  $("#biz-credit-submit").click(); await sleep(600);
+  check("B5 credit adjustment", text("#client-kpi-credits") === "27.5" && $$("#client-ledger-body tr").length === 2);
+
+  $('[data-client-page-action="order"]').click(); await sleep(300);
+  check("B6 new order page with client preselected", page() === "new-order" && $("#new-order-client").value === "c-test-0" && w.location.hash === "#/new-order/c-test-0");
+  const r1 = $("#new-order-rows tr");
+  setVal(r1.querySelector('[name="product_id"]'), "44444444-4444-4444-8444-444444444444");
+  setVal(r1.querySelector('[name="credits_used"]'), "30");
+  check("B7 credit row locks status", r1.querySelector('[name="payment_status"]').disabled);
+  r1.querySelector("[data-row-copy]").click(); await sleep(50);
+  const r2 = $$("#new-order-rows tr")[1];
+  setVal(r2.querySelector('[name="credits_used"]'), "");
+  setVal(r2.querySelector('[name="cash_amount_before_vat"]'), "500");
+  setVal($("#new-order-sequence"), "125"); $("#new-order-apply-sequence").click(); await sleep(50);
+  check("B8 sequence fills sheets", r1.querySelector('[name="sheet_number"]').value === "125" && r2.querySelector('[name="sheet_number"]').value === "126");
+  setVal(r1.querySelector('[name="notes"]'), "שורה 1");
+  check("B9 live summary", text("#new-order-summary").includes("590") && text("#new-order-summary").includes("-2.5"), text("#new-order-summary"));
+  const before = db().orders.length;
+  w.__mock.failNext("after");
+  $("#new-order-submit").click(); await sleep(400);
+  check("B10 network failure: error, rows kept, no fake success", text("#new-order-message").includes("לא ניתן להגיע") && $$("#new-order-rows tr").length === 2 && $("#new-order-result").hidden);
+  $("#new-order-submit").click(); await sleep(700);
+  check("B11 retry creates exactly 2 orders (no duplicates)", db().orders.length === before + 2, `${before}->${db().orders.length}`);
+  check("B12 result shown, form reset to one row", !$("#new-order-result").hidden && text("#new-order-result").includes("נשמרו 2") && $$("#new-order-rows tr").length === 1);
+
+  await nav("payments");
+  check("B13 payments page: 590 open", text("#payments-body").includes("590"), `rows=${$$("#payments-body tr").length} filter=${$("#payments-filter").value} ${text("#payments-body").slice(0,200)}`);
+  const payRow = $$("#payments-body tr").find((tr) => tr.textContent.includes("590"));
+  payRow.querySelector("[data-biz-pay]").click(); await sleep(600);
+  check("B14 marked paid via RPC", !text("#payments-body").includes("590.00") && db().orders.find((o) => o.sheet_number === "126").payment_status === "paid");
+  setVal($("#payments-filter"), "paid"); await sleep(50);
+  check("B15 paid filter shows it", text("#payments-body").includes("590"));
+
+  await nav("orders");
+  const target = db().orders.find((o) => o.id === "o-test-1");
+  const sel = $('[data-order-id="o-test-1"]'); sel.value = "paid"; sel.dispatchEvent(new w.Event("change", { bubbles: true })); await sleep(600);
+  check("B16 orders list status via RPC", target.payment_status === "paid");
+  target.updated_at = "2099-01-01T00:00:00Z";
+  const sel2 = $('[data-order-id="o-test-1"]'); w.prompt = () => "בדיקה"; sel2.value = "pending"; sel2.dispatchEvent(new w.Event("change", { bubbles: true })); await sleep(500);
+  check("B17 stale version rejected", target.payment_status === "paid" && text("#toast").includes("השתנה"), text("#toast"));
+
+  await nav("packages");
+  check("B18 packages page: balances + catalog", text("#packages-clients-body").includes("-2.5") && $$("#package-catalog-body tr").length === 3);
+  await nav("reports");
+  await sleep(200);
+  check("B19 reports: totals + monthly", !text("#report-billed").startsWith("₪0") && $$("#report-monthly-body tr").length >= 1, text("#report-billed"));
+  await nav("settings");
+  check("B20 settings: VAT 18 and 1 product", $('#vat-form [name="vat"]').value === "18" && $$("#products-body tr").length === 1);
+  $("#product-new").click(); await sleep(80);
+  const pf = $("#biz-product-form");
+  setVal(pf.elements.name, "עמוד מלא (בדיקה)"); setVal(pf.elements.price, "900"); setVal(pf.elements.credits, "4"); pf.elements.active.checked = true;
+  $("#biz-product-submit").click(); await sleep(500);
+  check("B21 product saved", $$("#products-body tr").length === 2 && !$("#biz-product-modal").open);
+  setVal($('#vat-form [name="vat"]'), "17"); $("#vat-submit").click(); await sleep(500);
+  await nav("new-order");
+  setVal($("#new-order-rows tr").querySelector('[name="cash_amount_before_vat"]'), "100");
+  check("B22 new VAT used in order summary", text("#new-order-summary").includes("117") && $("#new-order-rows tr").querySelector('[name="product_id"]').options.length === 3, text("#new-order-summary"));
+
+  // ===== deep link restored after login
+  await load("session=1&business=1", "#/client/c-test-3");
+  await sleep(500);
+  check("D1 deep link opens client page after login", page() === "client" && text("#client-page-name") === "לקוח בדיקה 4");
+
+  // ===== no products
+  await load("session=1&business=1&noproducts=1", "#/new-order");
+  await sleep(400);
+  check("N1 no products: save disabled + guidance", $("#new-order-submit").disabled && text("#new-order-message").includes("אין מוצרים"));
+
+  // ===== mobile width
+  await load("session=1&business=1", "#/dashboard", 390);
+  await sleep(500);
+  const overflow = () => d.documentElement.scrollWidth - w.innerWidth;
+  const ov1 = overflow();
+  await nav("new-order"); await sleep(200); const ov2 = overflow();
+  w.location.hash = "#/client/c-test-0"; await sleep(500); const ov3 = overflow();
+  await nav("payments"); await sleep(200); const ov4 = overflow();
+  check("M1 mobile: no page-level horizontal overflow", ov1 <= 1 && ov2 <= 1 && ov3 <= 1 && ov4 <= 1, `${ov1},${ov2},${ov3},${ov4}`);
+  check("M2 mobile: nav visible", visible('.main-nav [data-view="payments"]'));
+}
+run().catch((e) => out.push("ERROR " + (e && e.stack || e))).finally(() => {
+  const fails = out.filter((l) => !l.startsWith("PASS")).length;
+  document.getElementById("out").textContent = `RESULT ${fails ? "FAILED" : "OK"} (${out.length - fails}/${out.length})\n` + out.join("\n") + "\nDONE";
+});
+</script>
+</body></html>

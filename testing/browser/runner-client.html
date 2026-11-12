@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>client file runner</title></head>
+<body>
+<pre id="out">RUNNING</pre>
+<iframe id="f" style="width:1200px;height:700px"></iframe>
+<script>
+"use strict";
+const out = [];
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const frame = document.getElementById("f");
+let w, d;
+const $ = (s) => d.querySelector(s);
+const $$ = (s) => [...d.querySelectorAll(s)];
+const check = (name, cond, detail = "") => out.push(`${cond ? "PASS" : "FAIL"} ${name}${detail ? " — " + detail : ""}`);
+const text = (s) => ($(s)?.textContent || "").replace(/\s+/g, " ").trim();
+
+async function openCard(id) {
+  for (const dlg of $$("dialog[open]")) dlg.close();
+  $(`[data-preview-client-view="${id}"]`).click(); await sleep(50);
+}
+
+async function run() {
+  await new Promise((resolve) => { frame.onload = resolve; frame.src = `/__test/app.html?session=0&t=${Math.random()}`; });
+  w = frame.contentWindow; d = w.document; await sleep(300);
+  const requests = () => w.performance.getEntriesByType("resource").filter((e) => /supabase\.co/.test(e.name)).length;
+  $("#open-business-preview").click(); await sleep(50);
+  check("A1 premium badges only for clients with active package", $$("#preview-clients-body .premium-badge").length === 2);
+
+  await openCard("demo-client-001");
+  check("B1 card open + premium tag", $("#preview-client-details").open && !$("#preview-client-premium").hidden);
+  check("B2 active package", text("#preview-detail-package").includes("מינימום מקסימום") && text("#preview-detail-package-grid").includes("30"), text("#preview-detail-package"));
+  check("B3 benefits listed", text("#preview-detail-benefits").includes("מיקום על המפה"));
+  check("B4 half-credit balance 5.5", text("#preview-detail-credits").includes("5.5") && !text("#preview-detail-credits").includes("שלילית"), text("#preview-detail-credits"));
+  check("B5 12 installments, 5 paid", $$("#preview-detail-installments tr").length === 12 && $$("#preview-detail-installments .paid").length === 5);
+  check("B6 installment amount incl. VAT 211.22", text("#preview-detail-installments").includes("211.22"));
+  check("B7 undated cash debt 590 not overdue", text("#preview-detail-debts").includes("590") && text("#preview-detail-debts").includes("ללא מועד פירעון"), text("#preview-detail-debts").slice(0, 160));
+  check("B8 order history", text("#preview-detail-orders").includes("דוגמה-001"));
+
+  await openCard("demo-client-003");
+  check("C1 negative balance -2.5 flagged", /-2\.5|‎-2\.5/.test(text("#preview-detail-credits")) && text("#preview-detail-credits").includes("יתרה שלילית"), text("#preview-detail-credits"));
+  check("C2 two overdue installments", $$("#preview-detail-installments tr").filter((tr) => tr.textContent.includes("באיחור")).length === 2);
+  check("C3 overdue total 823.64", text("#preview-detail-debts").includes("823.64"), text("#preview-detail-debts").slice(0, 120));
+
+  await openCard("demo-client-002");
+  check("D1 ended package → not premium", $("#preview-client-premium").hidden && text("#preview-detail-package").includes("חבילה קודמת"));
+  check("D2 ended package installments all paid", $$("#preview-detail-installments .pending").length === 0 && $$("#preview-detail-installments tr").length === 12);
+
+  await openCard("demo-client-004");
+  check("E1 no package: empty installments message", !$("#preview-detail-installments-empty").hidden && $("#preview-detail-installments-wrap").hidden);
+  check("E2 no debts", text("#preview-detail-debts").includes("אין חובות פתוחים"));
+
+  // Purchase: catalog package
+  await openCard("demo-client-001");
+  $('[data-preview-action="open-package"]').click(); await sleep(50);
+  const modal = $("#preview-package-modal");
+  check("F1 purchase dialog open over card", modal.open && text("#preview-package-client").includes("נועה לדוגמה"));
+  const select = $("#preview-package-select");
+  check("F2 three packages + custom", select.options.length === 5 && select.options[4].value === "custom");
+  select.value = "leading-brand"; select.dispatchEvent(new w.Event("change", { bubbles: true })); await sleep(20);
+  check("F3 default 12 installments", $('#preview-package-form [name="installment_count"]').value === "12");
+  $("#preview-package-check").click(); await sleep(20);
+  const summary = text("#preview-package-summary");
+  check("F4 summary price 4,188 + 12 rows", summary.includes("4,188") && (summary.match(/ \d+\. /g) || []).length === 12, summary.slice(0, 120));
+  check("F5 says nothing saved", summary.includes("לא נשמר דבר"));
+  check("F6 save button disabled", $("#preview-package-modal .button-primary").disabled);
+
+  // Purchase: custom package with uneven split
+  select.value = "custom"; select.dispatchEvent(new w.Event("change", { bubbles: true })); await sleep(20);
+  check("G1 custom fields shown", !$("#preview-custom-package-fields").hidden);
+  $("#preview-package-check").click(); await sleep(20);
+  check("G2 custom requires fields", !summary.includes("מותאמת") && !text("#preview-package-summary").includes("מותאמת"));
+  const f = $("#preview-package-form").elements;
+  f.custom_name.value = "הסכם בדיקה"; f.custom_credits.value = "7.5"; f.custom_term.value = "3"; f.custom_price.value = "1000"; f.installment_count.value = "3";
+  $("#preview-package-check").click(); await sleep(20);
+  const s2 = text("#preview-package-summary");
+  check("G3 custom summary: 7.5 credits, 393.33 + 393.34", s2.includes("7.5") && s2.includes("393.33") && s2.includes("393.34") && s2.includes("1,000"), s2.slice(0, 200));
+  check("H1 no Supabase network requests", requests() === 0, String(requests()));
+}
+run().catch((e) => out.push("ERROR " + (e && e.stack || e))).finally(() => {
+  const fails = out.filter((l) => !l.startsWith("PASS")).length;
+  document.getElementById("out").textContent = `RESULT ${fails ? "FAILED" : "OK"} (${out.length - fails}/${out.length})\n` + out.join("\n") + "\nDONE";
+});
+</script>
+</body></html>
