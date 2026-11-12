@@ -1,0 +1,8 @@
+# Binary assets: never convert line endings or diff as text.
+*.pdf binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+
+# Archived data exports are kept byte-for-byte as originally saved (LF line endings).
+archive/data-exports-2026-11-11/*.json -text
