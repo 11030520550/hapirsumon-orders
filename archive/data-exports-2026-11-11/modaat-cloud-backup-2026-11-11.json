@@ -1,0 +1,116 @@
+{
+  "format": "modaat-local-backup-v1",
+  "exportedAt": "2026-11-11T16:10:30.231Z",
+  "storageKey": "modaat-newspaper-ads-v1",
+  "data": {
+    "clients": [
+      {
+        "id": "c-1",
+        "name": "׳¡׳˜׳•׳“׳™׳• ׳ ׳•׳¢׳”",
+        "phone": "050-1234567",
+        "email": "noa@example.com"
+      },
+      {
+        "id": "c-1794227183283",
+        "name": "׳‘׳“׳™׳§׳× ׳׳§׳•׳—",
+        "phone": "",
+        "email": ""
+      },
+      {
+        "id": "c-3",
+        "name": "׳׳׳₪׳™׳™׳× ׳©׳§׳“",
+        "phone": "03-5551234",
+        "email": "info@example.com"
+      },
+      {
+        "id": "c-2",
+        "name": "׳׳•׳₪׳§ ׳ ׳“׳׳´׳",
+        "phone": "052-7654321",
+        "email": "office@example.com"
+      },
+      {
+        "id": "c-1794227887305",
+        "name": "׳¨׳—׳׳™ ׳—׳™׳™׳",
+        "phone": "0527696981",
+        "email": "ayala9490a@gmail.com"
+      },
+      {
+        "id": "c-1794227854182",
+        "name": "׳™׳©׳¨׳׳ ׳™׳©׳¨׳׳׳™",
+        "phone": "0527696981",
+        "email": "ayala9490a@gmail.com"
+      },
+      {
+        "id": "c-fcacfcd6-03b7-4b96-9997-63864cf71a3b",
+        "name": "חנה סברדלוב",
+        "phone": "0583299490",
+        "email": "chana@gmail.com"
+      }
+    ],
+    "orders": [
+      {
+        "id": "o-1046",
+        "clientId": "c-3",
+        "date": "2026-11-17",
+        "section": "׳׳§׳•׳׳™",
+        "amount": 950,
+        "paymentStatus": "paid",
+        "notes": ""
+      },
+      {
+        "id": "o-1047",
+        "clientId": "c-2",
+        "date": "2026-11-14",
+        "section": "׳ ׳“׳׳´׳",
+        "amount": 2800,
+        "paymentStatus": "paid",
+        "notes": ""
+      },
+      {
+        "id": "o-1048",
+        "clientId": "c-1",
+        "date": "2026-11-11",
+        "section": "׳§׳”׳™׳׳”",
+        "amount": 1250,
+        "paymentStatus": "pending",
+        "notes": ""
+      },
+      {
+        "id": "o-a0f6f04e-44ae-461b-95ec-e7de899d34c9",
+        "clientId": "c-fcacfcd6-03b7-4b96-9997-63864cf71a3b",
+        "date": "2026-11-10",
+        "section": "נדל\"ן",
+        "amount": 680,
+        "paymentStatus": "pending",
+        "notes": "חצי עמוד"
+      },
+      {
+        "id": "o-1794227183467",
+        "clientId": "c-1794227183283",
+        "date": "2026-11-10",
+        "section": "׳‘׳“׳™׳§׳× ׳׳“׳•׳¨",
+        "amount": 400,
+        "paymentStatus": "paid",
+        "notes": ""
+      },
+      {
+        "id": "o-1794228206378",
+        "clientId": "c-1",
+        "date": "2026-11-09",
+        "section": "׳ ׳“׳\"׳",
+        "amount": 4,
+        "paymentStatus": "pending",
+        "notes": ""
+      },
+      {
+        "id": "o-1045",
+        "clientId": "c-1",
+        "date": "2026-11-06",
+        "section": "׳×׳¨׳‘׳•׳×",
+        "amount": 1600,
+        "paymentStatus": "paid",
+        "notes": ""
+      }
+    ]
+  }
+}

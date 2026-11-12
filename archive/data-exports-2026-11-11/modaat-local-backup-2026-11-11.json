@@ -1,0 +1,77 @@
+{
+  "format": "modaat-local-backup-v1",
+  "exportedAt": "2026-11-11T16:10:18.867Z",
+  "storageKey": "modaat-newspaper-ads-v1",
+  "data": {
+    "clients": [
+      {
+        "id": "c-1",
+        "name": "סטודיו נועה",
+        "phone": "050-1234567",
+        "email": "noa@example.com"
+      },
+      {
+        "id": "c-2",
+        "name": "אופק נדל״ן",
+        "phone": "052-7654321",
+        "email": "office@example.com"
+      },
+      {
+        "id": "c-3",
+        "name": "מאפיית שקד",
+        "phone": "03-5551234",
+        "email": "info@example.com"
+      },
+      {
+        "id": "c-1794227854182",
+        "name": "ישראל ישראלי",
+        "phone": "0527696981",
+        "email": "ayala9490a@gmail.com"
+      },
+      {
+        "id": "c-1794227887305",
+        "name": "רחלי חיים",
+        "phone": "0527696981",
+        "email": "ayala9490a@gmail.com"
+      }
+    ],
+    "orders": [
+      {
+        "id": "o-1048",
+        "clientId": "c-1",
+        "date": "2026-11-11",
+        "section": "קהילה",
+        "amount": 1250,
+        "paymentStatus": "paid",
+        "notes": ""
+      },
+      {
+        "id": "o-1047",
+        "clientId": "c-2",
+        "date": "2026-11-14",
+        "section": "נדל״ן",
+        "amount": 2800,
+        "paymentStatus": "pending",
+        "notes": ""
+      },
+      {
+        "id": "o-1046",
+        "clientId": "c-3",
+        "date": "2026-11-17",
+        "section": "מקומי",
+        "amount": 950,
+        "paymentStatus": "pending",
+        "notes": ""
+      },
+      {
+        "id": "o-1045",
+        "clientId": "c-1",
+        "date": "2026-11-06",
+        "section": "תרבות",
+        "amount": 1600,
+        "paymentStatus": "paid",
+        "notes": ""
+      }
+    ]
+  }
+}

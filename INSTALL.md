@@ -24,7 +24,7 @@
 ## הגדרות מקומיות שאינן ב-Git (ליצור מחדש רק אם נדרש)
 
 - `testing/supabase-test-config.json` — רק לכלי הבדיקה של פרויקט Supabase נפרד (`SUPABASE-TESTING.md`). להעתיק מ-`testing/supabase-test-config.example.json` ולמלא מפתח publishable של פרויקט בדיקה בלבד.
-- `reference/` — מחירון וחבילות של העיתון (חומר עסקי, מוחרג בכוונה). ראו `PROJECT-HANDOFF.md`.
+- אין צורך ליצור מחדש את `reference/` — המחירון ותמונת החבילות נשמרים ב-Repository.
 
 ## הרצה מקומית
 

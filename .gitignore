@@ -50,11 +50,11 @@ dist/
 build/
 orders-netlify-ready/
 
-# Internal reference material
-reference/
+# Reference material (newspaper price list and packages) is versioned in reference/
+# since 2026-11-12 with the owner's explicit approval (see ARCHIVE-INDEX.md).
 
-# Historical code versions and dev tooling (see ARCHIVE-INDEX.md).
-# Code/docs/images only: data exports (*.json, *.csv ...), secrets and reference/ stay excluded.
+# Historical code versions, dev tooling, reference copies and approved demo exports (see ARCHIVE-INDEX.md).
+# Secrets stay excluded everywhere. Only the two listed demo exports are re-included; any other JSON stays ignored.
 !archive/**/
 !archive/**/*.html
 !archive/**/*.js
@@ -62,3 +62,6 @@ reference/
 !archive/**/*.md
 !archive/**/*.sql
 !archive/**/*.png
+!archive/**/*.pdf
+!archive/data-exports-2026-11-11/modaat-cloud-backup-2026-11-11.json
+!archive/data-exports-2026-11-11/modaat-local-backup-2026-11-11.json

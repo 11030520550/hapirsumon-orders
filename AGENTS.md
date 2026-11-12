@@ -20,8 +20,8 @@
 - Never commit customer/order data, JSON exports, backups, private environment files, credentials, Supabase `service_role`/secret keys, or temporary files.
 - A Supabase publishable key may be present in client configuration; verify that no secret key is included before staging.
 - Review `git status` and the staged diff before every commit. Use `git diff --cached --check` and inspect the staged file list. Never push customer data, backups, passwords, secret keys, or other sensitive files.
-- Keep data backups and internal reference material (`reference/`) outside version control.
-- Exception approved by the user (2026-11-12): historical **code** versions, dev tooling and UI screenshots are kept in `archive/` (see `ARCHIVE-INDEX.md`). The archive must never contain customer data, JSON exports or secrets.
+- Keep new data backups and exports outside version control.
+- Exceptions approved by the project owner (2026-11-12), see `ARCHIVE-INDEX.md`: historical code versions, dev tooling and UI screenshots in `archive/`; the reference material in `reference/`; and exactly two demo-data exports in `archive/data-exports-2026-11-11/`. Do not add further exports or any secrets without new explicit approval.
 - Never ask the user to send a password or access token in chat. Use Git Credential Manager or another secure GitHub sign-in flow.
 
 ## Project constraints
