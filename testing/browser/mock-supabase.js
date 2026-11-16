@@ -189,7 +189,13 @@
   const client = {
     auth: {
       async getSession() { return { data: { session: state.session }, error: null }; },
-      async signInWithPassword() { state.session = { user }; setTimeout(() => emit("SIGNED_IN", state.session), 0); return { data: { session: state.session }, error: null }; },
+      async signInWithPassword(credentials = {}) {
+        state.signInCalls = (state.signInCalls || 0) + 1;
+        if (params.get("signindelay")) await wait(Number(params.get("signindelay")));
+        if (credentials.password === "wrong") return { data: { session: null }, error: { code: "invalid_credentials", message: "Invalid login credentials" } };
+        if (credentials.password === "offline") return { data: { session: null }, error: { message: "Failed to fetch" } };
+        state.session = { user }; setTimeout(() => emit("SIGNED_IN", state.session), 0); return { data: { session: state.session }, error: null };
+      },
       async signOut() { state.session = null; setTimeout(() => emit("SIGNED_OUT", null), 0); return { error: null }; },
       onAuthStateChange(cb) { state.listeners.push(cb); return { data: { subscription: { unsubscribe() {} } } }; }
     },
@@ -223,7 +229,8 @@
   window.__mock = {
     db, state,
     expireSession() { state.session = null; emit("SIGNED_OUT", null); },
-    failNext(mode) { state.failNext = mode; }
+    failNext(mode) { state.failNext = mode; },
+    get signInCalls() { return state.signInCalls || 0; }
   };
   window.supabase = { createClient: () => client };
 })();

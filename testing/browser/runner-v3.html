@@ -238,6 +238,47 @@ async function run() {
   $('[data-desk-go="payments"][data-desk-value="undated"]').click(); await sleep(300);
   check("S5 dashboard shortcut opens payments with its filter", page() === "payments" && $("#payments-filter").value === "undated");
 
+  // ===== login screen
+  const fillLogin = (password) => { $('#login-form [name="email"]').value = "user@example.invalid"; $('#login-form [name="password"]').value = password; };
+  await load("session=0&business=1");
+  check("A1 login: no preview/backup entry points, one primary button",
+    !$("#open-business-preview") && !$("#download-prelogin-backup") && $$("#auth-screen .button-primary").length === 1);
+  fillLogin("wrong"); $("#login-form").requestSubmit(); await sleep(300);
+  check("A2 wrong password: error tone, password cleared, button usable",
+    $("#login-message").dataset.tone === "error" && text("#login-message").includes("שגויות") && $('#login-form [name="password"]').value === "" && !$("#login-submit").disabled,
+    `${$("#login-message").dataset.tone} ${text("#login-message")}`);
+  fillLogin("offline"); $("#login-form").requestSubmit(); await sleep(300);
+  check("A3 network failure: clear error", $("#login-message").dataset.tone === "error" && text("#login-message").includes("לא ניתן להגיע"), text("#login-message"));
+
+  await load("session=0&business=1&signindelay=600&delay=400");
+  fillLogin("x"); $("#login-form").requestSubmit(); await sleep(120);
+  const toneDuring = $("#login-message").dataset.tone;
+  const busyDuring = $("#login-submit").disabled && $("#login-submit").classList.contains("is-loading");
+  $("#login-form").requestSubmit(); $("#login-form").requestSubmit(); await sleep(50);
+  check("A4 in progress: neutral (not red) status + loading button", toneDuring === "info" && busyDuring, `tone=${toneDuring} busy=${busyDuring}`);
+  check("A5 double submission blocked", w.__mock.signInCalls === 1, String(w.__mock.signInCalls));
+  await sleep(1800);
+  check("A6 successful login opens the app", page() === "dashboard" && !visible("#auth-screen"));
+
+  await load("session=1&business=1"); await sleep(400);
+  check("A7 page refresh with a session restores the app", page() === "dashboard" && !visible("#auth-screen"));
+
+  await load("session=0&business=1");
+  $("#password-toggle").click();
+  check("A8 password reveal toggle", $('#login-form [name="password"]').type === "text" && $("#password-toggle").getAttribute("aria-pressed") === "true");
+
+  const loginLayout = [];
+  for (const width of [1440, 1024, 768, 390]) {
+    await load("session=0&business=1", "", width);
+    const overflowX = d.documentElement.scrollWidth - w.innerWidth;
+    const button = $("#login-submit").getBoundingClientRect().width;
+    const field = $('#login-form [name="email"]').getBoundingClientRect().width;
+    const img = $(".auth-photo"); const photo = img.getBoundingClientRect();
+    loginLayout.push({ width, ok: overflowX <= 1 && button >= 260 && field >= 260 && img.complete && img.naturalWidth > 0 && photo.width > 0 && photo.height > 0, overflowX, button: Math.round(button), field: Math.round(field), photo: img.naturalWidth });
+  }
+  check("A9 login layout: no horizontal scroll, controls not squeezed, photo shown (1440/1024/768/390)",
+    loginLayout.every((row) => row.ok), JSON.stringify(loginLayout));
+
   // ===== mobile width
   await load("session=1&business=1", "#/dashboard", 390);
   await sleep(500);

@@ -819,7 +819,8 @@
     if ($("#auth-screen").hidden && $("#app-shell").hidden) $("#auth-screen").hidden = false;
   }
 
-  $("#open-business-preview").addEventListener("click", openPreview);
+  // The login screen no longer offers the preview (no unauthenticated entry point); the code stays for later review.
+  $("#open-business-preview")?.addEventListener("click", openPreview);
   $("#exit-business-preview").addEventListener("click", closePreview);
   $('[data-preview-view="clients"]').addEventListener("click", (event) => switchPreviewView("clients", event.currentTarget));
   $('[data-preview-view="orders"]').addEventListener("click", (event) => switchPreviewView("orders", event.currentTarget));

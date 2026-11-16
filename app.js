@@ -106,38 +106,38 @@
     if (code === "NOT_APPROVED") return message;
     if (code === "SETUP_REQUIRED") return message;
     if (/row-level security|permission denied|not allowed/i.test(message) || code === "42501") {
-      return "אין לחשבון זה הרשאה לבצע את הפעולה. ודאי שהמשתמש אושר ב-Supabase.";
+      return "אין לחשבון זה הרשאה לבצע את הפעולה. יש לוודא שהמשתמש אושר במערכת.";
     }
     if (/invalid login credentials/i.test(message) || code === "invalid_credentials") {
-      return "כתובת הדוא״ל או הסיסמה שגויים.";
+      return "כתובת הדוא״ל או הסיסמה שגויות. יש לבדוק ולנסות שוב.";
     }
     if (/email not confirmed/i.test(message)) {
       return "יש לאשר את כתובת הדוא״ל דרך הודעת האישור שנשלחה.";
     }
     if (code === "40001") {
-      return message || "הרשומה השתנתה אצל משתמשת אחרת. רענני את הנתונים ונסי שוב.";
+      return message || "הרשומה השתנתה אצל משתמש אחר. יש לרענן את הנתונים ולנסות שוב.";
     }
     if (code === "P0001" && message) return message;
     if (error instanceof Error && !code && /קידוד|UTF-8|משובש/.test(message)) return message;
     if (code === "STALE_RECORD") {
-      return "הרשומה השתנתה אצל משתמשת אחרת. הנתונים שלך לא נשמרו; רענני את הרשימה, בדקי את השינוי ונסי שוב.";
+      return "הרשומה השתנתה אצל משתמש אחר. הנתונים לא נשמרו; יש לרענן את הרשימה, לבדוק את השינוי ולנסות שוב.";
     }
     if (code === "VERSION_REQUIRED") {
       return "נדרשת התקנת עדכון מסד הנתונים למניעת דריסת שינויים מקבילים. יש להריץ את supabase-reliability-migration.sql.";
     }
     if (/duplicate key|already exists/i.test(message) || code === "23505") {
-      return "רשומה עם אותו מזהה כבר קיימת. הנתונים לא נדרסו; בדקי כפילויות ונסי שוב.";
+      return "רשומה עם אותו מזהה כבר קיימת. הנתונים לא נדרסו; יש לבדוק כפילויות ולנסות שוב.";
     }
     if (/foreign key|violates foreign key/i.test(message) || code === "23503") {
-      return "לא ניתן לבצע את הפעולה כי קיימות רשומות קשורות. בדקי את הלקוחות וההזמנות.";
+      return "לא ניתן לבצע את הפעולה כי קיימות רשומות קשורות. יש לבדוק את הלקוחות וההזמנות.";
     }
     if (/failed to fetch|network|fetch/i.test(message)) {
-      return "לא ניתן להגיע ל-Supabase. בדקי את החיבור לאינטרנט ואת כתובת הפרויקט.";
+      return "לא ניתן להגיע לשרת. יש לבדוק את החיבור לאינטרנט ולנסות שוב.";
     }
     if (/schema cache|column .* does not exist|could not find the .* column/i.test(message) || code.startsWith("PGRST")) {
-      return "מבנה הטבלאות ב-Supabase אינו תואם להגדרות האתר. בדקי את הסכימה וההרשאות.";
+      return "מבנה מסד הנתונים אינו תואם להגדרות האתר. יש לפנות למנהל המערכת.";
     }
-    return message ? `הפעולה לא הושלמה מול Supabase: ${message}` : "הפעולה נכשלה. נסי שוב.";
+    return message ? `הפעולה לא הושלמה מול Supabase: ${message}` : "הפעולה נכשלה. יש לנסות שוב.";
   }
 
   function previewIsOpen() {
@@ -180,12 +180,33 @@
     window.scrollTo(0, 0);
   }
 
-  function showAuth(message = "", sessionAvailable = false) {
+  // Login status line. tone: "info" = progress (neutral, never red), "success", "error" = a real failure.
+  function setLoginMessage(message = "", tone = message ? "error" : "") {
+    const box = $("#login-message");
+    box.textContent = message;
+    box.dataset.tone = message ? tone : "";
+    box.setAttribute("aria-live", tone === "error" ? "assertive" : "polite");
+  }
+
+  // Busy state for the login form: one request at a time, spinner on the single primary button.
+  let loginBusy = false;
+  function setLoginBusy(busy, label = "מתחברים…") {
+    loginBusy = busy;
+    const form = $("#login-form");
+    const submit = $("#login-submit");
+    form.setAttribute("aria-busy", String(busy));
+    submit.disabled = busy || !supabaseClient;
+    submit.classList.toggle("is-loading", busy);
+    $(".auth-submit-label", submit).textContent = busy ? label : "התחברות";
+    form.querySelectorAll("input").forEach((field) => { field.readOnly = busy; });
+  }
+
+  function showAuth(message = "", sessionAvailable = false, tone = message ? "error" : "") {
     requestedScreen = "auth";
     resetWorkspace();
     document.dispatchEvent(new CustomEvent("modaat:signed-out"));
     applyScreen();
-    $("#login-message").textContent = message;
+    setLoginMessage(message, tone);
     $("#auth-sign-out").hidden = !sessionAvailable;
     $("#auth-retry").hidden = !sessionAvailable;
   }
@@ -266,7 +287,7 @@
       throw error;
     }
     if (approved !== true) {
-      const error = new Error("החשבון התחבר אך עדיין לא אושר לשימוש. בקשי ממנהלת המערכת להוסיף אותו לרשימת המשתמשים המורשים.");
+      const error = new Error("החשבון התחבר אך עדיין לא אושר לשימוש. יש לפנות למנהל המערכת כדי לאשר אותו.");
       error.code = "NOT_APPROVED";
       throw error;
     }
@@ -439,7 +460,8 @@
     if (loadingUserId === session.user.id) return;
 
     loadingUserId = session.user.id;
-    showAuth("מתחברת למסד הנתונים ובודקת הרשאות…", true);
+    showAuth("מתחברים למסד הנתונים ובודקים הרשאות…", false, "info");
+    setLoginBusy(true, "טוען את המערכת…");
     try {
       await checkApproval();
       businessSchema = await detectBusinessSchema();
@@ -463,6 +485,7 @@
       showAuth(friendlyError(error), true);
     } finally {
       loadingUserId = null;
+      setLoginBusy(false);
     }
   }
 
@@ -1093,7 +1116,7 @@
       data = { clients: [], orders: [] };
       render();
       setSyncStatus("התחברות נדרשת");
-      showAuth("התנתקת מהמערכת.");
+      showAuth("ההתנתקות בוצעה בהצלחה.", false, "success");
     } catch (error) {
       console.error("התנתקות נכשלה:", error);
       showToast(`ההתנתקות נכשלה: ${friendlyError(error)}`, true);
@@ -1101,8 +1124,8 @@
   }
 
   async function retrySession() {
-    if (!supabaseClient) return;
-    $("#login-message").textContent = "בודקת שוב את ההרשאות…";
+    if (!supabaseClient || loginBusy) return;
+    setLoginMessage("בודקים שוב את ההרשאות…", "info");
     try {
       const { data: sessionData, error } = await supabaseClient.auth.getSession();
       if (error) throw error;
@@ -1110,33 +1133,55 @@
       await activateSession(sessionData.session);
     } catch (error) {
       console.error("בדיקת הרשאות חוזרת נכשלה:", error);
-      $("#login-message").textContent = friendlyError(error);
+      setLoginMessage(friendlyError(error), "error");
     }
   }
 
   $("#login-form").addEventListener("submit", async (event) => {
     event.preventDefault();
-    if (!supabaseClient) return;
+    // A second Enter/click while a sign-in is running is ignored (no double submission).
+    if (!supabaseClient || loginBusy) return;
     const form = event.currentTarget;
     if (!form.reportValidity()) return;
-    const submit = $("#login-submit");
-    submit.disabled = true;
-    $("#login-message").textContent = "מתחברת…";
+    if (!navigator.onLine) {
+      setLoginMessage("אין חיבור לאינטרנט. יש לבדוק את החיבור ולנסות שוב.", "error");
+      return;
+    }
     const formData = new FormData(form);
+    setLoginBusy(true, "מתחברים…");
+    setLoginMessage("מאמתים את הפרטים…", "info");
+    let signedIn = false;
     try {
       const { data: authData, error } = await supabaseClient.auth.signInWithPassword({
         email: String(formData.get("email")).trim(),
         password: String(formData.get("password"))
       });
       if (error) throw error;
+      signedIn = true;
       form.elements.password.value = "";
+      setLoginBusy(false);
       await activateSession(authData.session);
     } catch (error) {
       console.error("התחברות נכשלה:", error);
-      $("#login-message").textContent = friendlyError(error);
+      setLoginMessage(friendlyError(error), "error");
+      const wrongCredentials = /invalid login credentials/i.test(String(error && error.message)) || (error && error.code === "invalid_credentials");
+      if (!signedIn && wrongCredentials) {
+        form.elements.password.value = "";
+        form.elements.password.focus();
+      }
     } finally {
-      submit.disabled = false;
+      if (!loadingUserId) setLoginBusy(false);
     }
+  });
+
+  $("#password-toggle").addEventListener("click", (event) => {
+    const toggle = event.currentTarget;
+    const field = $("#login-form").elements.password;
+    const reveal = field.type === "password";
+    field.type = reveal ? "text" : "password";
+    toggle.textContent = reveal ? "הסתרה" : "הצגה";
+    toggle.setAttribute("aria-pressed", String(reveal));
+    toggle.setAttribute("aria-label", reveal ? "הסתרת הסיסמה" : "הצגת הסיסמה");
   });
 
   $("#client-form").addEventListener("submit", async (event) => {
@@ -1392,12 +1437,12 @@
       }
     }
     if (!validUrl || !validKey) {
-      showAuth("כדי להתחבר, הגדירי את Project URL ואת מפתח ה-publishable בקובץ supabase-config.js. לא נעשה שימוש בשמירה מקומית.");
+      showAuth("המערכת אינה מוגדרת להתחברות: חסרים כתובת הפרויקט או המפתח הציבורי בקובץ supabase-config.js.");
       $("#login-submit").disabled = true;
       return;
     }
     if (!window.supabase || typeof window.supabase.createClient !== "function") {
-      showAuth("ספריית Supabase לא נטענה. בדקי את החיבור לאינטרנט ונסי לטעון מחדש.");
+      showAuth("רכיב ההתחברות לא נטען. יש לבדוק את החיבור לאינטרנט ולטעון את הדף מחדש.");
       $("#login-submit").disabled = true;
       return;
     }

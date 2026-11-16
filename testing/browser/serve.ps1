@@ -9,7 +9,7 @@ param(
 # /__test/...  -> files from this testing/browser folder
 # /__test/app.html -> project index.html with the Supabase CDN script replaced by a local mock
 $ErrorActionPreference = "Stop"
-$types = @{ ".html" = "text/html; charset=utf-8"; ".css" = "text/css; charset=utf-8"; ".js" = "text/javascript; charset=utf-8"; ".png" = "image/png"; ".svg" = "image/svg+xml" }
+$types = @{ ".html" = "text/html; charset=utf-8"; ".css" = "text/css; charset=utf-8"; ".js" = "text/javascript; charset=utf-8"; ".png" = "image/png"; ".svg" = "image/svg+xml"; ".jpg" = "image/jpeg"; ".jpeg" = "image/jpeg" }
 $listener = New-Object System.Net.HttpListener
 $listener.Prefixes.Add("http://127.0.0.1:$Port/")
 $listener.Prefixes.Add("http://localhost:$Port/")
@@ -28,7 +28,7 @@ while ($listener.IsListening) {
       $html = [IO.File]::ReadAllText((Join-Path $Root "index.html"), $utf8)
       $html = $html.Replace('<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>', '<script src="/__test/mock-supabase.js"></script>')
       $html = $html -replace 'src="business-app\.js(\?v=[^"]*)?"', 'src="/business-app.js"'
-      $html = ($html -replace 'href="styles\.css(\?v=[^"]*)?"', 'href="/styles.css"').Replace('src="supabase-config.js"', 'src="/supabase-config.js"')
+      $html = ($html -replace 'href="styles\.css(\?v=[^"]*)?"', 'href="/styles.css"').Replace('src="supabase-config.js"', 'src="/supabase-config.js"').Replace('src="assets/', 'src="/assets/')
       if ($path -eq "/__test/app-old.html") {
         $html = ($html -replace 'src="app\.js(\?v=[^"]*)?"', 'src="/__test/old/app.js"') -replace 'src="business-preview\.js(\?v=[^"]*)?"', 'src="/__test/old/business-preview.js"'
       } else {
