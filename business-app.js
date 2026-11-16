@@ -27,10 +27,9 @@
   function localDateValue(date = new Date()) {
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
   }
+  // One date format across the system: DD/MM/YYYY (same as the orders list).
   function displayDate(value) {
-    if (!value) return "—";
-    const [year, month, day] = String(value).slice(0, 10).split("-").map(Number);
-    return new Intl.DateTimeFormat("he-IL", { day: "numeric", month: "short", year: "numeric" }).format(new Date(year, month - 1, day));
+    return value ? app().formatOrderDate(value) : "—";
   }
   const roundMoney = (value) => Math.round((value + Number.EPSILON) * 100) / 100;
   const gross = (beforeVat) => roundMoney(beforeVat * (1 + state.vatRate));
@@ -87,11 +86,13 @@
 
   async function loadBusinessData() {
     const token = ++state.loadToken;
+    // Every list is read page by page (fetchAllRows) so nothing is silently cut at the API row limit.
+    const all = (build) => q(app().fetchAllRows(build));
     const [packages, installments, obligations, balances] = await Promise.all([
-      q(sb().from("customer_packages").select("id,client_id,package_name_snapshot,credits_granted,term_months,price_before_vat,gross_total,starts_on,ends_on,installment_count,benefits_snapshot,status").order("starts_on", { ascending: false })),
-      q(sb().from("package_installments").select("id,customer_package_id,installment_number,due_on,amount_due").order("due_on")),
-      q(sb().from("financial_obligations").select("id,order_id,package_installment_id,amount_due,due_on,status,updated_at")),
-      q(sb().from("business_client_credit_balances").select("client_id,credit_balance"))
+      all(() => sb().from("customer_packages").select("id,client_id,package_name_snapshot,credits_granted,term_months,price_before_vat,gross_total,starts_on,ends_on,installment_count,benefits_snapshot,status").order("starts_on", { ascending: false }).order("id")),
+      all(() => sb().from("package_installments").select("id,customer_package_id,installment_number,due_on,amount_due").order("due_on").order("id")),
+      all(() => sb().from("financial_obligations").select("id,order_id,package_installment_id,amount_due,due_on,status,updated_at").order("id")),
+      all(() => sb().from("business_client_credit_balances").select("client_id,credit_balance").order("client_id"))
     ]);
     const sheets = await loadSheetStatus();
     if (token !== state.loadToken) return false;
@@ -251,6 +252,12 @@
     attentionNote.hidden = true;
 
     const open = sheetGroups().filter((group) => !sheetClosed(group.sheet));
+    // Masthead "edition": the newest open sheet that actually has orders (no invented issue data).
+    const edition = $("#masthead-edition");
+    if (edition) {
+      edition.hidden = open.length === 0;
+      edition.textContent = open.length ? `הגיליון הפתוח האחרון · ${open[0].sheet}` : "";
+    }
     sheetsList.innerHTML = open.length ? open.slice(0, 5).map((group) => `<li><button class="desk-item sheet-item" type="button" data-sheet-view="${escapeHtml(group.sheet)}">
       <span class="desk-count">${escapeHtml(group.sheet)}</span>
       <span class="desk-text"><strong>גיליון ${escapeHtml(group.sheet)}</strong><small>${escapeHtml(`${number.format(group.orders.length)} הזמנות · ${number.format(group.clients.size)} לקוחות`)}</small></span>
@@ -421,7 +428,7 @@
     $("#sheet-credits").textContent = number.format(group ? group.credits : 0);
     $("#sheet-orders-body").innerHTML = orders.map((order) => {
       const credits = order.billingMode === "credits";
-      const status = credits ? pill("paid", "קרדיטים") : pill(order.paymentStatus === "paid" ? "paid" : "pending", order.paymentStatus === "paid" ? "שולם" : "ממתין לתשלום");
+      const status = credits ? pill("neutral", "קרדיטים") : pill(order.paymentStatus === "paid" ? "paid" : "pending", order.paymentStatus === "paid" ? "שולם" : "ממתין לתשלום");
       return `<tr>
         <td class="order-number">${escapeHtml(order.orderNumber ?? "—")}</td>
         <td class="client-name"><button class="link-button" type="button" data-client-view="${escapeHtml(order.clientId)}">${escapeHtml(clientName(order.clientId))}</button></td>
@@ -501,7 +508,7 @@
     const vatField = $("#vat-form").elements.vat;
     if (document.activeElement !== vatField) vatField.value = roundMoney(state.vatRate * 100);
     $("#products-body").innerHTML = state.allProducts.map((product) => `<tr>
-      <td class="client-name">${escapeHtml(product.name)}</td>
+      <td class="client-name">${escapeHtml(product.name)}${app().hasEncodingDamage(product.name) ? ` ${pill("pending", "קידוד שגוי")}` : ""}</td>
       <td>${escapeHtml(product.dimensions || "—")}</td>
       <td class="amount-cell">${escapeHtml(product.base_price_before_vat != null ? money.format(product.base_price_before_vat) : "—")}</td>
       <td>${escapeHtml(product.credit_cost != null ? number.format(product.credit_cost) : "—")}</td>
@@ -704,16 +711,18 @@
   }
 
   function rowMarkup(values = {}) {
+    // Each order line is laid out as a two-line card (see .entry-table in styles.css), so all fields fit
+    // without horizontal scrolling; data-label shows the field name above each input.
     return `<tr data-order-row>
       <td class="row-number"></td>
-      <td><input name="sheet_number" maxlength="80" list="sheet-options" inputmode="numeric" value="${escapeHtml(values.sheet_number || "")}" aria-label="מספר גיליון"></td>
-      <td><select name="product_id" aria-label="מוצר">${productOptions(values.product_id)}</select></td>
-      <td><input name="cash_amount_before_vat" type="number" min="0.01" step="0.01" value="${escapeHtml(values.cash_amount_before_vat || "")}" aria-label="מחיר לפני מע״מ"></td>
-      <td><input name="credits_used" type="number" min="0.01" step="0.01" value="${escapeHtml(values.credits_used || "")}" aria-label="קרדיטים"></td>
-      <td><select name="payment_status" aria-label="סטטוס תשלום"><option value="pending">עדיין לא</option><option value="paid" ${values.payment_status === "paid" ? "selected" : ""}>שולם</option></select></td>
-      <td><input name="due_on" type="date" value="${escapeHtml(values.due_on || "")}" aria-label="מועד פירעון"></td>
-      <td><input name="notes" maxlength="300" value="${escapeHtml(values.notes || "")}" aria-label="הערות"></td>
-      <td class="client-actions"><button class="button button-outline client-action" type="button" data-row-copy>שכפול</button><button class="delete-order" type="button" data-row-remove aria-label="הסרת שורה">×</button></td>
+      <td class="cell-sheet" data-label="גיליון *"><input name="sheet_number" maxlength="80" list="sheet-options" inputmode="numeric" value="${escapeHtml(values.sheet_number || "")}" aria-label="מספר גיליון"></td>
+      <td class="cell-product" data-label="מוצר *"><select name="product_id" aria-label="מוצר">${productOptions(values.product_id)}</select></td>
+      <td class="cell-price" data-label="מחיר לפני מע״מ"><input name="cash_amount_before_vat" type="number" min="0.01" step="0.01" value="${escapeHtml(values.cash_amount_before_vat || "")}" aria-label="מחיר לפני מע״מ"></td>
+      <td class="cell-credits" data-label="או קרדיטים"><input name="credits_used" type="number" min="0.01" step="0.01" value="${escapeHtml(values.credits_used || "")}" aria-label="קרדיטים"></td>
+      <td class="cell-status" data-label="סטטוס תשלום"><select name="payment_status" aria-label="סטטוס תשלום"><option value="pending">עדיין לא</option><option value="paid" ${values.payment_status === "paid" ? "selected" : ""}>שולם</option></select></td>
+      <td class="cell-due" data-label="מועד פירעון"><input name="due_on" type="date" value="${escapeHtml(values.due_on || "")}" aria-label="מועד פירעון"></td>
+      <td class="cell-notes" data-label="הערות"><input name="notes" maxlength="300" value="${escapeHtml(values.notes || "")}" aria-label="הערות"></td>
+      <td class="client-actions cell-actions"><button class="button button-outline client-action" type="button" data-row-copy>שכפול</button><button class="delete-order" type="button" data-row-remove aria-label="הסרת שורה">×</button></td>
     </tr>`;
   }
 
@@ -908,6 +917,10 @@
     const active = form.elements.active.checked;
     const message = $("#biz-product-message");
     if (active && (price == null || credits == null)) { message.textContent = "מוצר פעיל חייב מחיר ועלות בקרדיטים."; return; }
+    if ([form.elements.name.value, form.elements.dimensions.value].some(app().hasEncodingDamage)) {
+      message.textContent = "הטקסט נראה משובש (בעיית קידוד עברית). הקלידו את שם המוצר מחדש בעברית; אל תדביקו טקסט משובש.";
+      return;
+    }
     const button = $("#biz-product-submit");
     setBusy(button, true, "שמירת מוצר");
     message.textContent = "";
@@ -949,7 +962,7 @@
     }
     window.clearTimeout(refreshTimer);
     refreshTimer = window.setTimeout(() => {
-      loadBusinessData().then((applied) => { if (applied) renderCurrent(); })
+      Promise.all([loadReference(), loadBusinessData()]).then(([, applied]) => { if (applied) renderCurrent(); })
         .catch((error) => console.error("רענון נתוני העסק נכשל:", error));
     }, 150);
   });

@@ -8,11 +8,11 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@500;700&family=Heebo:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20261116-1">
+  <link rel="stylesheet" href="styles.css?v=20261116-2">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="supabase-config.js"></script>
-  <script src="app.js?v=20261116-1" defer></script>
-  <script src="business-app.js?v=20261116-1" defer></script>
+  <script src="app.js?v=20261116-2" defer></script>
+  <script src="business-app.js?v=20261116-2" defer></script>
 </head>
 <body>
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -52,6 +52,41 @@
       </div>
       <p class="auth-footnote">אין הרשמה ציבורית. יש להשתמש בחשבון שהוזמן ואושר מראש.</p>
     </section>
+    <!-- Photo-ready panel. Until a licensed photograph is added (assets/login-photo.jpg + class "has-photo"),
+         it shows an original drawn composition: warm window light over an open newspaper on dark wood. -->
+    <aside class="auth-visual" aria-hidden="true">
+      <svg class="auth-scene" viewBox="0 0 800 1000" preserveAspectRatio="xMidYMid slice">
+        <defs>
+          <radialGradient id="sc-light" cx="18%" cy="8%" r="85%"><stop offset="0" stop-color="#F6E3C4" stop-opacity=".55"/><stop offset=".45" stop-color="#A38C77" stop-opacity=".18"/><stop offset="1" stop-color="#262C30" stop-opacity="0"/></radialGradient>
+          <linearGradient id="sc-room" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3A4D49"/><stop offset=".62" stop-color="#2B3533"/><stop offset="1" stop-color="#1E2326"/></linearGradient>
+          <linearGradient id="sc-wood" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#6B5240"/><stop offset="1" stop-color="#2E231C"/></linearGradient>
+          <linearGradient id="sc-paper" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F3EBDD"/><stop offset="1" stop-color="#D9CBB6"/></linearGradient>
+          <linearGradient id="sc-beam" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F8E7C8" stop-opacity=".30"/><stop offset="1" stop-color="#F8E7C8" stop-opacity="0"/></linearGradient>
+        </defs>
+        <rect width="800" height="1000" fill="url(#sc-room)"/>
+        <g opacity=".55"><rect x="70" y="70" width="230" height="330" rx="4" fill="none" stroke="#E5D9CB" stroke-opacity=".22" stroke-width="10"/><path d="M185 70v330M70 235h230" stroke="#E5D9CB" stroke-opacity=".22" stroke-width="8"/></g>
+        <path d="M80 80 L300 80 L800 760 L520 760 Z" fill="url(#sc-beam)"/>
+        <path d="M200 90 L290 90 L800 640 L700 700 Z" fill="url(#sc-beam)" opacity=".7"/>
+        <rect width="800" height="1000" fill="url(#sc-light)"/>
+        <path d="M0 700 L800 640 L800 1000 L0 1000 Z" fill="url(#sc-wood)"/>
+        <path d="M0 700 L800 640" stroke="#A38C77" stroke-opacity=".5" stroke-width="2"/>
+        <g transform="translate(250 600) rotate(-7)">
+          <rect x="6" y="10" width="380" height="250" rx="3" fill="#000" opacity=".28"/>
+          <rect width="380" height="250" rx="3" fill="url(#sc-paper)"/>
+          <path d="M190 0v250" stroke="#B9A994" stroke-width="1.5"/>
+          <text x="355" y="38" text-anchor="start" font-family="Frank Ruhl Libre, David, serif" font-size="30" font-weight="700" fill="#262C30" direction="rtl">הפרסומון</text>
+          <path d="M210 50h150M210 55h150" stroke="#262C30" stroke-width="1.2"/>
+          <rect x="250" y="68" width="110" height="70" fill="#A38C77" opacity=".55"/>
+          <g stroke="#6B645C" stroke-width="3" stroke-linecap="round" opacity=".55"><path d="M210 80h30M210 92h30M210 104h30M210 116h30M210 128h30M210 152h150M210 164h150M210 176h120M210 196h150M210 208h150M210 220h90"/></g>
+          <g stroke="#6B645C" stroke-width="3" stroke-linecap="round" opacity=".45"><path d="M20 30h150M20 42h150M20 54h110M20 78h150M20 90h150M20 102h150M20 114h70M20 138h150M20 150h150M20 162h130M20 186h150M20 198h150M20 210h100"/></g>
+        </g>
+        <g transform="translate(560 560)" opacity=".9"><path d="M0 60 q0 -50 40 -55 q40 5 40 55 z" fill="#E5D9CB" opacity=".08"/><rect x="18" y="58" width="44" height="54" rx="6" fill="#A38C77" opacity=".75"/><path d="M62 70 q22 4 0 28" fill="none" stroke="#A38C77" stroke-width="6" opacity=".75"/><path d="M28 40 q6 -14 0 -26 M44 40 q6 -14 0 -26" stroke="#E5D9CB" stroke-opacity=".35" stroke-width="3" fill="none" stroke-linecap="round"/></g>
+      </svg>
+      <div class="auth-visual-caption">
+        <span class="auth-visual-kicker">מערכת הפרסומון</span>
+        <p>כל גיליון מתחיל<br>בהזמנה אחת.</p>
+      </div>
+    </aside>
   </main>
   <div class="app-shell" id="app-shell" hidden>
     <aside class="sidebar" aria-label="ניווט ראשי">
@@ -92,7 +127,7 @@
         <!-- Dashboard: the daily desk -->
         <section class="page-view" data-page="dashboard" id="dashboard-view">
           <header class="masthead">
-            <div class="masthead-dateline"><span id="masthead-date"></span><span>שולחן העבודה היומי</span></div>
+            <div class="masthead-dateline"><span id="masthead-date"></span><span id="masthead-hebrew-date" hidden></span><span>שולחן העבודה היומי</span><span class="masthead-edition" id="masthead-edition" hidden></span></div>
             <div class="masthead-body">
               <div>
                 <h1 class="masthead-title" id="masthead-greeting">שלום</h1>

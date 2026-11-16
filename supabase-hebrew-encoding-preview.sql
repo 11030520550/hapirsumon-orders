@@ -1,4 +1,4 @@
--- READ-ONLY diagnosis of garbled Hebrew (mojibake) in clients and orders.
+-- READ-ONLY diagnosis of garbled Hebrew (mojibake) in clients, orders and the product catalog.
 -- Run the whole file in the Supabase SQL Editor. Nothing is written to the database:
 -- the helper functions live in pg_temp and disappear when the session ends.
 -- The result shows, for every damaged text value: table, row id, column, current text,
@@ -90,6 +90,12 @@ with text_values as (
   from public.orders as orders
   cross join lateral jsonb_each_text(to_jsonb(orders)) as field
   where field.key in ('section', 'notes', 'sheet_number', 'product_name_snapshot', 'product_dimensions_snapshot', 'entered_by_name')
+  union all
+  -- Product catalog (exists after supabase-business-upgrade.sql; this preview runs at install step 4b).
+  select 'product_catalog', products.id::text, field.key, field.value
+  from public.product_catalog as products
+  cross join lateral jsonb_each_text(to_jsonb(products)) as field
+  where field.key in ('name', 'dimensions')
 )
 select text_values.table_name, text_values.row_id, text_values.column_name,
        text_values.current_text, diagnosis.proposed as proposed_text,

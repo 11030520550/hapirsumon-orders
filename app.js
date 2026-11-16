@@ -47,7 +47,8 @@
   let businessSchema = false;
   const BASE_ORDER_COLUMNS = "id,client_id,publication_date,section,amount,payment_status,notes,updated_at,created_at";
   const BUSINESS_ORDER_COLUMNS = `${BASE_ORDER_COLUMNS},order_number,billing_mode,credits_used,cash_amount_before_vat,sheet_number,entered_at,product_name_snapshot,product_dimensions_snapshot`;
-  const BUSINESS_REALTIME_TABLES = ["financial_obligations", "credit_ledger", "customer_packages", "package_installments", "sheets"];
+  const BUSINESS_REALTIME_TABLES = ["financial_obligations", "credit_ledger", "customer_packages", "package_installments", "sheets",
+    "business_payment_events", "product_catalog", "package_catalog", "business_settings"];
 
   function toLocalDateValue(date) {
     const year = date.getFullYear();
@@ -56,8 +57,32 @@
     return `${year}-${month}-${day}`;
   }
 
+  // Same currency format as the business screens (two decimals, ILS sign).
+  const currencyFormat = new Intl.NumberFormat("he-IL", { style: "currency", currency: "ILS" });
   function formatCurrency(amount) {
-    return `₪${numberFormat.format(amount)}`;
+    return currencyFormat.format(Number(amount) || 0);
+  }
+
+  // Supabase/PostgREST returns at most one page of rows per request (1,000 by default).
+  // Reads every page so no screen silently works on a truncated list. `build` must return
+  // a fresh query with a deterministic order (ending with a unique column).
+  // Continues until an empty page, so it also works when the server limit is below PAGE_SIZE.
+  const PAGE_SIZE = 1000;
+  async function fetchAllRows(build) {
+    const rows = [];
+    for (let from = 0; ; ) {
+      const { data: page, error } = await build().range(from, from + PAGE_SIZE - 1);
+      if (error) return { data: null, error };
+      if (!page || page.length === 0) return { data: rows, error: null };
+      rows.push(...page);
+      from += page.length;
+    }
+  }
+
+  // Local writes (client/order forms) update app.js data directly; tell the business screens too,
+  // so names, statuses and totals elsewhere do not stay stale until the next realtime refresh.
+  function notifyDataChanged() {
+    document.dispatchEvent(new CustomEvent("modaat:data"));
   }
 
   function displayDate(value) {
@@ -250,10 +275,10 @@
   async function fetchCloudData() {
     const requestId = ++cloudFetchRequest;
     const [clientsResult, ordersResult] = await Promise.all([
-      supabaseClient.from("clients").select("id,name,phone,email,updated_at").order("name"),
-      supabaseClient.from("orders")
+      fetchAllRows(() => supabaseClient.from("clients").select("id,name,phone,email,updated_at").order("name").order("id")),
+      fetchAllRows(() => supabaseClient.from("orders")
         .select(businessSchema ? BUSINESS_ORDER_COLUMNS : BASE_ORDER_COLUMNS)
-        .order("publication_date", { ascending: false })
+        .order("publication_date", { ascending: false }).order("id"))
     ]);
     if (requestId !== cloudFetchRequest) return false;
     if (clientsResult.error) throw clientsResult.error;
@@ -500,7 +525,7 @@
       const credits = order.billingMode === "credits";
       const amountText = orderChargeText(order);
       const statusCell = credits
-        ? '<span class="payment-select paid">קרדיטים</span>'
+        ? '<span class="payment-select neutral">קרדיטים</span>'
         : `<select class="payment-select ${paid ? "paid" : "pending"}" data-order-id="${escapeHtml(order.id)}" aria-label="סטטוס תשלום להזמנה ${escapeHtml(label)}">
           <option value="paid" ${paid ? "selected" : ""}>שולם</option>
           <option value="pending" ${!paid ? "selected" : ""}>ממתין לתשלום</option>
@@ -513,7 +538,7 @@
         <td>${escapeHtml(formatOrderDate(order.orderDate))}</td>
         <td class="client-name">${client ? `<button class="link-button" type="button" data-client-view="${escapeHtml(client.id)}">${escapeHtml(clientName)}</button>` : escapeHtml(clientName)}</td>
         <td>${order.sheetNumber ? `<button class="link-button" type="button" data-sheet-view="${escapeHtml(order.sheetNumber)}">${escapeHtml(order.sheetNumber)}</button>` : "—"}</td>
-        <td>${escapeHtml(order.product || "—")}</td>
+        <td>${escapeHtml(order.product || "—")}${hasEncodingDamage(order.product) ? ' <span class="payment-select pending" title="שם המוצר נשמר בקידוד שגוי בהזמנה זו">קידוד שגוי</span>' : ""}</td>
         <td class="amount-cell">${escapeHtml(amountText)}</td>
         <td>${statusCell}</td>
         <td class="client-actions">
@@ -654,7 +679,7 @@
   }
 
   function orderStatusPill(order) {
-    if (order.billingMode === "credits") return '<span class="payment-select paid">קרדיטים</span>';
+    if (order.billingMode === "credits") return '<span class="payment-select neutral">קרדיטים</span>';
     const paid = order.paymentStatus === "paid";
     return `<span class="payment-select ${paid ? "paid" : "pending"}">${paid ? "שולם" : "ממתין לתשלום"}</span>`;
   }
@@ -1156,6 +1181,7 @@
         showToast("הלקוח נוסף בהצלחה.");
       }
       render();
+      notifyDataChanged();
       form.reset();
       $("#client-modal").close();
       editingClientId = null;
@@ -1228,6 +1254,7 @@
         showToast("ההזמנה נוצרה בהצלחה.");
       }
       render();
+      notifyDataChanged();
       form.reset();
       $("#order-modal").close();
       editingOrderId = null;
@@ -1256,6 +1283,7 @@
       if (!deletedRows || deletedRows.length === 0) throw staleRecordError();
       data.orders = data.orders.filter((order) => order.id !== orderId);
       render();
+      notifyDataChanged();
       showToast("ההזמנה נמחקה.");
     } catch (error) {
       console.error("מחיקת הזמנה נכשלה:", error);
@@ -1291,6 +1319,7 @@
       order.paymentStatus = requestedStatus;
       order.updatedAt = updatedRow.updated_at;
       render();
+      notifyDataChanged();
       showToast("סטטוס התשלום עודכן.");
     } catch (error) {
       console.error("עדכון סטטוס תשלום נכשל:", error);
@@ -1339,6 +1368,11 @@
     const now = new Date();
     const hour = now.getHours();
     $("#masthead-date").textContent = new Intl.DateTimeFormat("he-IL", { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(now);
+    try {
+      // Hebrew calendar date, as printed on a newspaper's dateline (e.g. כ״ה בחשוון תשפ״ז).
+      $("#masthead-hebrew-date").textContent = new Intl.DateTimeFormat("he-IL-u-ca-hebrew-nu-hebr", { day: "numeric", month: "long", year: "numeric" }).format(now);
+      $("#masthead-hebrew-date").hidden = false;
+    } catch { /* calendar not supported by this browser: the civil date alone is shown */ }
     $("#masthead-greeting").textContent = hour >= 5 && hour < 12 ? "בוקר טוב" : hour >= 12 && hour < 17 ? "צהריים טובים" : hour >= 17 && hour < 22 ? "ערב טוב" : "לילה טוב";
   })();
 
@@ -1399,6 +1433,8 @@
     friendlyError,
     hasEncodingDamage,
     formatOrderDate,
+    formatCurrency,
+    fetchAllRows,
     compareOrdersNewestFirst
   });
 

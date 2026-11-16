@@ -215,6 +215,29 @@ async function run() {
   await sleep(400);
   check("N1 no products: save disabled + guidance", $("#new-order-submit").disabled && text("#new-order-message").includes("אין מוצרים"));
 
+  // ===== regression: reads past the API row limit (mock server returns at most 7 rows per request)
+  await load("session=1&business=1&maxrows=7", "#/orders");
+  await sleep(700);
+  check("S1 paged reads load every order past the row limit", text("#orders-count").startsWith(String(db().orders.length)), text("#orders-count"));
+  await nav("payments"); setVal($("#payments-filter"), "all"); await sleep(150);
+  check("S2 paged reads load every obligation", text("#payments-count").startsWith(String(db().financial_obligations.length)), text("#payments-count"));
+
+  // ===== regression: a client edited in one screen is shown updated in the business screens
+  await nav("clients");
+  $('[data-client-edit="c-test-1"]').click(); await sleep(80);
+  $("#client-form").elements.name.value = "לקוח ששמו שונה"; $("#client-form").requestSubmit(); await sleep(500);
+  await nav("payments"); setVal($("#payments-filter"), "all"); await sleep(200);
+  check("S3 client rename shows on payments screen", text("#payments-body").includes("לקוח ששמו שונה"),
+    `msg=${text("#client-message")} db=${(db().clients.find((c) => c.id === "c-test-1") || {}).name} open=${$("#client-modal").open} rows=${$$("#payments-body tr").length}`);
+
+  // ===== order form fits the desktop width; dashboard shortcuts carry their filter
+  await goNewOrder(); await sleep(200);
+  const entryWrap = $("#new-order-form .table-wrap");
+  check("S4 order form fits without horizontal scroll", entryWrap.scrollWidth <= entryWrap.clientWidth + 1, `${entryWrap.scrollWidth}/${entryWrap.clientWidth}`);
+  await nav("dashboard"); await sleep(200);
+  $('[data-desk-go="payments"][data-desk-value="undated"]').click(); await sleep(300);
+  check("S5 dashboard shortcut opens payments with its filter", page() === "payments" && $("#payments-filter").value === "undated");
+
   // ===== mobile width
   await load("session=1&business=1", "#/dashboard", 390);
   await sleep(500);

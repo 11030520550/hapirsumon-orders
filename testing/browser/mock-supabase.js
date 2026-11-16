@@ -62,19 +62,30 @@
   function query(table) {
     const businessTable = !["clients", "orders"].includes(table);
     const filters = [];
-    let orderBy = null; let limit = null;
+    const orderBy = []; let limit = null; let range = null; let patch = null; let single = false;
     const chain = {
       select() { return chain; },
       eq(col, val) { filters.push((r) => String(r[col]) === String(val)); return chain; },
       lte(col, val) { filters.push((r) => r[col] <= val); return chain; },
       gte(col, val) { filters.push((r) => r[col] >= val); return chain; },
       in(col, vals) { filters.push((r) => vals.map(String).includes(String(r[col]))); return chain; },
-      order(col, opts = {}) { orderBy = { col, asc: opts.ascending !== false }; return chain; },
+      order(col, opts = {}) { orderBy.push({ col, asc: opts.ascending !== false }); return chain; },
       limit(n) { limit = n; return chain; },
+      range(from, to) { range = [from, to]; return chain; },
+      update(values) { patch = values; return chain; },
+      maybeSingle() { single = true; return chain; },
       then(resolve, reject) {
         if ((businessTable && !business) || (table === "sheets" && params.get("sheets") !== "1")) return Promise.resolve({ data: null, error: { code: "PGRST205", message: `Could not find the table 'public.${table}' in the schema cache` } }).then(resolve, reject);
+        if (patch) {
+          const hit = tableRows(table).filter((r) => filters.every((f) => f(r)));
+          hit.forEach((r) => Object.assign(r, patch, { updated_at: now() }));
+          const copies = hit.map((r) => ({ ...r }));
+          return Promise.resolve({ data: single ? (copies[0] || null) : copies, error: null }).then(resolve, reject);
+        }
         let rows = tableRows(table).filter((r) => filters.every((f) => f(r))).map((r) => ({ ...r }));
-        if (orderBy) rows.sort((a, b) => (a[orderBy.col] > b[orderBy.col] ? 1 : a[orderBy.col] < b[orderBy.col] ? -1 : 0) * (orderBy.asc ? 1 : -1));
+        rows.sort((a, b) => { for (const o of orderBy) { const c = (a[o.col] > b[o.col] ? 1 : a[o.col] < b[o.col] ? -1 : 0) * (o.asc ? 1 : -1); if (c) return c; } return 0; });
+        if (range) rows = rows.slice(range[0], Math.min(range[1] + 1, Number(params.get("maxrows") || 1000) + range[0]));
+        else if (params.get("maxrows")) rows = rows.slice(0, Number(params.get("maxrows")));
         if (limit != null) rows = rows.slice(0, limit);
         return Promise.resolve({ data: rows, error: null }).then(resolve, reject);
       }
