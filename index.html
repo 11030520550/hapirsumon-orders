@@ -3,27 +3,33 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#12243a">
+  <meta name="theme-color" content="#F5F1EB">
   <title>מודעת — ניהול הזמנות פרסום</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20261111-6">
+  <link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@500;700&family=Heebo:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css?v=20261116-1">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="supabase-config.js"></script>
-  <script src="app.js?v=20261111-6" defer></script>
-  <script src="business-app.js?v=20261111-6" defer></script>
+  <script src="app.js?v=20261116-1" defer></script>
+  <script src="business-app.js?v=20261116-1" defer></script>
 </head>
 <body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-today" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="8" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="5" rx="1.5"/><rect x="13.5" y="11.5" width="7" height="9" rx="1.5"/><rect x="3.5" y="14.5" width="7" height="6" rx="1.5"/></symbol>
+    <symbol id="i-orders" viewBox="0 0 24 24"><path d="M14 3.5H7.5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8z"/><path d="M14 3.5V8h4.5M9 12.5h6M9 16h4"/></symbol>
+    <symbol id="i-issues" viewBox="0 0 24 24"><path d="M4 5.5h12v13a2 2 0 0 0 2 2H6a2 2 0 0 1-2-2z"/><path d="M16 9h3.5v9.5a2 2 0 0 1-2 2M7.5 9h5M7.5 12.5h5M7.5 16h3"/></symbol>
+    <symbol id="i-clients" viewBox="0 0 24 24"><circle cx="9.5" cy="8" r="3.5"/><path d="M3 19.5a6.5 6.5 0 0 1 13 0M16 4.6a3.5 3.5 0 0 1 0 6.8M21 19.5a6.5 6.5 0 0 0-3.6-5.8"/></symbol>
+    <symbol id="i-payments" viewBox="0 0 24 24"><rect x="3" y="5.5" width="18" height="13" rx="2"/><path d="M3 9.5h18M7 14.5h4"/></symbol>
+    <symbol id="i-packages" viewBox="0 0 24 24"><path d="M3.5 8.5h17v3.5h-17zM5 12v8h14v-8M12 8.5V20"/><path d="M12 8.5C10.5 5 7 4.5 7 6.5S10 8.5 12 8.5c2 0 5-.5 5-2S13.5 5 12 8.5z"/></symbol>
+    <symbol id="i-reports" viewBox="0 0 24 24"><path d="M4 20.5h16M6.5 20.5V12M11 20.5V5.5M15.5 20.5v-9M20 20.5V9"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 6.5h9M17 6.5h3M4 12h3M11 12h9M4 17.5h11M19 17.5h1"/><circle cx="15" cy="6.5" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="17.5" r="2"/></symbol>
+  </svg>
   <main class="auth-screen" id="auth-screen">
-    <aside class="announcement-banner auth-announcement" role="note" aria-label="הודעת גרסת פיתוח">
-      <div class="announcement-title"><strong>מערכת הפרסומון</strong><span aria-hidden="true">|</span><span>גרסת פיתוח</span><span class="beta-badge">BETA</span></div>
-      <p>המערכת נמצאת בשלבי פיתוח ובדיקה. ייתכנו שינויים ותקלות.</p>
-    </aside>
     <section class="auth-card" aria-labelledby="login-title">
       <a class="brand auth-brand" href="#" aria-label="מודעת">
         <span class="brand-mark" aria-hidden="true">מ</span>
-        <span class="brand-copy"><strong>מודעת</strong><small>ניהול פרסום בעיתון</small></span>
+        <span class="brand-copy"><strong>מודעת</strong><small>מערכת הפרסומון <span class="beta-badge" title="גרסת פיתוח ובדיקה">BETA</span></small></span>
       </a>
       <p class="eyebrow">גישה מאובטחת למערכת</p>
       <h1 id="login-title">התחברות</h1>
@@ -48,91 +54,80 @@
     </section>
   </main>
   <div class="app-shell" id="app-shell" hidden>
-    <aside class="announcement-banner" role="note" aria-label="הודעת גרסת פיתוח">
-      <div class="announcement-title">
-        <strong>מערכת הפרסומון</strong>
-        <span aria-hidden="true">|</span>
-        <span>גרסת פיתוח</span>
-        <span class="beta-badge">BETA</span>
-      </div>
-      <p>המערכת נמצאת בשלבי פיתוח ובדיקה. ייתכנו שינויים ותקלות.</p>
-    </aside>
     <aside class="sidebar" aria-label="ניווט ראשי">
-      <a class="brand" href="#/dashboard" aria-label="מודעת — לוח בקרה">
+      <a class="brand" href="#/dashboard" aria-label="מודעת — היום">
         <span class="brand-mark" aria-hidden="true">מ</span>
-        <span class="brand-copy"><strong>מודעת</strong><small>ניהול פרסום בעיתון</small></span>
+        <span class="brand-copy"><strong>מודעת</strong><small>מערכת הפרסומון <span class="beta-badge" title="גרסת פיתוח ובדיקה. ייתכנו שינויים ותקלות.">BETA</span></small></span>
       </a>
-      <div class="sidebar-label">תפריט ראשי</div>
       <nav class="main-nav">
-        <button class="nav-link" type="button" data-view="dashboard"><span class="nav-icon">▦</span>לוח בקרה</button>
-        <button class="nav-link" type="button" data-view="orders"><span class="nav-icon">▤</span>הזמנות</button>
-        <button class="nav-link" type="button" data-view="sheets"><span class="nav-icon">▧</span>גיליונות</button>
-        <button class="nav-link" type="button" data-view="clients"><span class="nav-icon">♙</span>לקוחות</button>
-        <button class="nav-link" type="button" data-view="packages"><span class="nav-icon">◈</span>חבילות וקרדיטים</button>
-        <button class="nav-link" type="button" data-view="payments"><span class="nav-icon">₪</span>תשלומים וחובות</button>
-        <button class="nav-link" type="button" data-view="reports"><span class="nav-icon">▥</span>דוחות</button>
-        <button class="nav-link" type="button" data-view="settings"><span class="nav-icon">⚙</span>הגדרות ומוצרים</button>
+        <button class="nav-link" type="button" data-view="dashboard"><span class="nav-icon"><svg><use href="#i-today"/></svg></span>היום</button>
+        <p class="nav-group">עבודה שוטפת</p>
+        <button class="nav-link" type="button" data-view="orders"><span class="nav-icon"><svg><use href="#i-orders"/></svg></span>הזמנות</button>
+        <button class="nav-link" type="button" data-view="sheets"><span class="nav-icon"><svg><use href="#i-issues"/></svg></span>גיליונות</button>
+        <button class="nav-link" type="button" data-view="clients"><span class="nav-icon"><svg><use href="#i-clients"/></svg></span>לקוחות</button>
+        <p class="nav-group">כספים</p>
+        <button class="nav-link" type="button" data-view="payments"><span class="nav-icon"><svg><use href="#i-payments"/></svg></span>תשלומים וחובות</button>
+        <button class="nav-link" type="button" data-view="packages"><span class="nav-icon"><svg><use href="#i-packages"/></svg></span>חבילות וקרדיטים</button>
+        <p class="nav-group">ניהול</p>
+        <button class="nav-link" type="button" data-view="reports"><span class="nav-icon"><svg><use href="#i-reports"/></svg></span>דוחות</button>
+        <button class="nav-link" type="button" data-view="settings"><span class="nav-icon"><svg><use href="#i-settings"/></svg></span>הגדרות ומוצרים</button>
       </nav>
       <div class="sidebar-bottom">
-        <div class="help-card">
-          <span class="help-icon">✳</span>
-          <strong>הכול במקום אחד</strong>
-          <p>נהלו הזמנות, לקוחות ותשלומים בפשטות.</p>
-        </div>
-        <span class="storage-note" role="status" aria-live="polite"><span class="storage-dot"></span><span id="sync-status">מתחברת למסד הנתונים המשותף</span></span>
+        <span class="storage-note" role="status" aria-live="polite"><span class="storage-dot"></span><span id="sync-status">מתחבר למסד הנתונים המשותף</span></span>
       </div>
     </aside>
 
     <main class="main-content" id="dashboard">
       <header class="topbar">
-        <div class="breadcrumbs">ניהול <span>/</span> <strong id="page-title">לוח בקרה</strong></div>
+        <div class="breadcrumbs"><span class="crumb-parent" id="page-section">מודעת</span><span class="crumb-parent" aria-hidden="true">/</span><strong id="page-title">היום</strong></div>
         <div class="topbar-actions">
           <span class="today-label" id="today-label"></span>
-          <button class="button button-outline import-button" id="open-import" type="button">גיבוי וייבוא</button>
-          <button class="avatar" type="button" aria-label="משתמשת מנהלת">מ</button>
+          <button class="button button-ghost import-button" id="open-import" type="button">גיבוי וייבוא</button>
+          <button class="avatar" type="button" aria-label="המשתמש המחובר">מ</button>
           <button class="button button-outline sign-out-button" id="sign-out" type="button">התנתקות</button>
         </div>
       </header>
 
       <div class="page-content">
-        <!-- Dashboard -->
+        <!-- Dashboard: the daily desk -->
         <section class="page-view" data-page="dashboard" id="dashboard-view">
-          <div class="welcome-row">
-            <div>
-              <p class="eyebrow">יום נעים, מנהלת</p>
-              <h1>לוח הבקרה</h1>
-              <p class="page-subtitle">תמונת מצב של ההזמנות והתשלומים.</p>
+          <header class="masthead">
+            <div class="masthead-dateline"><span id="masthead-date"></span><span>שולחן העבודה היומי</span></div>
+            <div class="masthead-body">
+              <div>
+                <h1 class="masthead-title" id="masthead-greeting">שלום</h1>
+                <p class="masthead-lede">מה דורש תשומת לב היום, אילו גיליונות פתוחים ומה נכנס לאחרונה.</p>
+              </div>
+              <div class="page-actions">
+                <button class="button button-outline" type="button" data-open-modal="client-modal"><span class="button-plus">＋</span> לקוח חדש</button>
+                <button class="button button-primary" type="button" data-go="new-order"><span class="button-plus">＋</span> הזמנה חדשה</button>
+              </div>
             </div>
-            <div class="page-actions">
-              <button class="button button-outline" type="button" data-open-modal="client-modal"><span class="button-plus">＋</span> לקוח חדש</button>
-              <button class="button button-primary" type="button" data-go="new-order"><span class="button-plus">＋</span> הזמנה חדשה</button>
-            </div>
+          </header>
+
+          <nav class="quick-actions" aria-label="פעולות מהירות">
+            <button class="quick-action" type="button" data-go="orders"><span class="nav-icon"><svg><use href="#i-orders"/></svg></span><span><strong>כל ההזמנות</strong><small>חיפוש לפי מספר, לקוח או גיליון</small></span></button>
+            <button class="quick-action" type="button" data-go="clients"><span class="nav-icon"><svg><use href="#i-clients"/></svg></span><span><strong>לקוחות</strong><small>פתיחת תיק לקוח</small></span></button>
+            <button class="quick-action" type="button" data-go="payments"><span class="nav-icon"><svg><use href="#i-payments"/></svg></span><span><strong>גבייה</strong><small>חיובים פתוחים וסימון תשלום</small></span></button>
+            <button class="quick-action" type="button" data-go="sheets"><span class="nav-icon"><svg><use href="#i-issues"/></svg></span><span><strong>גיליונות</strong><small>ההזמנות בכל גיליון</small></span></button>
+          </nav>
+
+          <div class="desk-grid">
+            <section class="desk-panel" aria-labelledby="desk-attention-title">
+              <div class="desk-panel-head"><h2 id="desk-attention-title">דורש תשומת לב</h2><p id="desk-attention-source"></p></div>
+              <ul class="desk-list" id="desk-attention"><li class="desk-empty">טוען נתונים…</li></ul>
+              <p class="desk-note" id="desk-attention-note" hidden></p>
+            </section>
+            <section class="desk-panel" aria-labelledby="desk-sheets-title">
+              <div class="desk-panel-head"><h2 id="desk-sheets-title">גיליונות פתוחים</h2><button class="link-button" type="button" data-go="sheets">כל הגיליונות</button></div>
+              <ul class="desk-list" id="desk-sheets"><li class="desk-empty">טוען נתונים…</li></ul>
+              <p class="desk-note" id="desk-sheets-note" hidden></p>
+            </section>
           </div>
-          <section class="stats-grid" aria-label="סיכום הזמנות ותשלומים">
-            <article class="stat-card">
-              <div class="stat-top"><span class="stat-icon icon-blue">▤</span><span class="stat-caption">כל ההזמנות</span></div>
-              <div class="stat-value" id="stat-orders">0</div>
-              <div class="stat-foot">הזמנות פרסום במערכת</div>
-            </article>
-            <article class="stat-card">
-              <div class="stat-top"><span class="stat-icon icon-green">₪</span><span class="stat-caption">התקבלו תשלומים</span></div>
-              <div class="stat-value" id="stat-paid">₪0</div>
-              <div class="stat-foot">סכום ששולם בפועל</div>
-            </article>
-            <article class="stat-card">
-              <div class="stat-top"><span class="stat-icon icon-orange">◷</span><span class="stat-caption">ממתינות לתשלום</span></div>
-              <div class="stat-value" id="stat-pending">0</div>
-              <div class="stat-foot">הזמנות שטרם שולמו</div>
-            </article>
-            <article class="stat-card">
-              <div class="stat-top"><span class="stat-icon icon-purple">₪</span><span class="stat-caption">יתרה לגבייה</span></div>
-              <div class="stat-value" id="stat-balance">₪0</div>
-              <div class="stat-foot">סכום שעדיין ממתין לתשלום</div>
-            </article>
-          </section>
+
           <section class="orders-section">
             <div class="section-heading">
-              <div><h2>הזמנות אחרונות</h2><p>שמונה ההזמנות האחרונות לפי תאריך הזמנה</p></div>
+              <div><h2>נכנסו לאחרונה</h2><p>שמונה ההזמנות האחרונות לפי תאריך הזמנה</p></div>
               <button class="button button-outline" type="button" data-go="orders">לכל ההזמנות</button>
             </div>
             <div class="table-wrap">
@@ -142,7 +137,20 @@
               </table>
             </div>
           </section>
-          <footer class="page-footer">מודעת <span>·</span> ניהול פרסום בעיתון</footer>
+
+          <section class="ledger-strip" aria-labelledby="ledger-title">
+            <div class="ledger-strip-head">
+              <h2 id="ledger-title">סיכום לפי סטטוס ההזמנות</h2>
+              <p>נתון ביניים: מבוסס על סטטוס ההזמנות בלבד, אינו כולל תשלומי חבילות, ועשוי להיות שונה ממסך התשלומים ומהדוחות עד לתיקון החישוב.</p>
+            </div>
+            <div class="ledger-figures">
+              <div><span>כל ההזמנות</span><strong id="stat-orders">0</strong></div>
+              <div><span>הזמנות שסומנו כשולמו</span><strong id="stat-paid">₪0</strong></div>
+              <div><span>הזמנות שטרם שולמו</span><strong id="stat-pending">0</strong></div>
+              <div><span>סכום הזמנות שטרם שולמו</span><strong id="stat-balance">₪0</strong></div>
+            </div>
+          </section>
+          <footer class="page-footer">מודעת <span>·</span> מערכת הפרסומון</footer>
         </section>
 
         <!-- New order -->

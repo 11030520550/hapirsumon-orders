@@ -29,12 +29,17 @@
   let lastSyncError = "";
   let requestedScreen = "auth";
   const VIEW_TITLES = {
-    dashboard: "לוח בקרה", orders: "הזמנות", "new-order": "הזמנה חדשה", sheets: "גיליונות", sheet: "גיליון",
+    dashboard: "היום", orders: "הזמנות", "new-order": "הזמנה חדשה", sheets: "גיליונות", sheet: "גיליון",
     clients: "לקוחות", client: "תיק לקוח", packages: "חבילות וקרדיטים", payments: "תשלומים וחובות",
     reports: "דוחות", settings: "הגדרות ומוצרים"
   };
   // Screens without their own side-menu item highlight their parent item.
   const NAV_PARENT = { "new-order": "orders", sheet: "sheets", client: "clients" };
+  // Sidebar group of each screen, shown as the first breadcrumb.
+  const VIEW_SECTIONS = {
+    dashboard: "מודעת", orders: "עבודה שוטפת", "new-order": "עבודה שוטפת", sheets: "עבודה שוטפת", sheet: "עבודה שוטפת",
+    clients: "עבודה שוטפת", client: "עבודה שוטפת", payments: "כספים", packages: "כספים", reports: "ניהול", settings: "ניהול"
+  };
   let currentView = { name: "dashboard", param: "" };
   // A deep link (e.g. #/client/<id>) is restored after the first successful login of this page load.
   let pendingRoute = /^#\/[a-z-]+/.test(location.hash) ? location.hash : null;
@@ -620,6 +625,7 @@
       else link.removeAttribute("aria-current");
     });
     $("#page-title").textContent = VIEW_TITLES[name];
+    $("#page-section").textContent = VIEW_SECTIONS[name] || "מודעת";
     if (name === "client") renderClientPage();
     if (changed) window.scrollTo(0, 0);
     document.dispatchEvent(new CustomEvent("modaat:view", { detail: { name, param } }));
@@ -1328,6 +1334,13 @@
       importPlan.conflicts.length > 0 || (!importPlan.newClients.length && !importPlan.newOrders.length);
   });
   $("#today-label").textContent = new Intl.DateTimeFormat("he-IL", { weekday: "long", day: "numeric", month: "long" }).format(new Date());
+  // Dashboard masthead: full Hebrew dateline and a time-of-day greeting.
+  (function setMasthead() {
+    const now = new Date();
+    const hour = now.getHours();
+    $("#masthead-date").textContent = new Intl.DateTimeFormat("he-IL", { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(now);
+    $("#masthead-greeting").textContent = hour >= 5 && hour < 12 ? "בוקר טוב" : hour >= 12 && hour < 17 ? "צהריים טובים" : hour >= 17 && hour < 22 ? "ערב טוב" : "לילה טוב";
+  })();
 
   async function initialize() {
     const config = window.MODAAT_SUPABASE_CONFIG;

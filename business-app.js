@@ -189,9 +189,84 @@
     </tr>`).join("");
   }
 
+  // ---------- dashboard: the daily desk ----------
+  // Presentation only. Reuses the rows of the payments screen (obligationRows), the sheet groups of the
+  // sheets screen and the loaded credit balances; it adds no financial calculation of its own.
+  const deskFilter = { view: "", select: "", value: "" };
+
+  function deskItem({ count, title, hint, meta = "", tone = "warn", attrs = "" }) {
+    const level = count > 0 ? tone : "calm";
+    return `<li><button class="desk-item is-${level}" type="button" ${attrs}>
+      <span class="desk-count">${escapeHtml(number.format(count))}</span>
+      <span class="desk-text"><strong>${escapeHtml(title)}</strong><small>${escapeHtml(hint)}</small></span>
+      <span class="desk-meta">${escapeHtml(count > 0 ? meta : "אין כרגע")}</span>
+    </button></li>`;
+  }
+
+  function deskLink(view, select = "", value = "") {
+    return `data-desk-go="${escapeHtml(view)}" data-desk-select="${escapeHtml(select)}" data-desk-value="${escapeHtml(value)}"`;
+  }
+
+  function renderDashboard() {
+    const attention = $("#desk-attention");
+    const sheetsList = $("#desk-sheets");
+    if (!attention || !sheetsList) return;
+    const attentionNote = $("#desk-attention-note");
+    const sheetsNote = $("#desk-sheets-note");
+    const sum = (rows) => money.format(rows.reduce((total, row) => total + row.amount, 0));
+
+    if (!state.ready) {
+      // Without the business schema only the order status is known.
+      const pending = app().orders().filter((order) => order.billingMode !== "credits" && order.paymentStatus !== "paid");
+      $("#desk-attention-source").textContent = "לפי סטטוס ההזמנות";
+      attention.innerHTML = deskItem({
+        count: pending.length, title: "הזמנות שטרם שולמו", hint: "סטטוס התשלום בהזמנה הוא \"ממתין לתשלום\"",
+        meta: "לרשימה", attrs: deskLink("orders", "#payment-filter", "pending")
+      });
+      attentionNote.hidden = false;
+      attentionNote.textContent = "מעקב מועדי פירעון וחובות בפיגור זמין לאחר התקנת הסכימה העסקית.";
+      sheetsList.innerHTML = '<li class="desk-empty">מספרי גיליון נשמרים בהזמנות לאחר התקנת הסכימה העסקית.</li>';
+      sheetsNote.hidden = true;
+      return;
+    }
+    if (!state.loaded) {
+      attention.innerHTML = '<li class="desk-empty">טוען נתונים מהמסד…</li>';
+      sheetsList.innerHTML = '<li class="desk-empty">טוען נתונים מהמסד…</li>';
+      return;
+    }
+
+    const rows = obligationRows();
+    const weekAhead = localDateValue(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
+    const overdue = rows.filter((row) => row.kind === "overdue");
+    const dueSoon = rows.filter((row) => row.kind === "future" && row.dueOn <= weekAhead);
+    const undated = rows.filter((row) => row.kind === "undated");
+    const negative = app().clients().filter((client) => (state.balances.get(client.id) ?? 0) < 0);
+    $("#desk-attention-source").textContent = "לפי החיובים במסך התשלומים";
+    attention.innerHTML = [
+      deskItem({ count: overdue.length, title: "תשלומים באיחור", hint: "מועד הפירעון עבר והחיוב עדיין פתוח", meta: sum(overdue), tone: "alert", attrs: deskLink("payments", "#payments-filter", "overdue") }),
+      deskItem({ count: dueSoon.length, title: "לפירעון בשבוע הקרוב", hint: "חיובים שמועד הפירעון שלהם בשבעת הימים הקרובים", meta: sum(dueSoon), attrs: deskLink("payments", "#payments-filter", "future") }),
+      deskItem({ count: undated.length, title: "חיובים פתוחים ללא מועד פירעון", hint: "לא ייחשבו באיחור עד שייקבע להם מועד", meta: sum(undated), attrs: deskLink("payments", "#payments-filter", "undated") }),
+      deskItem({ count: negative.length, title: "לקוחות ביתרת קרדיטים שלילית", hint: "ניצלו יותר קרדיטים ממה שהוקצה להם", meta: "לבדיקה", attrs: deskLink("packages") })
+    ].join("");
+    attentionNote.hidden = true;
+
+    const open = sheetGroups().filter((group) => !sheetClosed(group.sheet));
+    sheetsList.innerHTML = open.length ? open.slice(0, 5).map((group) => `<li><button class="desk-item sheet-item" type="button" data-sheet-view="${escapeHtml(group.sheet)}">
+      <span class="desk-count">${escapeHtml(group.sheet)}</span>
+      <span class="desk-text"><strong>גיליון ${escapeHtml(group.sheet)}</strong><small>${escapeHtml(`${number.format(group.orders.length)} הזמנות · ${number.format(group.clients.size)} לקוחות`)}</small></span>
+      <span class="desk-meta">${pill("open", "פתוח")}</span>
+    </button></li>`).join("") : '<li class="desk-empty">אין גיליונות פתוחים עם הזמנות.</li>';
+    const notes = [];
+    if (open.length > 5) notes.push(`ועוד ${number.format(open.length - 5)} גיליונות פתוחים.`);
+    if (!state.sheetsInstalled) notes.push("סגירת גיליונות עדיין לא הופעלה במסד הנתונים, ולכן כל הגיליונות מוצגים כפתוחים.");
+    sheetsNote.hidden = notes.length === 0;
+    sheetsNote.textContent = notes.join(" ");
+  }
+
   // ---------- rendering by screen ----------
   function renderCurrent() {
     const route = app().route();
+    if (route.name === "dashboard") renderDashboard();
     if (route.name === "reports") renderReports();
     if (!state.ready) return;
     if (route.name === "client") renderClientPage(route.param);
@@ -868,14 +943,28 @@
     }
   });
   document.addEventListener("modaat:data", () => {
-    if (!state.ready) return;
+    if (!state.ready) {
+      if (app().route().name === "dashboard") renderDashboard();
+      return;
+    }
     window.clearTimeout(refreshTimer);
     refreshTimer = window.setTimeout(() => {
       loadBusinessData().then((applied) => { if (applied) renderCurrent(); })
         .catch((error) => console.error("רענון נתוני העסק נכשל:", error));
     }, 150);
   });
-  document.addEventListener("modaat:view", () => renderCurrent());
+  document.addEventListener("modaat:view", (event) => {
+    renderCurrent();
+    // A dashboard shortcut may open a list with a preset filter (applied after the screen reset its filters).
+    if (deskFilter.view && event.detail && event.detail.name === deskFilter.view) {
+      const select = deskFilter.select && $(deskFilter.select);
+      if (select && [...select.options].some((option) => option.value === deskFilter.value)) {
+        select.value = deskFilter.value;
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      deskFilter.view = "";
+    }
+  });
   document.addEventListener("modaat:signed-out", () => {
     Object.assign(state, { ready: false, loaded: false, packages: [], installments: [], obligations: [], balances: new Map(), modalClientId: null });
     $("#new-order-rows").innerHTML = "";
@@ -921,6 +1010,11 @@
 
   document.addEventListener("click", (event) => {
     const route = app().route();
+    const desk = event.target.closest("[data-desk-go]");
+    if (desk) {
+      Object.assign(deskFilter, { view: desk.dataset.deskGo, select: desk.dataset.deskSelect, value: desk.dataset.deskValue });
+      app().navigate(desk.dataset.deskGo);
+    }
     const action = event.target.closest("[data-client-page-action]");
     if (action && route.name === "client") {
       if (action.dataset.clientPageAction === "package") openPackage(route.param);
