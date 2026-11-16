@@ -8,11 +8,11 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@500;700&family=Heebo:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20261116-5">
+  <link rel="stylesheet" href="styles.css?v=20261116-6">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="supabase-config.js"></script>
-  <script src="app.js?v=20261116-5" defer></script>
-  <script src="business-app.js?v=20261116-5" defer></script>
+  <script src="app.js?v=20261116-6" defer></script>
+  <script src="business-app.js?v=20261116-6" defer></script>
 </head>
 <body>
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -27,12 +27,13 @@
   </svg>
   <main class="auth-screen" id="auth-screen">
     <section class="auth-panel" aria-labelledby="login-title">
-      <a class="brand auth-brand" href="#" aria-label="מודעת">
-        <span class="brand-mark" aria-hidden="true">מ</span>
-        <span class="brand-copy"><strong>מודעת</strong><small>מערכת הפרסומון</small></span>
-      </a>
       <div class="auth-body">
-        <p class="eyebrow">גישה מאובטחת למערכת</p>
+        <!-- Newspaper nameplate: typography is the logo. Display branding only; internal names are unchanged. -->
+        <header class="auth-masthead">
+          <p class="auth-wordmark">הפרסומון</p>
+          <span class="auth-rule" aria-hidden="true"></span>
+          <p class="auth-tagline">מערכת ניהול הזמנות לעיתון</p>
+        </header>
         <h1 id="login-title">ברוכים השבים</h1>
         <p class="auth-lede">התחברות עם החשבון שאושר לשימוש במערכת.</p>
         <form id="login-form" class="auth-form" aria-describedby="login-message">
@@ -54,9 +55,10 @@
         </div>
         <p class="auth-footnote">אין הרשמה ציבורית. הגישה מותרת רק לחשבונות שהוזמנו ואושרו מראש.</p>
       </div>
-      <p class="auth-colophon">מודעת · מערכת הפרסומון</p>
     </section>
     <aside class="auth-visual" aria-hidden="true">
+      <!-- The full photograph is shown uncropped; a blurred copy of the same image fills the space around it. -->
+      <img class="auth-photo-ambient" src="assets/login-photo.jpg" alt="" width="1536" height="1024" decoding="async">
       <img class="auth-photo" src="assets/login-photo.jpg" alt="" width="1536" height="1024" decoding="async" fetchpriority="high">
     </aside>
   </main>

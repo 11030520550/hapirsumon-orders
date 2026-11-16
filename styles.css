@@ -71,22 +71,24 @@ h1, h2, h3, p { margin-top: 0; }
 .brand-copy strong { font-family: var(--font-serif); font-size: 23px; font-weight: 700; letter-spacing: -.2px; line-height: 1.1; }
 .brand-copy small { display: flex; align-items: center; gap: 6px; color: var(--ink-3); font-size: 12px; }
 
-/* ---------- Auth: 55% sign-in area (right, RTL start) + 45% photograph (left) ---------- */
-.auth-screen { position: fixed; inset: 0; z-index: 10; display: grid; grid-template-columns: 55fr 45fr; overflow-y: auto; background: var(--paper); }
-.auth-panel { display: grid; grid-template-rows: auto 1fr auto; min-height: 100vh; padding: clamp(24px, 3.2vw, 44px) clamp(24px, 5vw, 80px);
+/* ---------- Auth: 48% sign-in area (right, RTL start) + 52% photograph (left) ---------- */
+.auth-screen { position: fixed; inset: 0; z-index: 10; display: grid; grid-template-columns: 48fr 52fr; overflow-y: auto; background: var(--paper); }
+.auth-panel { display: grid; place-items: center; min-height: 100vh; padding: clamp(20px, 4vh, 48px) clamp(20px, 4vw, 64px);
   background: radial-gradient(80% 60% at 0% 50%, rgba(229, 217, 203, .55) 0%, transparent 70%), radial-gradient(70% 55% at 100% 0%, #FFFDF9 0%, transparent 70%), var(--paper); }
-.auth-brand { justify-self: start; padding: 0; }
-.auth-brand .brand-mark { width: 44px; height: 44px; font-size: 26px; }
-.auth-brand .brand-copy strong { font-size: 25px; }
 
 /* The card: spacious, centred, one column of equal-width controls. */
-.auth-body { align-self: center; justify-self: center; width: min(500px, 100%); margin: 36px 0; padding: clamp(32px, 3.6vw, 52px) clamp(26px, 3.4vw, 48px) clamp(26px, 2.8vw, 36px);
+.auth-body { width: min(480px, 100%); padding: clamp(28px, 4.2vh, 46px) clamp(24px, 3vw, 44px) clamp(22px, 3vh, 30px);
   border: 1px solid rgba(163, 140, 119, .32); border-radius: 22px; background: rgba(251, 249, 245, .92);
   box-shadow: 0 1px 0 rgba(255, 255, 255, .8) inset, 0 30px 70px -20px rgba(38, 44, 48, .18), 0 6px 18px rgba(38, 44, 48, .05); }
-.auth-body .eyebrow { margin-bottom: 12px; font-size: 13.5px; }
-.auth-body h1 { margin: 0 0 10px; font-size: clamp(36px, 3.2vw, 46px); letter-spacing: -.5px; }
-.auth-lede { margin: 0 0 32px; color: var(--ink-3); font-size: 16.5px; line-height: 1.6; }
-.auth-form { display: grid; gap: 20px; }
+/* Nameplate: "הפרסומון" set like a newspaper masthead, an Oxford rule (thick + hairline) and a quiet tagline. */
+.auth-masthead { margin: 0 0 clamp(22px, 3.4vh, 32px); text-align: center; }
+.auth-wordmark { margin: 0; color: var(--ink); font-family: var(--font-serif); font-size: clamp(44px, 4vw, 54px); font-weight: 700; line-height: 1; letter-spacing: -.5px; }
+.auth-rule { display: block; height: 6px; margin: 14px auto 10px; border-top: 2.5px solid var(--forest); border-bottom: 1px solid var(--forest); }
+.auth-tagline { display: flex; align-items: center; justify-content: center; gap: 12px; margin: 0; color: var(--wood-text); font-size: 14px; font-weight: 600; letter-spacing: .06em; }
+.auth-tagline::before, .auth-tagline::after { content: ""; width: 5px; height: 5px; background: var(--wood); transform: rotate(45deg); }
+.auth-body h1 { margin: 0 0 6px; font-size: clamp(26px, 2.2vw, 30px); font-weight: 500; letter-spacing: -.2px; text-align: center; }
+.auth-lede { margin: 0 0 clamp(20px, 3.2vh, 28px); color: var(--ink-3); font-size: 15.5px; line-height: 1.6; text-align: center; }
+.auth-form { display: grid; gap: 18px; }
 .auth-form .field-label { gap: 8px; color: var(--ink); font-size: 14.5px; }
 .auth-form .field-label input { min-height: 56px; padding: 12px 16px; border-color: #D9CCBC; border-radius: 12px; background: #FFFEFC; font-size: 16px; text-align: right; transition: border-color .15s, box-shadow .15s; }
 .auth-form .field-label input::placeholder { color: #A1988D; }
@@ -112,18 +114,22 @@ h1, h2, h3, p { margin-top: 0; }
 .auth-submit.is-loading { background: var(--forest-hover); }
 .auth-secondary-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
 .auth-secondary-actions:not(:has(button:not([hidden]))) { display: none; }
-.auth-footnote { margin: 28px 0 0; padding-top: 18px; border-top: 1px solid var(--line); color: var(--ink-3); font-size: 13px; line-height: 1.6; text-align: center; }
-.auth-colophon { justify-self: center; margin: 0; color: var(--ink-3); font-family: var(--font-serif); font-size: 13px; letter-spacing: .4px; opacity: .8; }
+.auth-footnote { margin: clamp(20px, 3vh, 26px) 0 0; padding-top: 16px; border-top: 1px solid var(--line); color: var(--ink-3); font-size: 13px; line-height: 1.6; text-align: center; }
 #run-local-import:disabled { cursor: not-allowed; opacity: .55; }
 @keyframes auth-spin { to { transform: rotate(360deg); } }
 @keyframes auth-pulse { 50% { opacity: .35; } }
 @media (prefers-reduced-motion: reduce) { .auth-spinner, .auth-status[data-tone="info"]::before { animation-duration: 3s; } }
 
 /* Photograph: full-bleed, framed on the armchair + open newspaper; only a whisper of shading at the seam. */
-.auth-visual { position: relative; overflow: hidden; min-height: 100vh; background: #1F2A27; }
-.auth-photo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 74% 50%; }
-.auth-visual::after { content: ""; position: absolute; inset: 0; pointer-events: none;
-  background: linear-gradient(270deg, rgba(31, 42, 39, .22) 0%, rgba(31, 42, 39, 0) 14%), radial-gradient(140% 100% at 55% 50%, transparent 70%, rgba(20, 22, 20, .22) 100%); }
+/* Photograph: the whole 3:2 image is shown (no crop, no zoom) across the panel width; a blurred, dimmed copy of
+   the same photo fills the space above and below, and the edges dissolve into it, so it reads as one scene. */
+.auth-visual { position: relative; display: grid; place-items: center; overflow: hidden; min-height: 100vh; background: #1C2522; }
+.auth-photo-ambient { position: absolute; top: -48px; left: -48px; width: calc(100% + 96px); height: calc(100% + 96px); object-fit: cover; object-position: 55% 50%;
+  filter: blur(70px) saturate(1.05) brightness(.38); transform: scale(1.15); }
+.auth-photo { position: relative; z-index: 1; display: block; width: 100%; height: auto; max-height: 100vh; aspect-ratio: 3 / 2; object-fit: cover;
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, rgba(0,0,0,.55) 7%, #000 17%, #000 83%, rgba(0,0,0,.55) 93%, transparent 100%); mask-image: linear-gradient(180deg, transparent 0, rgba(0,0,0,.55) 7%, #000 17%, #000 83%, rgba(0,0,0,.55) 93%, transparent 100%); }
+.auth-visual::after { content: ""; position: absolute; z-index: 2; inset: 0; pointer-events: none;
+  background: linear-gradient(270deg, rgba(28, 37, 34, .28) 0%, rgba(28, 37, 34, 0) 10%), radial-gradient(130% 90% at 50% 50%, transparent 62%, rgba(18, 22, 20, .30) 100%); }
 
 /* ---------- Development / preview notice (kept only for the isolated preview) ---------- */
 .announcement-banner { position: sticky; top: 0; z-index: 4; display: grid; justify-items: center; gap: 1px; padding: 8px 18px; border-bottom: 1px solid var(--line); color: var(--ink-2); background: var(--linen); text-align: center; }
@@ -443,10 +449,10 @@ button.desk-item:hover { background: #F7F2EA; }
   /* Tablet portrait: the photograph becomes a wide band above a centred card. */
   .auth-screen { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
   .auth-visual { grid-row: 1; min-height: 0; height: clamp(220px, 34vh, 340px); }
-  .auth-photo { object-position: 60% 62%; }
+  .auth-photo-ambient { display: none; }
+  .auth-photo { position: absolute; inset: 0; height: 100%; max-height: none; aspect-ratio: auto; object-position: 50% 62%; -webkit-mask-image: none; mask-image: none; }
   .auth-visual::after { background: linear-gradient(0deg, rgba(31, 42, 39, .18) 0%, rgba(31, 42, 39, 0) 22%); }
-  .auth-panel { grid-row: 2; min-height: 0; padding: 22px clamp(20px, 6vw, 48px) 26px; }
-  .auth-body { margin: 22px 0 18px; }
+  .auth-panel { grid-row: 2; min-height: 0; padding: 28px clamp(20px, 6vw, 48px) 32px; }
 }
 @media (max-width: 760px) {
   .sidebar, .business-preview-shell .sidebar { position: sticky; top: 0; z-index: 3; width: 100%; height: auto; padding: 10px 12px 8px; border-left: 0; border-bottom: 1px solid var(--line); }
@@ -500,11 +506,13 @@ button.desk-item:hover { background: #F7F2EA; }
 }
 @media (max-width: 560px) {
   .auth-visual { height: 150px; }
-  .auth-photo { object-position: 62% 64%; }
-  .auth-panel { padding: 16px 16px 22px; }
-  .auth-body { margin: 16px 0 14px; padding: 28px 20px 22px; border-radius: 18px; }
-  .auth-body h1 { font-size: 32px; }
-  .auth-lede { margin-bottom: 24px; font-size: 15.5px; }
+  .auth-photo { object-position: 55% 64%; }
+  .auth-panel { padding: 18px 16px 24px; }
+  .auth-body { padding: 28px 20px 22px; border-radius: 18px; }
+  .auth-wordmark { font-size: 42px; }
+  .auth-tagline { gap: 9px; font-size: 12.5px; letter-spacing: .1em; }
+  .auth-body h1 { font-size: 25px; }
+  .auth-lede { margin-bottom: 22px; font-size: 15px; }
 }
 @media (max-width: 380px) {
   .quick-actions { grid-template-columns: 1fr; }
