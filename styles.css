@@ -70,7 +70,6 @@ h1, h2, h3, p { margin-top: 0; }
 .brand-copy { display: grid; gap: 2px; }
 .brand-copy strong { font-family: var(--font-serif); font-size: 23px; font-weight: 700; letter-spacing: -.2px; line-height: 1.1; }
 .brand-copy small { display: flex; align-items: center; gap: 6px; color: var(--ink-3); font-size: 12px; }
-.beta-badge { padding: 0 6px; border: 1px solid var(--wood); border-radius: 999px; color: var(--wood-text); font-size: 10px; font-weight: 600; letter-spacing: .6px; line-height: 16px; }
 
 /* ---------- Auth: 55% sign-in panel (right, RTL start) + 45% photograph (left) ---------- */
 .auth-screen { position: fixed; inset: 0; z-index: 10; display: grid; grid-template-columns: 55fr 45fr; overflow-y: auto; background: var(--paper); }

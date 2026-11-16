@@ -243,6 +243,7 @@ async function run() {
   await load("session=0&business=1");
   check("A1 login: no preview/backup entry points, one primary button",
     !$("#open-business-preview") && !$("#download-prelogin-backup") && $$("#auth-screen .button-primary").length === 1);
+  check("A10 no BETA label anywhere in the interface", !/beta/i.test(d.body.innerText + d.body.innerHTML.match(/class="[^"]*"/g).join(" ")));
   fillLogin("wrong"); $("#login-form").requestSubmit(); await sleep(300);
   check("A2 wrong password: error tone, password cleared, button usable",
     $("#login-message").dataset.tone === "error" && text("#login-message").includes("שגויות") && $('#login-form [name="password"]').value === "" && !$("#login-submit").disabled,
