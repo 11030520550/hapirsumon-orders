@@ -1,6 +1,6 @@
 # דרישות סביבת עבודה — מערכת ההזמנות של הפרסומון
 
-אין שלב Build ואין חבילות להתקנה (אין `package.json` / `node_modules`). האתר הוא HTML/CSS/JavaScript סטטי שטוען את ספריית Supabase מ-CDN.
+אין שלב Build ואין חבילות להתקנה (אין `package.json` / `node_modules`). האתר הוא HTML/CSS/JavaScript סטטי. ספריית Supabase (supabase-js 2.119.0) שמורה מקומית ב-`vendor/` עם בדיקת שלמות SRI; בעדכון גרסה יש להחליף את הקובץ, לעדכן את ה-hash ב-`index.html` ולוודא שה-hash תואם ל-hash שמפרסם jsDelivr.
 
 ## תוכנות נדרשות
 
@@ -19,7 +19,7 @@
 |---|---|---|
 | GitHub | גישה ל-`11030520550/hapirsumon-orders` (פרטי) | |
 | Supabase | גישה לפרויקט **orders** בלוח הבקרה | הנתונים, המשתמשים המאושרים והסכימה החיה נמצאים שם בלבד. כתובת הפרויקט והמפתח הציבורי (publishable) נמצאים ב-`supabase-config.js`; מפתח סודי לא נדרש ואסור בקוד. |
-| Netlify | גישה לאתר `hapirsumon-orders` (\u200Fhttps://hapirsumon-orders.netlify.app/) | פרסום ידני בלבד, באישור. |
+| Netlify | גישה לאתר `hapirsumon-orders` (https://hapirsumon-orders.netlify.app/) | פרסום ידני בלבד, באישור. |
 
 ## הגדרות מקומיות שאינן ב-Git (ליצור מחדש רק אם נדרש)
 
@@ -29,8 +29,10 @@
 ## הרצה מקומית
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File testing\browser\serve.ps1
+powershell -ExecutionPolicy Bypass -File testing\browser\serve.ps1 -HeadersFile _headers
 ```
+
+`-HeadersFile _headers` שולח את כותרות האבטחה של Netlify (כולל CSP) גם מקומית, כך שהבדיקות רצות תחת אותה מדיניות כמו באתר החי (`C1`–`C3` ב-runner-v3).
 
 - `http://127.0.0.1:8000` — האתר האמיתי (מתחבר ל-Supabase; נדרש משתמש מאושר).
 - `http://127.0.0.1:8000/__test/runner-v3.html` — בדיקות דפדפן אוטומטיות מול Supabase מדומה (ללא רשת). התוצאה מוצגת בראש הדף (`RESULT OK`).
