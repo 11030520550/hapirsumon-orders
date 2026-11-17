@@ -1,34 +1,156 @@
-# מצב הפרויקט והמשך פיתוח — מערכת ההזמנות של הפרסומון
+# HANDOFF — מערכת ההזמנות של הפרסומון (hapirsumon-orders)
 
-עדכון: 12/11/2026. מסמך פנימי; אינו עולה ל-Netlify.
+עדכון: 17/11/2026, במצב Commit `ff0bed5` (ראו סעיף 7: ייתכן שקומיט זה, שמוסיף את המסמך, הוא האחרון). מסמך פנימי; **אינו עולה ל-Netlify**.
+נכתב לשיחת עבודה חדשה: לקרוא אותו ואת `AGENTS.md` לפני כל פעולה.
 
-## מה קיים בקוד (מגובה במלואו ב-GitHub)
+---
 
-- **ממשק:** `index.html`, `styles.css`, `app.js` (התחברות, סנכרון, ניתוב מסכים, מצב legacy), `business-app.js` (מסכים עסקיים מול RPC), `business-preview.js` (תצוגה מקדימה עם נתוני דוגמה).
-- **מסכים:** לוח בקרה · הזמנות (כולל "הזמנה חדשה" מרובת שורות) · גיליונות · לקוחות ותיק לקוח · חבילות וקרדיטים · תשלומים וחובות · דוחות · הגדרות ומוצרים.
-- **SQL (לא הורץ ע"י הקוד; מריצים ידנית ב-SQL Editor באישור):** סכימה בסיסית, Reliability, Business upgrade + preflight/verify/cutover, גיליונות ומספרי הזמנה, תיקון עברית (preview/fix), גיבוי snapshot, מוצר הדגמה. סדר הפעלה: `INSTALL-BUSINESS.md`.
-- **בדיקות:** `testing/browser/` (Supabase מדומה + ~90 בדיקות דפדפן), `testing/` (כלי RPC לפרויקט Supabase נפרד).
+## 0. כללים מחייבים (לא לעקוף)
 
-## מה לא ידוע מתוך ה-Repository
+- **אין להריץ SQL, לשנות נתונים, הרשאות, RLS או פונקציות ב-Supabase** ללא אישור מפורש של בעלת הפרויקט לאותה פעולה.
+- **אין לפרסם ל-Netlify** ללא אישור מפורש. אין להגדיר פרסום אוטומטי. הפרסום ידני ומתבצע ע״י בעלת הפרויקט.
+- **אין לשנות עיצוב שאושר** — במיוחד מסך ההתחברות (סעיף 4).
+- **בדיקות Mock אינן הוכחה שהמערכת האמיתית תקינה.** בדיווח יש להפריד תמיד בין Mock לבין בדיקה מול Supabase האמיתי / האתר החי.
+- אחרי **כל** שינוי בקובץ בפרויקט: `git status` + diff → בדיקות → Commit ייעודי → Push ל-`main` → אימות סנכרון. בלי force-push. דיווח: Commit, הצלחת Push, מזהה, שינויים שלא נדחפו (פירוט ב-`AGENTS.md`).
+- אין להכניס ל-Git נתוני לקוחות, גיבויים/ייצואי JSON, סודות או מפתח `service_role`/secret. חריגים מאושרים בלבד: `ARCHIVE-INDEX.md`.
+- לא לבקש סיסמה או Token בצ׳אט. אין חשבון בדיקה מאושר זמין לסוכן — בדיקות אחרי התחברות דורשות את בעלת הפרויקט.
+- ממשק בעברית RTL; Supabase הוא מקור הנתונים היחיד (אין fallback מקומי לנתוני לקוחות/הזמנות).
 
-- אילו קובצי SQL כבר הורצו בפרויקט Supabase **orders** (הורצה לפחות `supabase-business-upgrade.sql` בניסיון אחד שנכשל ותוקן; יש לבדוק עם `supabase-business-upgrade-preflight-summary.sql`).
-- איזו גרסה מפורסמת כרגע ב-Netlify.
+---
 
-## משימות פתוחות
+## 1. מטרת המערכת, ארכיטקטורה וקבצים
 
-1. להריץ (באישור) את `supabase-sheets-and-order-numbers.sql`, ולפי הצורך את `supabase-renumber-short-order-numbers.sql`.
-2. להריץ `supabase-hebrew-encoding-preview.sql`, לבדוק, ואז (באישור) `supabase-hebrew-encoding-fix.sql`.
-3. עריכת הזמנות עסקיות (RPC `update_business_order`) — עדיין לא מחוברת לממשק.
-4. בדיקה מול Supabase אמיתי, ואז פרסום ידני ל-Netlify ו-cutover.
-5. קטלוג מוצרים אמיתי — דורש מחירון קריא (ראו להלן).
+מערכת פנימית לעיתון "הפרסומון": לקוחות, הזמנות פרסום, גיליונות, חבילות וקרדיטים, חובות ותשלומים, דוחות.
 
-## חומרים נוספים ב-Repository
+- **אתר סטטי** HTML/CSS/JS ללא Build וללא `package.json`. Backend: **Supabase** (Postgres + Auth + RLS + RPC + Realtime).
+- **מצבי פעולה ב-`app.js`:** אם סכימת העסק מותקנת (`businessSchema`) — המסכים העסקיים ב-`business-app.js` פועלים מול RPC; אחרת מצב legacy (כתיבה ישירה לטבלאות). **בייצור הסכימה העסקית מותקנת.**
 
-- `reference/` — מחירון וחבילות (מקור לקטלוג המוצרים).
-- `archive/data-exports-2026-11-11/` — שני גיבויי JSON (נתוני דמה) מ-11/11/2026.
+| קובץ | תפקיד |
+|---|---|
+| `index.html` | כל המסכים (התחברות + אפליקציה), sprite של SVG (`.svg-defs`) |
+| `styles.css` | כל העיצוב (גרסת cache: `?v=20261117-4`) |
+| `app.js` | התחברות/סשן, ניתוב מסכים (`#/...`), סנכרון Realtime + בדיקה תקופתית, לקוחות, הזמנות legacy, גיבוי/ייבוא JSON, `friendlyError`, `safeErrorDetails` |
+| `business-app.js` | מסכים עסקיים מול RPC (הזמנה חדשה מרובת שורות, גיליונות, חבילות, תשלומים, מוצרים, מע״מ) |
+| `business-preview.js` | תצוגה מקדימה עם נתוני דוגמה בקוד (ללא Supabase) |
+| `supabase-config.js` | Project URL + מפתח **publishable** בלבד |
+| `vendor/supabase-js-2.119.0.js` | ספריית Supabase מקובעת, נטענת עם SRI (sha384) מ-`index.html`; `vendor/**` מוגדר `-text` ב-`.gitattributes` כדי שה-hash לא ישתנה |
+| `_headers` | כותרות אבטחה של Netlify (CSP וכו׳) — חייב להיות בשורש תיקיית הפרסום |
+| `assets/login-photo.jpg`, `assets/logo-emblem.png` | תמונת מסך ההתחברות והלוגו (`logo-emblem-source.png` ו-`CREDITS.md` אינם נפרסים) |
+| `supabase-*.sql` | הגירות/בדיקות — **מורצות ידנית בלבד ובאישור** (סדר: `INSTALL-BUSINESS.md`) |
+| `testing/browser/` | שרת בדיקה `serve.ps1`, Supabase מדומה `mock-supabase.js`, `runner-v3.html`, `runner-client.html`, `csp-recorder.js` |
+| `testing/index.html`, `test-harness.js` | כלי RPC לפרויקט Supabase נפרד (`SUPABASE-TESTING.md`) |
+| מסמכים | `README.md`, `INSTALL.md`, `INSTALL-BUSINESS.md`, `SUPABASE-SETUP.md`, `SUPABASE-TESTING.md`, `UPGRADE-PLAN.md`, `ARCHIVE-INDEX.md`, `AGENTS.md` |
+| `archive/`, `reference/` | גרסאות קודמות, צילומים, מחירון (באישור; ראו `ARCHIVE-INDEX.md`) |
 
-שניהם נשמרו באישור מפורש של בעלת הפרויקט (12/11/2026). פירוט: `ARCHIVE-INDEX.md`. הנתונים החיים עדיין נמצאים ב-Supabase בלבד.
+קבצי פרסום (בדיוק 11): `_headers`, `index.html`, `styles.css`, `app.js`, `business-app.js`, `business-preview.js`, `supabase-config.js`, `assets/login-photo.jpg`, `assets/logo-emblem.png`, `vendor/supabase-js-2.119.0.js`, `vendor/LICENSE-supabase-js.txt`.
 
-## כללי עבודה
+---
 
-ראו `AGENTS.md`: Commit+Push אחרי כל שינוי, ללא סודות/נתוני לקוחות, ללא הרצת SQL או פרסום ללא אישור.
+## 2. Supabase — חיבור, הזדהות, הרשאות ופעולות עסקיות
+
+- **פרויקט:** `orders`, כתובת `https://sndaeogseawtwzwxiqst.supabase.co` (ציבורית, מופיעה גם ב-CSP). בקוד רק מפתח publishable; **אין** ואסור מפתח secret/`service_role`.
+- **הזדהות:** אימייל + סיסמה (`signInWithPassword`), `persistSession` + `autoRefreshToken`. **הרשמה ציבורית כבויה** (אומת). אחרי התחברות נבדק `rpc("current_user_is_approved")` — רק משתמשים ברשימת `private.approved_users` נכנסים; הבדיקה חוזרת תקופתית ומנתקת משתמש שאישורו בוטל.
+- **אירועי סשן** (`onAuthStateChange`): SIGNED_IN / SIGNED_OUT / USER_UPDATED; פקיעת סשן מחזירה למסך התחברות **בלי** הודעת הצלחה. הודעת "ההתנתקות בוצעה בהצלחה." מוצגת רק אחרי התנתקות יזומה (`signOutNoticePending`).
+- **שגיאות:** `friendlyError` מחזיר עברית בלבד — פרטים שגויים (הודעה כללית, ללא חשיפת קיום חשבון), הגבלת קצב (429 / `over_*_rate_limit`), ושגיאה כללית לכל תקלה לא צפויה. בהתחברות, ב-console נרשם רק `safeErrorDetails` (name/code/status/message מקוצר), ללא סיסמה או טוקן.
+- **הרשאות (אומת מול השרת האמיתי כ-anon, 17/11):** כל 19 הטבלאות/views מחזירות 401/42501; PATCH/DELETE/POST ל-clients/orders/payments נחסמים; 6 ה-RPC נחסמים ל-anon; GraphQL ללא שדות; Storage ללא buckets.
+- **RPC שהממשק קורא (בקוד בפועל):** `current_user_is_approved`, `create_orders_batch`, `delete_business_order`, `set_obligation_paid`, `set_sheet_status`, `purchase_customer_package`, `adjust_client_credits`, `save_product_catalog_item`, `set_business_vat_rate`. קיים במסד גם `update_business_order` (עם `p_expected_updated_at`, תמיכה בסכום legacy ועדכון חוב) — **עדיין לא מחובר לממשק**.
+- **כתיבות ישירות שעדיין בקוד** (`app.js`):
+  - בכל מצב: עדכון/הוספת לקוח (`clients`, שורות 1245, 1255) — לא מושפע מה-Cutover.
+  - **במצב עסקי, יישברו אחרי Cutover:** עריכת הזמנה ישנה דרך `#order-form` (`orders.update`, שורה 1321) וייבוא הזמנות מגיבוי JSON (`orders.insert`, שורה 1063; גם אינו יוצר חוב כספי להזמנות המיובאות).
+  - מצב legacy בלבד: הוספת הזמנה (1328), מחיקה (1360), שינוי סטטוס תשלום (1395). במצב עסקי התשלום עובר דרך `set_obligation_paid`.
+- **Cutover** (`supabase-business-upgrade-cutover.sql`) — **לא הורץ.** הוא מבטל הרשאות INSERT/UPDATE/DELETE ישירות על `orders` ו-INSERT על `payments` (כולל הרשאות עמודה), משאיר SELECT, בודק תנאים מקדימים ומאמת בסוף, בטרנזקציה. החזרה לאחור: `grant` מחדש (מוכן בתוכנית, לא הורץ). `supabase-business-upgrade-verify.sql` — קריאה בלבד.
+
+---
+
+## 3. מצב נוכחי — מה בוצע ואושר
+
+- ניווט מסכים, איפוס חיפושים, ממשק עסקי מול RPC, גיליונות, מספרי הזמנה בני 5 ספרות, תיקון קידוד עברית בקוד — בוצעו בשלבים קודמים.
+- **סכימת העסק מותקנת בייצור** וטבלת `sheets` קיימת (נצפה). מצב ההרצה המדויק של שאר קובצי ה-SQL (תיקון עברית, מספור מחדש) **לא ידוע מתוך ה-Repository** — לבדוק (באישור) עם `supabase-business-upgrade-preflight-summary.sql`.
+- **מסך התחברות חדש אושר** (קומיטים 12505d0 → 704a80a) ופורסם בעבר בהצלחה.
+- **תיקוני אבטחה** (cb03581 + תיעוד 98bb1e0): הודעת התנתקות קבועה, הודעות שגיאה בטוחות, supabase-js 2.119.0 מקומי עם SRI, `_headers` עם CSP / X-Frame-Options / nosniff / Referrer-Policy / Permissions-Policy. לצורך ה-CSP הועבר ה-style היחיד מ-HTML ל-`.svg-defs` ב-CSS (ללא שינוי חזותי); אין סקריפטים inline, אין `unsafe-inline`.
+- **ff0bed5:** README — לגרור את התיקייה עצמה ולא ZIP של `Compress-Archive` (ראו סעיף 8).
+- **תוכנית (ניתוח בלבד, לא בוצעה)** לשתי הפעולות התלויות בכתיבה ישירה:
+  1. עריכת הזמנה ישנה → להעביר ל-`update_business_order` (שינוי קוד בלבד, ללא SQL). להחליט אם הזמנה ישנה נשארת "סכום בלבד" (מומלץ).
+  2. ייבוא הזמנות מ-JSON → מומלץ RPC חדש אטומי (לקוחות + הזמנות legacy + חובות, הוספה בלבד) — דורש הגירה באישור; חלופה זמנית: לחסום ייבוא הזמנות אחרי Cutover ולהשאיר ייבוא לקוחות.
+  סדר: קוד + בדיקות → פרסום באישור → Cutover בחלון ללא עריכות (גיבוי לפני, verify אחרי) → בדיקה ידנית חיה → RPC ייבוא.
+
+---
+
+## 4. החלטות עיצוב מחייבות — מסך ההתחברות (אסור לשנות)
+
+- פריסה מפוצלת: תמונה (`assets/login-photo.jpg`) בצד שמאל במחשב, מוצגת **במלואה** (`.auth-photo`) על רקע מטושטש של אותה תמונה (`.auth-photo-ambient`); בטלפון התמונה למעלה (390×150 ב-390px) והרקע המטושטש מוסתר. אין לשנות מיקום, גודל או חיתוך.
+- צד ימין: לוגו עגול `assets/logo-emblem.png` (`.auth-mark`, 56px; 48px בטלפון), שם "הפרסומון", סלוגן **"ניהול חכם. פרסום מדויק."**, כותרת **"ברוכים השבים"**, טקסט **"הכניסה למערכת מיועדת לחשבונות שהוזמנו ואושרו מראש."**
+- טופס בתוך מסגרת **ריבועית**: `.auth-body` עם `border: 1px solid #23272A`, `border-radius: 0`, רקע `#FFFDF8`, רוחב `min(480px, 100%)`; שדות, כפתור, הודעות ומתג העין — כולם `radius 0`. אין קו נחושת ואין `h1::before`.
+- מתג עין לסיסמה (`#password-toggle`): שומר פוקוס ומיקום סמן, `aria-label` "הצגת הסיסמה" / "הסתרת הסיסמה".
+- עיצוב autofill והודעות סטטוס (info/error/success) כפי שהם בקוד.
+- אין תווית BETA בממשק. שאר הממשק: עברית RTL כפי שקיים.
+- צילומי השוואה אחרונים: מחשב/נייד/טאבלט זהים פיקסל לפיקסל לגרסה המאושרת; טלפון — 0 פיקסלים שונים (הפרש של 73 פיקסלים מופיע גם בין שתי צילומים של אותה גרסה = אי-דטרמיניזם של הצילום).
+
+---
+
+## 5. תוצאות בדיקות (17/11/2026)
+
+**Mock (Supabase מדומה, ללא רשת) — אינו מוכיח תקינות המערכת האמיתית:**
+- `runner-v3.html`: **82/82 עברו**, תחת ה-CSP של `_headers`, גם מהריפו וגם מתיקיית הפרסום לבדה. כולל A12–A17 (הגבלת קצב, שגיאה כללית, אין סיסמה ב-console, הודעת התנתקות נשארת/מוחלפת, פקיעת סשן), C1–C3 (אפס חסימות CSP, כותרות בדף `/`, סקריפט vendor עם SRI).
+- `runner-client.html`: **נכשל — ידוע ולא קשור**: מחפש את כפתור התצוגה המקדימה שהוסר ממסך ההתחברות. לתקן את הבדיקה (לא את המסך).
+
+**מול Supabase האמיתי (ללא חשבון; ניסיון התחברות שגוי אחד בלבד עם כתובת `example.invalid`):**
+- דף ההתחברות האמיתי עם הספרייה המקומית תחת CSP: R1–R4, R5b–R10 עברו — הספרייה נטענת עם SRI, אפס חסימות CSP, לחיצה משולשת = בקשה אחת, הודעה כללית, אין טוקן/סיסמה באחסון או ב-console.
+- R5a (מצב "שולח" של הכפתור) — לא ניתן למדידה בבדיקה מול השרת האמיתי (virtual time); נבדק רק ב-Mock (A4).
+- תמונות (מתיקיית הפרסום, תחת CSP): מחשב 1440px ו-טלפון 390px — הלוגו והתמונה נטענים (200), אפס חסימות CSP.
+- בדיקת הרשאות anon — ראו סעיף 2.
+
+**לא נבדק מול המערכת האמיתית** (דורש חשבון מאושר — בעלת הפרויקט): מסכים אחרי התחברות, Realtime (`wss`) תחת ה-CSP, כתיבה/עריכה, התנתקות אמיתית.
+
+הרצה: `powershell -ExecutionPolicy Bypass -File testing\browser\serve.ps1 -HeadersFile _headers` ואז Chrome headless על `http://127.0.0.1:8000/__test/runner-v3.html` (פקודה מלאה ב-`INSTALL.md`). `-Root <תיקייה>` מאפשר להריץ מול תיקיית הפרסום.
+
+---
+
+## 6. בעיות ידועות, סיכונים ונושאים פתוחים
+
+- **האתר החי שבור כרגע** (סעיף 8): התמונות מחזירות 404 ותיקוני האבטחה אינם באוויר.
+- **Cutover לא בוצע:** משתמש מחובר ומאושר עדיין יכול לכתוב ישירות ל-`orders`/`payments` (RLS מגביל למשתמשים מאושרים בלבד, אך עוקף את חוקי ה-RPC). דורש קודם את שני תיקוני הקוד שבסעיף 3.
+- ייבוא JSON של הזמנות אינו יוצר חובות כספיים (פער קיים גם היום).
+- `console.error` בפעולות שאינן התחברות (שמירת לקוח/הזמנה, ייבוא) עדיין רושם את אובייקט השגיאה המלא של Supabase (ללא סיסמאות; ייתכנו פרטי רשומה טכניים).
+- Realtime תחת ה-CSP לא נבדק בפועל (`connect-src` כולל `wss://` של הפרויקט).
+- `runner-client.html` נכשל (בדיקה מיושנת).
+- בסביבת המחשב הזה מסנן "אתרוג" מזריק `/jsQuilting/server/etAddOn.js` לדפים — בעיית רשת מקומית, לא של האתר; עלול להופיע כחסימת CSP בדפדפן המקומי.
+- מספרי השורות בסעיף 2 נכונים ל-`ff0bed5`; לאמת מחדש לפני שינוי.
+
+---
+
+## 7. GitHub
+
+- Repository פרטי: `https://github.com/11030520550/hapirsumon-orders`, ענף `main`, remote `origin`.
+- **Commit אחרון לפני מסמך זה: `ff0bed5`**; מסונכרן עם `origin/main`, ללא שינויים מקומיים. מסמך זה נשמר בקומיט נפרד מיד אחריו — לבדוק `git log -1`.
+- רצף אחרון: `704a80a` (מסך התחברות מאושר) → `26d9481` (כתובת Netlify) → `cb03581` (אבטחה) → `98bb1e0` (תיעוד) → `ff0bed5` (אזהרת ZIP).
+
+---
+
+## 8. Netlify
+
+- אתר: **hapirsumon-orders** — https://hapirsumon-orders.netlify.app/ (השם "cute-macaron-aede92" שגוי). פרסום ידני דרך Deploys, באישור בלבד.
+- **מצב חי (נבדק 17/11/2026):** מוגש תוכן הגרסה הקודמת (704a80a, ספרייה מ-CDN `@2`, ללא `_headers` → אין CSP, רק HSTS של Netlify).
+  - **סיבת התמונות השבורות:** הועלה `orders-netlify-ready-2026-11-17.zip` שנוצר ב-`Compress-Archive` של PowerShell 5.1, שנתיביו עם `\`. Netlify יצר קבצים בשם `assets\login-photo.jpg` בשורש, ולכן `/assets/login-photo.jpg` ו-`/assets/logo-emblem.png` מחזירים 404. הקוד וה-CSP תקינים.
+  - ה-ZIP השבור שונה שמו ל-`orders-netlify-ready-2026-11-17-BROKEN-do-not-upload.zip` (שולחן העבודה).
+
+## 9. תיקיית הפרסום הממתינה
+
+- **`C:\Users\USER\Desktop\orders-netlify-ready-2026-11-17-images-fix`** — 11 הקבצים מסעיף 1, נבנתה ב-`git archive` מ-`ff0bed5`, `_headers` בשורש, SRI תואם, זהה בייט לבייט לתיקייה שנבדקה. ZIP תקין (נתיבים עם `/`): `...-images-fix.zip`.
+- העלאה: Netlify → hapirsumon-orders → Deploys → **לגרור את התיקייה עצמה**.
+- אחרי הפרסום לבדוק: `/assets/login-photo.jpg`, `/assets/logo-emblem.png`, `/vendor/supabase-js-2.119.0.js` → 200; כותרות CSP / X-Frame-Options / nosniff / Referrer-Policy / Permissions-Policy בדף `/`; אין שגיאות CSP; התחברות והתנתקות (בעלת הפרויקט).
+- תיקיות ישנות בשולחן העבודה (`orders-netlify-ready`, `orders-netlify-ready-2026-11-17`, `...-security`) — לא להעלות.
+
+---
+
+## 10. משימות להמשך (לפי עדיפות)
+
+1. **[ממתין לבעלת הפרויקט]** פרסום התיקייה `orders-netlify-ready-2026-11-17-images-fix`, ואז אימות חי (סעיף 9) כולל בדיקה מחוברת ו-Realtime.
+2. תיקון `runner-client.html` לבדיקה שתואמת למסך ללא כפתור התצוגה המקדימה (בדיקות בלבד).
+3. עריכת הזמנה ישנה דרך `update_business_order` (קוד בלבד, + בדיקות Mock) — לפי התוכנית בסעיף 3.
+4. חסימת ייבוא הזמנות (או חלופה) לקראת Cutover; ייבוא לקוחות נשאר.
+5. **[דורש אישור SQL]** בדיקת מצב ההגירות ב-`orders` עם `supabase-business-upgrade-preflight-summary.sql`; לפי הצורך תיקון עברית / מספור.
+6. **[דורש אישור]** Cutover בחלון ללא עריכות: גיבוי → cutover → verify → בדיקה ידנית.
+7. **[דורש אישור SQL]** RPC ייבוא אטומי (לקוחות + הזמנות + חובות).
+8. צמצום פרטי שגיאה ב-`console.error` גם בפעולות שאינן התחברות (`safeErrorDetails`).
+9. קטלוג מוצרים אמיתי מהמחירון שב-`reference/` (דורש אימות מחירים מול בעלת הפרויקט).
