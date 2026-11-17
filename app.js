@@ -1174,14 +1174,24 @@
     }
   });
 
+  // Eye icon (CSS swaps the two SVGs by aria-pressed). A mouse press does not steal focus from the field,
+  // and the caret position survives the type switch; keyboard users can still Tab to the button.
+  $("#password-toggle").addEventListener("mousedown", (event) => event.preventDefault());
   $("#password-toggle").addEventListener("click", (event) => {
     const toggle = event.currentTarget;
     const field = $("#login-form").elements.password;
+    const hadFocus = document.activeElement === field;
+    const { selectionStart, selectionEnd } = field;
     const reveal = field.type === "password";
     field.type = reveal ? "text" : "password";
-    toggle.textContent = reveal ? "הסתרה" : "הצגה";
+    const label = reveal ? "הסתרת הסיסמה" : "הצגת הסיסמה";
     toggle.setAttribute("aria-pressed", String(reveal));
-    toggle.setAttribute("aria-label", reveal ? "הסתרת הסיסמה" : "הצגת הסיסמה");
+    toggle.setAttribute("aria-label", label);
+    toggle.title = label;
+    if (hadFocus) {
+      field.focus();
+      try { field.setSelectionRange(selectionStart, selectionEnd); } catch { /* not all input types support it */ }
+    }
   });
 
   $("#client-form").addEventListener("submit", async (event) => {

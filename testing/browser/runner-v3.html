@@ -243,8 +243,10 @@ async function run() {
   await load("session=0&business=1");
   check("A1 login: no preview/backup entry points, one primary button",
     !$("#open-business-preview") && !$("#download-prelogin-backup") && $$("#auth-screen .button-primary").length === 1);
-  check("A11 login branding: הפרסומון nameplate + tagline, no square mark or old name",
-    text(".auth-wordmark") === "הפרסומון" && text(".auth-tagline") === "מערכת ניהול הזמנות לעיתון" && !$("#auth-screen .brand-mark") && !text("#auth-screen").includes("מודעת"));
+  check("A11 login branding: mark + הפרסומון + motto above the form, no card/old ornaments or old name",
+    text(".auth-wordmark") === "הפרסומון" && text(".auth-tagline") === "הסדר שמאחורי כל גיליון" && !!$(".auth-brand svg.auth-mark")
+    && !$(".auth-body .auth-brand") && !$(".auth-rule") && !$("#auth-screen .brand-mark") && !text("#auth-screen").includes("מודעת")
+    && $(".auth-brand").getBoundingClientRect().bottom <= $("#login-title").getBoundingClientRect().top);
   check("A10 no BETA label anywhere in the interface", !/beta/i.test(d.body.innerText + d.body.innerHTML.match(/class="[^"]*"/g).join(" ")));
   fillLogin("wrong"); $("#login-form").requestSubmit(); await sleep(300);
   check("A2 wrong password: error tone, password cleared, button usable",
@@ -267,8 +269,19 @@ async function run() {
   check("A7 page refresh with a session restores the app", page() === "dashboard" && !visible("#auth-screen"));
 
   await load("session=0&business=1");
-  $("#password-toggle").click();
-  check("A8 password reveal toggle", $('#login-form [name="password"]').type === "text" && $("#password-toggle").getAttribute("aria-pressed") === "true");
+  const pw = $('#login-form [name="password"]'); const eye = $("#password-toggle");
+  const shown = (sel) => w.getComputedStyle(eye.querySelector(sel)).display !== "none";
+  const hiddenState = pw.type === "password" && shown(".icon-eye-off") && !shown(".icon-eye") && eye.getAttribute("aria-label") === "הצגת הסיסמה" && !eye.textContent.trim();
+  pw.value = "secret123"; pw.focus(); pw.setSelectionRange(3, 3);
+  const signInsBefore = w.__mock.signInCalls || 0;
+  eye.dispatchEvent(new w.MouseEvent("mousedown", { bubbles: true, cancelable: true })); eye.click(); await sleep(50);
+  const revealedState = pw.type === "text" && shown(".icon-eye") && !shown(".icon-eye-off") && eye.getAttribute("aria-pressed") === "true" && eye.getAttribute("aria-label") === "הסתרת הסיסמה";
+  const keptFocus = d.activeElement === pw && pw.selectionStart === 3;
+  const noSubmit = (w.__mock.signInCalls || 0) === signInsBefore && eye.type === "button";
+  eye.click(); await sleep(50);
+  const backHidden = pw.type === "password" && shown(".icon-eye-off") && eye.getAttribute("aria-pressed") === "false";
+  check("A8 password eye icon: crossed eye when hidden, open eye when shown, aria-label per state, focus kept, no submit",
+    hiddenState && revealedState && keptFocus && noSubmit && backHidden, JSON.stringify({ hiddenState, revealedState, keptFocus, noSubmit, backHidden }));
 
   const loginLayout = [];
   for (const width of [1440, 1024, 768, 390]) {
