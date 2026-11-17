@@ -244,7 +244,11 @@ async function run() {
   check("A1 login: no preview/backup entry points, one primary button",
     !$("#open-business-preview") && !$("#download-prelogin-backup") && $$("#auth-screen .button-primary").length === 1);
   check("A11 login branding: mark + הפרסומון + motto above the form, no card/old ornaments or old name",
-    text(".auth-wordmark") === "הפרסומון" && text(".auth-tagline") === "הסדר שמאחורי כל גיליון" && !!$(".auth-brand svg.auth-mark")
+    text(".auth-wordmark") === "הפרסומון" && text(".auth-tagline") === "ניהול חכם. פרסום מדויק." && !!$(".auth-brand .auth-mark")
+    && text(".auth-lede") === "הכניסה למערכת מיועדת לחשבונות שהוזמנו ואושרו מראש." && !$(".auth-footnote")
+    && (d.querySelector("#auth-screen").innerText.match(/אושרו מראש/g) || []).length === 1
+    && w.getComputedStyle($('#login-form [name="email"]')).direction === "ltr" && w.getComputedStyle($('#login-form [name="password"]')).direction === "ltr"
+    && $("#password-toggle").getBoundingClientRect().left >= $('#login-form [name="password"]').getBoundingClientRect().left
     && !$(".auth-body .auth-brand") && !$(".auth-rule") && !$("#auth-screen .brand-mark") && !text("#auth-screen").includes("מודעת")
     && $(".auth-brand").getBoundingClientRect().bottom <= $("#login-title").getBoundingClientRect().top);
   check("A10 no BETA label anywhere in the interface", !/beta/i.test(d.body.innerText + d.body.innerHTML.match(/class="[^"]*"/g).join(" ")));
