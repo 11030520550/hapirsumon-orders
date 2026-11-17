@@ -249,6 +249,11 @@ async function run() {
     && (d.querySelector("#auth-screen").innerText.match(/אושרו מראש/g) || []).length === 1
     && w.getComputedStyle($('#login-form [name="email"]')).direction === "ltr" && w.getComputedStyle($('#login-form [name="password"]')).direction === "ltr"
     && $("#password-toggle").getBoundingClientRect().left >= $('#login-form [name="password"]').getBoundingClientRect().left
+    && (() => { const cs = w.getComputedStyle($(".auth-body")); const h1 = w.getComputedStyle($("#login-title"), "::before");
+      return ["borderTopLeftRadius", "borderTopRightRadius", "borderBottomLeftRadius", "borderBottomRightRadius"].every((k) => cs[k] === "0px")
+        && cs.borderTopStyle === "solid" && parseFloat(cs.borderTopWidth) >= 1 && (h1.content === "none" || h1.content === "normal"); })()
+    && (() => { const logo = $(".auth-brand img.auth-mark"); return !!logo && logo.complete && logo.naturalWidth >= 150
+      && new URL(logo.src).origin === w.location.origin && /\/assets\/logo-emblem\.png$/.test(new URL(logo.src).pathname); })()
     && !$(".auth-body .auth-brand") && !$(".auth-rule") && !$("#auth-screen .brand-mark") && !text("#auth-screen").includes("מודעת")
     && $(".auth-brand").getBoundingClientRect().bottom <= $("#login-title").getBoundingClientRect().top);
   check("A10 no BETA label anywhere in the interface", !/beta/i.test(d.body.innerText + d.body.innerHTML.match(/class="[^"]*"/g).join(" ")));
