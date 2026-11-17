@@ -19,7 +19,7 @@
 |---|---|---|
 | GitHub | גישה ל-`11030520550/hapirsumon-orders` (פרטי) | |
 | Supabase | גישה לפרויקט **orders** בלוח הבקרה | הנתונים, המשתמשים המאושרים והסכימה החיה נמצאים שם בלבד. כתובת הפרויקט והמפתח הציבורי (publishable) נמצאים ב-`supabase-config.js`; מפתח סודי לא נדרש ואסור בקוד. |
-| Netlify | גישה לאתר `cute-macaron-aede92` | פרסום ידני בלבד, באישור. |
+| Netlify | גישה לאתר `hapirsumon-orders` (\u200Fhttps://hapirsumon-orders.netlify.app/) | פרסום ידני בלבד, באישור. |
 
 ## הגדרות מקומיות שאינן ב-Git (ליצור מחדש רק אם נדרש)
 
