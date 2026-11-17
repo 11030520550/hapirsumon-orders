@@ -38,7 +38,9 @@
 
 1. ודאו ב-Supabase שהגירת הסנכרון הורצה, RLS פעיל, ההרשמה הציבורית כבויה, ושכל משתמשת הוזמנה ואושרה.
 2. השתמשו בתיקיית `orders-netlify-ready` שנוצרה לצד תיקיית הפרויקט. היא מכילה רק `index.html`, `styles.css`, `app.js`, `business-app.js`, `business-preview.js`, `supabase-config.js`, `_headers` (כותרות האבטחה — חייב להיות בשורש התיקייה), `vendor/` (ספריית Supabase המקובעת) ואת `assets/login-photo.jpg` ו-`assets/logo-emblem.png`. התקנת המערכת העסקית מתוארת ב-[`INSTALL-BUSINESS.md`](./INSTALL-BUSINESS.md). אל תעתיקו לתוכה גיבויים, SQL, מסמכים פנימיים או נתוני לקוחות.
-3. באתר Netlify הקיים `hapirsumon-orders` (https://hapirsumon-orders.netlify.app/), פתחו **Deploys → Deploy manually** והעלו את תוכן התיקייה. אין ליצור אתר חדש ואין לשנות את כתובת האתר.
+3. באתר Netlify הקיים `hapirsumon-orders` (https://hapirsumon-orders.netlify.app/), פתחו **Deploys → Deploy manually** וגררו את **התיקייה עצמה** (לא קבצים בודדים). אין ליצור אתר חדש ואין לשנות את כתובת האתר.
+   - **אין להעלות ZIP שנוצר ב-`Compress-Archive` של Windows PowerShell 5.1**: הוא שומר נתיבים עם `\` (למשל `assets\login-photo.jpg`), ו-Netlify יוצר קובץ בשם הזה בשורש במקום תיקייה — התמונות, `vendor/` וכו׳ מחזירים 404. אם נדרש ZIP, ליצור אותו ב-`git archive --format=zip` (נתיבים עם `/`).
+   - לאחר הפרסום לוודא ש-`/assets/login-photo.jpg`, `/assets/logo-emblem.png` ו-`/vendor/supabase-js-2.119.0.js` מחזירים 200, ושכותרת `Content-Security-Policy` מופיעה בתגובה לדף הראשי.
 4. לאחר אישור מפורש לפרסום, בדקו את האתר ב-HTTPS: התחברות כמשתמשת מאושרת, חסימה בחלון פרטי לא מחובר, רענון, הוספה/עריכה, סנכרון בין שתי לשוניות והתנתקות.
 
 הקבצים המקומיים והכנת החבילה אינם מפרסמים דבר. אל תפרסמו לפני שהגירת ה-SQL הורצה ונבדקה.
