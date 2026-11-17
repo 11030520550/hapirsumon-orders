@@ -58,6 +58,8 @@ body::after { content: ""; position: fixed; inset: 0; z-index: 30; pointer-event
 button, input, select, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; }
 [hidden] { display: none !important; }
+/* Icon sprite holder (was an inline style attribute; moved here so the CSP needs no 'unsafe-inline'). */
+.svg-defs { position: absolute; }
 h1, h2, h3, p { margin-top: 0; }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }

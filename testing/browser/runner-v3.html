@@ -263,6 +263,18 @@ async function run() {
     `${$("#login-message").dataset.tone} ${text("#login-message")}`);
   fillLogin("offline"); $("#login-form").requestSubmit(); await sleep(300);
   check("A3 network failure: clear error", $("#login-message").dataset.tone === "error" && text("#login-message").includes("לא ניתן להגיע"), text("#login-message"));
+  fillLogin("ratelimit"); $("#login-form").requestSubmit(); await sleep(300);
+  check("A12 rate limit: friendly Hebrew message, no server text, button usable",
+    $("#login-message").dataset.tone === "error" && text("#login-message").includes("יותר מדי ניסיונות") && !/rate|limit|request/i.test(text("#login-message")) && !$("#login-submit").disabled, text("#login-message"));
+  const consoleSeen = []; const origErr = w.console.error.bind(w.console);
+  w.console.error = (...args) => { consoleSeen.push(args.map((a) => { try { return typeof a === "string" ? a : JSON.stringify(a); } catch { return String(a); } }).join(" ")); origErr(...args); };
+  fillLogin("unexpected"); $("#login-form").requestSubmit(); await sleep(300);
+  w.console.error = origErr;
+  check("A13 unexpected error: generic Hebrew message, no technical Supabase text on screen; details only in console",
+    $("#login-message").dataset.tone === "error" && text("#login-message").includes("תקלה לא צפויה") && !/supabase|database|XYZ|schema/i.test(text("#login-message"))
+    && consoleSeen.some((line) => line.includes("unexpected_failure")), text("#login-message"));
+  check("A14 console never receives the password", !consoleSeen.some((line) => line.includes("unexpected") && line.includes("password")) && !consoleSeen.some((line) => /"unexpected"/.test(line)),
+    consoleSeen.join(" | ").slice(0, 160));
 
   await load("session=0&business=1&signindelay=600&delay=400");
   fillLogin("x"); $("#login-form").requestSubmit(); await sleep(120);
@@ -276,6 +288,36 @@ async function run() {
 
   await load("session=1&business=1"); await sleep(400);
   check("A7 page refresh with a session restores the app", page() === "dashboard" && !visible("#auth-screen"));
+
+  // Sign-out notice stays; session expiry / remote sign-out still shows a clean login screen.
+  $("#sign-out").click(); await sleep(50);
+  const noticeEarly = text("#login-message"); await sleep(700);
+  check("A15 sign-out: success notice stays visible after the SIGNED_OUT event, login shown, data cleared",
+    noticeEarly === "ההתנתקות בוצעה בהצלחה." && text("#login-message") === "ההתנתקות בוצעה בהצלחה." && $("#login-message").dataset.tone === "success"
+    && visible("#auth-screen") && !visible("#app-shell") && $$("#orders-body tr").length === 0, `${noticeEarly} / ${text("#login-message")}`);
+  fillLogin("wrong"); $("#login-form").requestSubmit(); await sleep(300);
+  check("A16 next sign-in attempt replaces the sign-out notice", $("#login-message").dataset.tone === "error" && !text("#login-message").includes("ההתנתקות"));
+  await load("session=1&business=1"); await sleep(400);
+  w.__mock.expireSession(); await sleep(500);
+  check("A17 session expiry (no user sign-out): login shown without a success notice", visible("#auth-screen") && !visible("#app-shell") && $("#login-message").dataset.tone !== "success", `tone=${$("#login-message").dataset.tone} text=${text("#login-message")}`);
+
+  // Production CSP (from _headers, sent by serve.ps1 -HeadersFile) must not block anything the app uses.
+  const appHead = await w.fetch("/__test/app.html", { cache: "no-store" });
+  const csp = appHead.headers.get("content-security-policy") || "";
+  const realHead = await w.fetch("/", { cache: "no-store" });
+  const realCsp = realHead.headers.get("content-security-policy") || "";
+  const realHtml = await realHead.text();
+  await load("session=0&business=1"); fillLogin("x"); $("#login-form").requestSubmit(); await sleep(1500);
+  for (const v of ["clients", "payments", "sheets", "settings", "orders"]) { await nav(v); }
+  await sleep(300);
+  check("C1 CSP from _headers is active and nothing is blocked (login + main screens)",
+    csp.includes("default-src 'self'") && csp.includes("script-src 'self'") && Array.isArray(w.__cspViolations) && w.__cspViolations.length === 0,
+    `csp=${csp ? "yes" : "MISSING"} violations=${JSON.stringify(w.__cspViolations || "no-recorder")}`);
+  check("C3 real page blocks framing (frame-ancestors 'none' + X-Frame-Options DENY) and sends the other security headers",
+    realCsp.includes("frame-ancestors 'none'") && realHead.headers.get("x-frame-options") === "DENY" && realHead.headers.get("x-content-type-options") === "nosniff"
+    && !!realHead.headers.get("referrer-policy") && !!realHead.headers.get("permissions-policy"));
+  check("C2 Supabase library pinned to an exact local file with SRI (no CDN, no @2)",
+    /<script src="vendor\/supabase-js-2\.119\.0\.js" integrity="sha384-[A-Za-z0-9+\/=]+"><\/script>/.test(realHtml) && !realHtml.includes("cdn.jsdelivr.net") && !/supabase-js@2/.test(realHtml));
 
   await load("session=0&business=1");
   const pw = $('#login-form [name="password"]'); const eye = $("#password-toggle");

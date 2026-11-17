@@ -137,7 +137,19 @@
     if (/schema cache|column .* does not exist|could not find the .* column/i.test(message) || code.startsWith("PGRST")) {
       return "מבנה מסד הנתונים אינו תואם להגדרות האתר. יש לפנות למנהל המערכת.";
     }
-    return message ? `הפעולה לא הושלמה מול Supabase: ${message}` : "הפעולה נכשלה. יש לנסות שוב.";
+    // Rate limiting (e.g. too many sign-in attempts in a short time).
+    if (/^over_.*rate_limit$/.test(code) || (error && Number(error.status) === 429) || /rate limit|too many requests/i.test(message)) {
+      return "בוצעו יותר מדי ניסיונות בזמן קצר. יש להמתין כמה דקות ולנסות שוב.";
+    }
+    // Unexpected errors: no technical server text in the interface (details go to the console via safeErrorDetails).
+    return "הפעולה לא הושלמה בשל תקלה לא צפויה. יש לנסות שוב, ואם הבעיה חוזרת — לפנות למנהל המערכת.";
+  }
+
+  // Console-safe summary of an error: only name/code/status/message. Never the request body, headers,
+  // tokens or form values (passwords are never passed to this function or to console).
+  function safeErrorDetails(error) {
+    if (!error || typeof error !== "object") return { message: String(error) };
+    return { name: error.name || "", code: error.code || "", status: error.status ?? "", message: String(error.message || "").slice(0, 300) };
   }
 
   function previewIsOpen() {
@@ -363,7 +375,7 @@
       lastSyncError = "";
       setSyncStatus(realtimeConnected ? "סנכרון חי פעיל" : "סנכרון אוטומטי פעיל");
     } catch (error) {
-      console.error("סנכרון נתוני הענן נכשל:", error);
+      console.error("סנכרון נתוני הענן נכשל:", safeErrorDetails(error));
       if (error.code === "NOT_APPROVED" || error.code === "SETUP_REQUIRED") {
         activeUserId = null;
         stopRealtimeSync();
@@ -403,7 +415,7 @@
           setSyncStatus("הגישה לנתונים נחסמה");
           showAuth(friendlyError(error), true);
         } else {
-          console.error("בדיקת אישור תקופתית נכשלה:", error);
+          console.error("בדיקת אישור תקופתית נכשלה:", safeErrorDetails(error));
           setSyncStatus("לא ניתן לאמת כרגע את ההרשאות");
         }
       }
@@ -444,6 +456,9 @@
     }
   }
 
+  const SIGN_OUT_NOTICE = "ההתנתקות בוצעה בהצלחה.";
+  let signOutNoticePending = false;
+
   async function activateSession(session) {
     if (!session || !session.user) {
       stopRealtimeSync();
@@ -453,7 +468,14 @@
       data = { clients: [], orders: [] };
       render();
       setSyncStatus("התחברות נדרשת");
-      showAuth();
+      // A user-initiated sign-out already showed its success notice; the SIGNED_OUT event that follows
+      // must not wipe it. Expiry / remote sign-out (no pending notice) still show a clean login screen.
+      if (signOutNoticePending) {
+        signOutNoticePending = false;
+        showAuth(SIGN_OUT_NOTICE, false, "success");
+      } else {
+        showAuth();
+      }
       return;
     }
     if (activeUserId === session.user.id && requestedScreen === "app") return;
@@ -481,7 +503,7 @@
       activeUserId = null;
       data = { clients: [], orders: [] };
       render();
-      console.error("טעינת נתוני Supabase נכשלה:", error);
+      console.error("טעינת נתוני Supabase נכשלה:", safeErrorDetails(error));
       showAuth(friendlyError(error), true);
     } finally {
       loadingUserId = null;
@@ -1116,9 +1138,11 @@
       data = { clients: [], orders: [] };
       render();
       setSyncStatus("התחברות נדרשת");
-      showAuth("ההתנתקות בוצעה בהצלחה.", false, "success");
+      signOutNoticePending = true;
+      showAuth(SIGN_OUT_NOTICE, false, "success");
     } catch (error) {
-      console.error("התנתקות נכשלה:", error);
+      signOutNoticePending = false;
+      console.error("התנתקות נכשלה:", safeErrorDetails(error));
       showToast(`ההתנתקות נכשלה: ${friendlyError(error)}`, true);
     }
   }
@@ -1132,7 +1156,7 @@
       activeUserId = null;
       await activateSession(sessionData.session);
     } catch (error) {
-      console.error("בדיקת הרשאות חוזרת נכשלה:", error);
+      console.error("בדיקת הרשאות חוזרת נכשלה:", safeErrorDetails(error));
       setLoginMessage(friendlyError(error), "error");
     }
   }
@@ -1141,6 +1165,7 @@
     event.preventDefault();
     // A second Enter/click while a sign-in is running is ignored (no double submission).
     if (!supabaseClient || loginBusy) return;
+    signOutNoticePending = false; // a new sign-in attempt supersedes any pending sign-out notice
     const form = event.currentTarget;
     if (!form.reportValidity()) return;
     if (!navigator.onLine) {
@@ -1162,7 +1187,7 @@
       setLoginBusy(false);
       await activateSession(authData.session);
     } catch (error) {
-      console.error("התחברות נכשלה:", error);
+      console.error("התחברות נכשלה:", safeErrorDetails(error));
       setLoginMessage(friendlyError(error), "error");
       const wrongCredentials = /invalid login credentials/i.test(String(error && error.message)) || (error && error.code === "invalid_credentials");
       if (!signedIn && wrongCredentials) {
@@ -1462,7 +1487,7 @@
 
     const { data: sessionData, error } = await supabaseClient.auth.getSession();
     if (error) {
-      console.error("בדיקת הפעלת Supabase נכשלה:", error);
+      console.error("בדיקת הפעלת Supabase נכשלה:", safeErrorDetails(error));
       showAuth(friendlyError(error));
       return;
     }
@@ -1496,7 +1521,7 @@
   data = { clients: [], orders: [] };
   render();
   initialize().catch((error) => {
-    console.error("אתחול Supabase נכשל:", error);
+    console.error("אתחול Supabase נכשל:", safeErrorDetails(error));
     showAuth(friendlyError(error));
   });
 })();

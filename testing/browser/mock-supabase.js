@@ -194,6 +194,8 @@
         if (params.get("signindelay")) await wait(Number(params.get("signindelay")));
         if (credentials.password === "wrong") return { data: { session: null }, error: { code: "invalid_credentials", message: "Invalid login credentials" } };
         if (credentials.password === "offline") return { data: { session: null }, error: { message: "Failed to fetch" } };
+        if (credentials.password === "ratelimit") return { data: { session: null }, error: { name: "AuthApiError", status: 429, code: "over_request_rate_limit", message: "Request rate limit reached" } };
+        if (credentials.password === "unexpected") return { data: { session: null }, error: { name: "AuthApiError", status: 500, code: "unexpected_failure", message: "Database error querying schema (internal detail XYZ)" } };
         state.session = { user }; setTimeout(() => emit("SIGNED_IN", state.session), 0); return { data: { session: state.session }, error: null };
       },
       async signOut() { state.session = null; setTimeout(() => emit("SIGNED_OUT", null), 0); return { error: null }; },

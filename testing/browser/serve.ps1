@@ -1,14 +1,29 @@
 param(
   [string]$Root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path,
   [string]$TestDir = $PSScriptRoot,
-  [int]$Port = 8000
+  [int]$Port = 8000,
+  # Optional: a Netlify-style _headers file. Its "/*" headers (e.g. the CSP) are sent with the app pages and
+  # files, and a CSP-violation recorder (/__test/csp-recorder.js) is injected into HTML pages, so tests run
+  # under the same policy as production. Test runner pages under /__test/ (which use inline scripts) are exempt.
+  [string]$HeadersFile = ""
 )
 # Local static server for manual checks + mocked browser tests.
-# Run from anywhere:  powershell -ExecutionPolicy Bypass -File testing\browser\serve.ps1
+# Run from anywhere:  powershell -ExecutionPolicy Bypass -File testing\browser\serve.ps1 [-HeadersFile _headers]
 # /            -> project files (html/css/js/png only; no .git, no data files)
 # /__test/...  -> files from this testing/browser folder
-# /__test/app.html -> project index.html with the Supabase CDN script replaced by a local mock
+# /__test/app.html -> project index.html with the Supabase library replaced by a local mock
 $ErrorActionPreference = "Stop"
+$extraHeaders = [ordered]@{}
+if ($HeadersFile) {
+  $inBlock = $false
+  foreach ($line in [IO.File]::ReadAllLines((Resolve-Path $HeadersFile).Path)) {
+    if ($line -match '^\s*#' -or $line.Trim() -eq "") { continue }
+    if ($line -match '^\S') { $inBlock = ($line.Trim() -eq "/*"); continue }
+    if ($inBlock -and $line -match '^\s+([^:]+):\s*(.+)$') { $extraHeaders[$Matches[1].Trim()] = $Matches[2].Trim() }
+  }
+  Write-Output ("Sending {0} headers from {1}" -f $extraHeaders.Count, $HeadersFile)
+}
+$recorderTag = '<script src="/__test/csp-recorder.js"></script>'
 $types = @{ ".html" = "text/html; charset=utf-8"; ".css" = "text/css; charset=utf-8"; ".js" = "text/javascript; charset=utf-8"; ".png" = "image/png"; ".svg" = "image/svg+xml"; ".jpg" = "image/jpeg"; ".jpeg" = "image/jpeg" }
 $listener = New-Object System.Net.HttpListener
 $listener.Prefixes.Add("http://127.0.0.1:$Port/")
@@ -24,9 +39,15 @@ while ($listener.IsListening) {
     if ($path -eq "/") { $path = "/index.html" }
     $bytes = $null; $type = $null
     if ($path -match '\.\.' -or $path -match '(^|/)\.') { throw "forbidden" }
-    if ($path -eq "/__test/app.html" -or $path -eq "/__test/app-old.html") {
+    if ($path -eq "/__test/real.html") {
+      # The real index.html (real supabase-js + real supabase-config.js), framable by same-origin test pages.
+      $html = [IO.File]::ReadAllText((Join-Path $Root "index.html"), $utf8)
+      $html = ($html -replace '(src|href)="(?!https?:|/|#|data:)', '$1="/')
+      $bytes = $utf8.GetBytes($html); $type = $types[".html"]
+    } elseif ($path -eq "/__test/app.html" -or $path -eq "/__test/app-old.html") {
       $html = [IO.File]::ReadAllText((Join-Path $Root "index.html"), $utf8)
       $html = $html.Replace('<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>', '<script src="/__test/mock-supabase.js"></script>')
+      $html = $html -replace '<script src="vendor/supabase-js-[^"]+"[^>]*></script>', '<script src="/__test/mock-supabase.js"></script>'
       $html = $html -replace 'src="business-app\.js(\?v=[^"]*)?"', 'src="/business-app.js"'
       $html = ($html -replace 'href="styles\.css(\?v=[^"]*)?"', 'href="/styles.css"').Replace('src="supabase-config.js"', 'src="/supabase-config.js"').Replace('src="assets/', 'src="/assets/')
       if ($path -eq "/__test/app-old.html") {
@@ -42,15 +63,37 @@ while ($listener.IsListening) {
       if (-not $types.ContainsKey($ext) -or -not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "notfound" }
       $bytes = [IO.File]::ReadAllBytes($file); $type = $types[$ext]
     }
+    $isAppPage = ($path -eq "/__test/app.html" -or $path -eq "/__test/real.html")
+    $isRunnerPage = $path.StartsWith("/__test/") -and -not $isAppPage
+    if ($extraHeaders.Count -and -not $isRunnerPage -and $type -eq $types[".html"]) {
+      $html = $utf8.GetString($bytes)
+      $html = $html -replace '(<head[^>]*>)', ('$1' + $recorderTag)
+      $bytes = $utf8.GetBytes($html)
+    }
     $res.StatusCode = 200
     $res.ContentType = $type
     $res.Headers.Add("Cache-Control", "no-store")
-    $res.OutputStream.Write($bytes, 0, $bytes.Length)
+    if ($extraHeaders.Count -and -not $isRunnerPage) {
+      foreach ($k in $extraHeaders.Keys) {
+        $value = $extraHeaders[$k]
+        # The test runners embed /__test/app.html in a same-origin iframe; only for that page is framing relaxed
+        # from 'none'/DENY to same-origin. Every other directive is sent exactly as in _headers.
+        if ($isAppPage) {
+          if ($k -eq "Content-Security-Policy") { $value = $value -replace "frame-ancestors 'none'", "frame-ancestors 'self'" }
+          if ($k -eq "X-Frame-Options") { $value = "SAMEORIGIN" }
+        }
+        $res.Headers.Add($k, $value)
+      }
+    }
+    # HEAD: headers and length only (writing a body to a HEAD response throws and used to crash the server).
+    if ($ctx.Request.HttpMethod -eq "HEAD") { $res.ContentLength64 = $bytes.Length }
+    else { $res.OutputStream.Write($bytes, 0, $bytes.Length) }
   } catch {
-    $res.StatusCode = 404
-    $msg = $utf8.GetBytes("Not found")
-    $res.OutputStream.Write($msg, 0, $msg.Length)
+    try {
+      $res.StatusCode = 404
+      if ($ctx.Request.HttpMethod -ne "HEAD") { $msg = $utf8.GetBytes("Not found"); $res.OutputStream.Write($msg, 0, $msg.Length) }
+    } catch { }
   } finally {
-    $res.OutputStream.Close()
+    try { $res.OutputStream.Close() } catch { }
   }
 }

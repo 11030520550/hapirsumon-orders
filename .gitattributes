@@ -4,5 +4,9 @@
 *.jpg binary
 *.jpeg binary
 
+# Vendored third-party files are protected by Subresource Integrity (SHA-384 in index.html):
+# any line-ending conversion on checkout would change the hash and the browser would refuse to load them.
+vendor/** -text
+
 # Archived data exports are kept byte-for-byte as originally saved (LF line endings).
 archive/data-exports-2026-11-11/*.json -text

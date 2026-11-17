@@ -1,0 +1,14 @@
+# Netlify response headers for every path. Must be included at the root of the publish folder.
+# CSP is built from the resources the app actually uses:
+#   scripts  : own files only (supabase-js is vendored in /vendor; no inline scripts, no eval)
+#   styles   : own CSS + Google Fonts stylesheet (no inline styles or style attributes)
+#   fonts    : Google Fonts files
+#   images   : own files + data: (the paper texture in styles.css is an inline SVG data URI)
+#   connect  : the Supabase project only (REST/Auth over https, Realtime over wss)
+#   workers  : self + blob: (supabase-js can start its realtime heartbeat worker from a blob URL)
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://sndaeogseawtwzwxiqst.supabase.co wss://sndaeogseawtwzwxiqst.supabase.co; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=(), magnetometer=(), gyroscope=(), accelerometer=()
