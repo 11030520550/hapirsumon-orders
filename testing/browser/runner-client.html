@@ -20,7 +20,7 @@ async function openCard(id) {
 }
 
 async function run() {
-  await new Promise((resolve) => { frame.onload = resolve; frame.src = `/__test/app.html?session=0&t=${Math.random()}`; });
+  await new Promise((resolve) => { frame.onload = resolve; frame.src = `/__test/app-preview.html?session=0&t=${Math.random()}`; });
   w = frame.contentWindow; d = w.document; await sleep(300);
   const requests = () => w.performance.getEntriesByType("resource").filter((e) => /supabase\.co/.test(e.name)).length;
   $("#open-business-preview").click(); await sleep(50);

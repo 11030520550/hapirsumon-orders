@@ -8,12 +8,12 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@500;700&family=Heebo:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20261117-4">
+  <link rel="stylesheet" href="styles.css?v=20261118-1">
   <!-- supabase-js pinned to 2.119.0 and served locally (vendor/); SHA-384 verified against jsDelivr's published hash. -->
   <script src="vendor/supabase-js-2.119.0.js" integrity="sha384-uteMfOloLDGt042uDz+xHGF3ym63/WQ6rFq7murQRG8Ih7QrXGEGNtWd8688sb4O"></script>
   <script src="supabase-config.js"></script>
-  <script src="app.js?v=20261117-4" defer></script>
-  <script src="business-app.js?v=20261117-4" defer></script>
+  <script src="app.js?v=20261118-1" defer></script>
+  <script src="business-app.js?v=20261118-1" defer></script>
 </head>
 <body>
   <svg class="svg-defs" width="0" height="0" aria-hidden="true">
@@ -950,6 +950,19 @@
         <button class="button button-primary" id="run-local-import" type="button" disabled>ייבוא רשומות חדשות בלבד</button>
       </div>
     </div>
+  </dialog>
+
+  <dialog class="modal confirm-modal" id="app-confirm-modal" aria-labelledby="app-confirm-title">
+    <form class="modal-card" id="app-confirm-form">
+      <div class="modal-heading">
+        <div><span class="modal-kicker" id="app-confirm-kicker">אישור פעולה</span><h2 id="app-confirm-title"></h2></div>
+        <button class="close-button" type="button" data-close-modal aria-label="סגירה">×</button>
+      </div>
+      <p class="confirm-message" id="app-confirm-message"></p>
+      <label class="field-label" id="app-confirm-reason-wrap" hidden><span class="confirm-reason-label" id="app-confirm-reason-label"></span><input id="app-confirm-reason" maxlength="200" autocomplete="off"></label>
+      <p class="form-message" id="app-confirm-error" role="alert"></p>
+      <div class="modal-actions"><button class="button button-outline" type="button" data-close-modal>ביטול</button><button class="button button-primary" type="submit" id="app-confirm-submit">אישור</button></div>
+    </form>
   </dialog>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>

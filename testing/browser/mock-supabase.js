@@ -40,7 +40,7 @@
   let orderCounter = 22030;
 
   const user = { id: "00000000-0000-4000-8000-0000000000aa" };
-  const state = { session: params.get("session") === "1" ? { user } : null, approvalDelay: Number(params.get("delay") || 0), listeners: [], failNext: null, rpcCalls: [] };
+  const state = { session: params.get("session") === "1" ? { user } : null, approvalDelay: Number(params.get("delay") || 0), listeners: [], failNext: null, failTables: {}, rpcCalls: [] };
   const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const emit = (event, session) => state.listeners.forEach((cb) => cb(event, session));
   const err = (message, code = "P0001") => ({ data: null, error: { message, code } });
@@ -76,6 +76,13 @@
       maybeSingle() { single = true; return chain; },
       then(resolve, reject) {
         if ((businessTable && !business) || (table === "sheets" && params.get("sheets") !== "1")) return Promise.resolve({ data: null, error: { code: "PGRST205", message: `Could not find the table 'public.${table}' in the schema cache` } }).then(resolve, reject);
+        if (state.failTables[table] > 0) { state.failTables[table] -= 1; return Promise.resolve({ data: null, error: { message: "Failed to fetch" } }).then(resolve, reject); }
+        // ?bizdelay=ms: business data tables answer late (to test loading states). business_settings is exempt:
+        // app.js reads it to detect the business schema before showing the app.
+        if (businessTable && table !== "business_settings" && params.get("bizdelay") && !chain.delayed) {
+          chain.delayed = true;
+          return wait(Number(params.get("bizdelay"))).then(() => chain.then(resolve, reject));
+        }
         if (patch) {
           const hit = tableRows(table).filter((r) => filters.every((f) => f(r)));
           hit.forEach((r) => Object.assign(r, patch, { updated_at: now() }));
@@ -232,6 +239,8 @@
     db, state,
     expireSession() { state.session = null; emit("SIGNED_OUT", null); },
     failNext(mode) { state.failNext = mode; },
+    // The next `times` reads of `table` fail like a dropped network request.
+    failTable(table, times = 1) { state.failTables[table] = times; },
     get signInCalls() { return state.signInCalls || 0; }
   };
   window.supabase = { createClient: () => client };

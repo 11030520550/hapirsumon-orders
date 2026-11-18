@@ -325,8 +325,82 @@
     return true;
   }
 
+  // The sidebar status line shows the connection state, unless a part of the data failed to refresh
+  // (reported by app.js or business-app.js). Such a failure stays visible until that part succeeds.
+  let baseSyncStatus = "";
+  const syncIssues = new Map();
+  function renderSyncStatus() {
+    const issue = [...syncIssues.values()][0];
+    const status = $("#sync-status");
+    status.textContent = issue || baseSyncStatus;
+    status.closest(".storage-note")?.classList.toggle("is-error", Boolean(issue));
+  }
   function setSyncStatus(message) {
-    $("#sync-status").textContent = message;
+    baseSyncStatus = message;
+    if (message === "התחברות נדרשת") syncIssues.clear();
+    renderSyncStatus();
+  }
+  // source: a short key ("cloud", "business"); message null = that source is healthy again.
+  // Returns true when the issue is new (the caller may then show a toast once, not on every retry).
+  function reportSyncIssue(source, message) {
+    const isNew = Boolean(message) && syncIssues.get(source) !== message;
+    if (message) syncIssues.set(source, message);
+    else syncIssues.delete(source);
+    renderSyncStatus();
+    return isNew;
+  }
+
+  // One confirmation dialog in the system's style, instead of window.confirm / window.prompt.
+  // Resolves with { reason } when confirmed, or null when cancelled (Esc, ×, backdrop, "ביטול").
+  let pendingAsk = null;
+  function askConfirm({ kicker = "אישור פעולה", title, message = "", confirmText = "אישור", danger = false,
+    reason = null } = {}) {
+    const modal = $("#app-confirm-modal");
+    const form = $("#app-confirm-form");
+    const reasonInput = $("#app-confirm-reason");
+    const errorBox = $("#app-confirm-error");
+    const submit = $("#app-confirm-submit");
+    if (pendingAsk) pendingAsk(null);
+    $("#app-confirm-kicker").textContent = kicker;
+    $("#app-confirm-title").textContent = title;
+    $("#app-confirm-message").textContent = message;
+    $("#app-confirm-message").hidden = !message;
+    $("#app-confirm-reason-wrap").hidden = !reason;
+    $("#app-confirm-reason-label").textContent = reason ? reason.label : "";
+    reasonInput.value = "";
+    reasonInput.placeholder = reason && reason.placeholder ? reason.placeholder : "";
+    errorBox.textContent = "";
+    submit.textContent = confirmText;
+    submit.classList.toggle("button-danger", danger);
+    submit.classList.toggle("button-primary", !danger);
+    return new Promise((resolve) => {
+      const finish = (value) => {
+        if (pendingAsk !== finish) return;
+        pendingAsk = null;
+        form.removeEventListener("submit", onSubmit);
+        modal.removeEventListener("close", onClose);
+        if (modal.open) modal.close();
+        resolve(value);
+      };
+      const onSubmit = (event) => {
+        event.preventDefault();
+        const text = reasonInput.value.trim();
+        const minimum = reason ? (reason.min ?? 1) : 0;
+        if (reason && text.length < minimum) {
+          errorBox.textContent = minimum > 1 ? `נדרשת סיבה (${minimum} תווים לפחות).` : "נדרשת סיבה.";
+          reasonInput.focus();
+          return;
+        }
+        finish({ reason: text });
+      };
+      const onClose = () => finish(null);
+      pendingAsk = finish;
+      form.addEventListener("submit", onSubmit);
+      modal.addEventListener("close", onClose);
+      modal.showModal();
+      // A destructive action never starts focused on its own button (Enter must not delete by accident).
+      (reason ? reasonInput : danger ? form.querySelector(".modal-actions [data-close-modal]") : submit).focus();
+    });
   }
 
   function staleRecordError() {
@@ -373,6 +447,7 @@
       const applied = await fetchCloudData();
       if (!applied || !activeUserId) return;
       lastSyncError = "";
+      reportSyncIssue("cloud", null);
       setSyncStatus(realtimeConnected ? "סנכרון חי פעיל" : "סנכרון אוטומטי פעיל");
     } catch (error) {
       console.error("סנכרון נתוני הענן נכשל:", safeErrorDetails(error));
@@ -386,7 +461,7 @@
         showAuth(friendlyError(error), true);
         return;
       }
-      setSyncStatus("שגיאת סנכרון — הנתונים לא עודכנו");
+      reportSyncIssue("cloud", "שגיאת סנכרון — הנתונים לא עודכנו");
       if (!quiet && lastSyncError !== String(error.message || error)) {
         showToast(`הסנכרון נכשל: ${friendlyError(error)}`, true);
       }
@@ -1120,9 +1195,13 @@
     if (deleteButton) {
       const order = data.orders.find((item) => item.id === deleteButton.dataset.deleteOrder);
       const label = order && order.orderNumber != null ? order.orderNumber : order && order.id;
-      if (order && window.confirm(`למחוק את הזמנה ${label}?`)) {
-        if (businessSchema) window.ModaatBusiness.deleteOrder(order);
-        else deleteOrder(order.id);
+      if (order) {
+        askConfirm({ kicker: "מחיקת הזמנה", title: `למחוק את הזמנה ${label}?`, message: "ההזמנה תימחק מהמערכת. פעולה זו אינה ניתנת לביטול.",
+          confirmText: "מחיקה", danger: true }).then((answer) => {
+          if (!answer) return;
+          if (businessSchema) window.ModaatBusiness.deleteOrder(order);
+          else deleteOrder(order.id);
+        });
       }
     }
   });
@@ -1510,6 +1589,8 @@
     refresh: () => fetchCloudData(),
     rerenderClients: () => renderClientTable(),
     toast: showToast,
+    ask: askConfirm,
+    reportSyncIssue,
     friendlyError,
     hasEncodingDamage,
     formatOrderDate,

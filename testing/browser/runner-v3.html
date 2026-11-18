@@ -29,6 +29,16 @@ async function login() {
 }
 const nav = async (view) => { $(`.main-nav [data-view="${view}"]`).click(); await sleep(150); };
 const db = () => w.__mock.db;
+// Answers the system confirmation dialog (#app-confirm-modal). Returns false if the dialog is not open.
+async function answerDialog({ reason = null, cancel = false } = {}) {
+  await sleep(80);
+  const modal = $("#app-confirm-modal");
+  if (!modal || !modal.open) return false;
+  if (cancel) { modal.querySelector("[data-close-modal]").click(); await sleep(40); return true; }
+  if (reason !== null) $("#app-confirm-reason").value = reason;
+  $("#app-confirm-form").requestSubmit(); await sleep(40);
+  return true;
+}
 const goNewOrder = async () => { await nav("orders"); $('[data-page="orders"] [data-go="new-order"]').click(); await sleep(200); };
 
 async function run() {
@@ -120,7 +130,8 @@ async function run() {
   const sel = $('[data-order-id="o-test-1"]'); sel.value = "paid"; sel.dispatchEvent(new w.Event("change", { bubbles: true })); await sleep(600);
   check("B16 orders list status via RPC", target.payment_status === "paid");
   target.updated_at = "2099-01-01T00:00:00Z";
-  const sel2 = $('[data-order-id="o-test-1"]'); w.prompt = () => "בדיקה"; sel2.value = "pending"; sel2.dispatchEvent(new w.Event("change", { bubbles: true })); await sleep(500);
+  const sel2 = $('[data-order-id="o-test-1"]'); sel2.value = "pending"; sel2.dispatchEvent(new w.Event("change", { bubbles: true }));
+  await answerDialog({ reason: "בדיקה" }); await sleep(500);
   check("B17 stale version rejected", target.payment_status === "paid" && text("#toast").includes("השתנה"), text("#toast"));
 
   await nav("packages");
@@ -173,22 +184,41 @@ async function run() {
   check("R10 sheet page: address, 10 orders, summary", page() === "sheet" && w.location.hash === "#/sheet/124" && $$("#sheet-orders-body tr").length === 10 && text("#sheet-count") === "10");
   check("R11 sheet columns: product, credits, before/after VAT, status, notes", ["מוצר", "קרדיטים", "לפני מע", "כולל מע", "סטטוס תשלום", "הערות"].every((h) => text('[data-page="sheet"] thead').includes(h)));
   const statusesBefore = db().orders.filter((o) => o.sheet_number === "124").map((o) => o.payment_status).join();
-  w.confirm = () => true;
-  $("#sheet-toggle-status").click(); await sleep(600);
+  $("#sheet-toggle-status").click();
+  check("I1 closing a sheet asks in the system dialog (no window.confirm)", await answerDialog({ cancel: true }) && text("#sheet-page-status") === "פתוח");
+  $("#sheet-toggle-status").click(); await answerDialog(); await sleep(600);
   const statusesAfter = db().orders.filter((o) => o.sheet_number === "124").map((o) => o.payment_status).join();
   check("R12 close sheet: status closed, payments untouched, orders kept", text("#sheet-page-status") === "סגור" && statusesBefore === statusesAfter && $$("#sheet-orders-body tr").length === 10, `status=${text("#sheet-page-status")} same=${statusesBefore === statusesAfter} rows=${$$("#sheet-orders-body tr").length} toast=${text("#toast")}`);
-  w.prompt = () => "";
-  $("#sheet-toggle-status").click(); await sleep(400);
-  check("R13 reopen requires a reason", text("#sheet-page-status") === "סגור");
-  w.prompt = () => "תיקון מודעה";
-  $("#sheet-toggle-status").click(); await sleep(600);
-  check("R14 reopen with reason", text("#sheet-page-status") === "פתוח");
+  $("#sheet-toggle-status").click();
+  await answerDialog({ reason: "ab" }); await sleep(200);
+  check("R13 reopen requires a reason (3+ characters, dialog stays open)", text("#sheet-page-status") === "סגור" && $("#app-confirm-modal").open && text("#app-confirm-error").includes("3"), text("#app-confirm-error"));
+  $("#app-confirm-reason").value = "תיקון מודעה"; $("#app-confirm-form").requestSubmit(); await sleep(600);
+  check("R14 reopen with reason", text("#sheet-page-status") === "פתוח" && !$("#app-confirm-modal").open && db().sheets.find((s) => s.sheet_number === "124").status_reason === "תיקון מודעה");
   $("#sheet-new-order").click(); await sleep(300);
   check("R15 order for this sheet presets the sheet", page() === "new-order" && $("#new-order-rows tr").querySelector('[name="sheet_number"]').value === "124");
   await nav("sheets"); $('[data-sheet-view="124"]').click(); await sleep(250);
-  w.confirm = () => true; $("#sheet-toggle-status").click(); await sleep(600);
+  $("#sheet-toggle-status").click(); await answerDialog(); await sleep(600);
   $("#sheet-new-order").click(); await sleep(300);
   check("R16 closed sheet warning in order form", !$("#new-order-sheet-warning").hidden && text("#new-order-sheet-warning").includes("124"));
+
+  // ===== Infrastructure: visible sync failures, loading states
+  check("I2 status line healthy before failure", !$(".storage-note").classList.contains("is-error") && text("#sync-status").includes("סנכרון"), text("#sync-status"));
+  w.__mock.failTable("customer_packages", 1);
+  await w.ModaatApp.refresh(); await sleep(500);
+  check("I3 background refresh failure is visible in the status line", $(".storage-note").classList.contains("is-error") && text("#sync-status").includes("שגיאת סנכרון"), text("#sync-status"));
+  check("I4 background refresh failure shows one toast", $("#toast").classList.contains("visible") && text("#toast").includes("רענון"), text("#toast"));
+  await w.ModaatApp.refresh(); await sleep(500);
+  check("I5 the error clears after a successful refresh", !$(".storage-note").classList.contains("is-error") && !text("#sync-status").includes("שגיאת"), text("#sync-status"));
+  await nav("orders");
+  const victim = db().orders.find((o) => o.payment_status === "pending" && $(`[data-delete-order="${o.id}"]`));
+  const ordersBefore = db().orders.length;
+  $(`[data-delete-order="${victim.id}"]`).click();
+  const deleteAsked = await answerDialog({ cancel: true }); await sleep(300);
+  check("I6 delete asks in the system dialog; cancel keeps the order", deleteAsked && db().orders.length === ordersBefore);
+  $(`[data-delete-order="${victim.id}"]`).click();
+  check("I7 delete dialog is styled as destructive", $("#app-confirm-modal").open && $("#app-confirm-submit").classList.contains("button-danger"));
+  await answerDialog(); await sleep(700);
+  check("I8 confirmed delete removes the order", db().orders.length === ordersBefore - 1 && !db().orders.some((o) => o.id === victim.id));
 
   await nav("clients");
   check("R17 garbled name flagged in client list", $$("#clients-body .payment-select.pending").some((el) => el.textContent.includes("קידוד")));
@@ -204,6 +234,15 @@ async function run() {
   check("R19 sheets table not installed: notice, no close button", !$("#sheets-status-note").hidden);
   $('[data-sheet-view="124"]').click(); await sleep(250);
   check("R20 without sheets table the toggle is hidden", $("#sheet-toggle-status").hidden && text("#sheet-page-status") === "פתוח");
+
+  // Loading state: business data (incl. sheet statuses) arrives late; no "no sheets" / "open" guess meanwhile.
+  await load("session=1&business=1&sheets=1&bizdelay=1500", "#/sheets");
+  await sleep(300);
+  check("I9 sheets list shows loading, not 'no sheets'", text("#sheets-body").includes("טוען") && $("#sheets-empty").hidden, text("#sheets-body"));
+  w.location.hash = "#/sheet/124"; await sleep(200);
+  check("I10 sheet page shows loading, no guessed status or toggle", text("#sheet-orders-body").includes("טוען") && text("#sheet-page-status") === "" && $("#sheet-toggle-status").hidden, text("#sheet-page-status"));
+  await sleep(5500); // three sequential delayed reads: reference data, business lists, sheet statuses
+  check("I11 after loading: real rows and status", $$("#sheet-orders-body tr").length === 10 && text("#sheet-page-status") === "פתוח" && !$("#sheet-toggle-status").hidden);
 
   // ===== deep link restored after login
   await load("session=1&business=1", "#/client/c-test-3");

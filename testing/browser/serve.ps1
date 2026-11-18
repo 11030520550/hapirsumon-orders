@@ -44,7 +44,7 @@ while ($listener.IsListening) {
       $html = [IO.File]::ReadAllText((Join-Path $Root "index.html"), $utf8)
       $html = ($html -replace '(src|href)="(?!https?:|/|#|data:)', '$1="/')
       $bytes = $utf8.GetBytes($html); $type = $types[".html"]
-    } elseif ($path -eq "/__test/app.html" -or $path -eq "/__test/app-old.html") {
+    } elseif ($path -eq "/__test/app.html" -or $path -eq "/__test/app-old.html" -or $path -eq "/__test/app-preview.html") {
       $html = [IO.File]::ReadAllText((Join-Path $Root "index.html"), $utf8)
       $html = $html.Replace('<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>', '<script src="/__test/mock-supabase.js"></script>')
       $html = $html -replace '<script src="vendor/supabase-js-[^"]+"[^>]*></script>', '<script src="/__test/mock-supabase.js"></script>'
@@ -55,6 +55,11 @@ while ($listener.IsListening) {
       } else {
         $html = ($html -replace 'src="app\.js(\?v=[^"]*)?"', 'src="/app.js"') -replace 'src="business-preview\.js(\?v=[^"]*)?"', 'src="/business-preview.js"'
       }
+      if ($path -eq "/__test/app-preview.html") {
+        # The login screen no longer has the preview button; business-preview.js still binds to it if present.
+        # Test-only: add a hidden entry button so runner-client.html can open the sample-data preview.
+        $html = $html -replace '(<body[^>]*>)', '$1<button id="open-business-preview" type="button" hidden></button>'
+      }
       $bytes = $utf8.GetBytes($html); $type = $types[".html"]
     } else {
       if ($path.StartsWith("/__test/")) { $file = Join-Path $TestDir ($path.Substring(8) -replace '/', '\') }
@@ -63,7 +68,7 @@ while ($listener.IsListening) {
       if (-not $types.ContainsKey($ext) -or -not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "notfound" }
       $bytes = [IO.File]::ReadAllBytes($file); $type = $types[$ext]
     }
-    $isAppPage = ($path -eq "/__test/app.html" -or $path -eq "/__test/real.html")
+    $isAppPage = ($path -eq "/__test/app.html" -or $path -eq "/__test/real.html" -or $path -eq "/__test/app-preview.html")
     $isRunnerPage = $path.StartsWith("/__test/") -and -not $isAppPage
     if ($extraHeaders.Count -and -not $isRunnerPage -and $type -eq $types[".html"]) {
       $html = $utf8.GetString($bytes)

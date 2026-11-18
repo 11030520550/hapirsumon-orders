@@ -16,8 +16,9 @@
   const MAX_ROWS = 250;
   const LEDGER_TYPES = { package_grant: "הקצאת חבילה", order_consumption: "ניצול בהזמנה", correction: "התאמה ידנית", conversion_reversal: "החזרה בהמרה" };
 
+  const BUSINESS_SYNC_ERROR = "שגיאת סנכרון — חלק מהנתונים לא עודכנו";
   const state = {
-    ready: false, loaded: false, vatRate: 0.18, catalog: [], allProducts: [], products: [],
+    ready: false, loaded: false, loadFailed: false, vatRate: 0.18, catalog: [], allProducts: [], products: [],
     packages: [], installments: [], obligations: [], balances: new Map(),
     loadToken: 0, clientToken: 0, modalClientId: null, keys: {}, editingProductId: null,
     sheetStatus: new Map(), sheetsInstalled: false, presetSheet: ""
@@ -68,7 +69,8 @@
     return `<span class="payment-select ${tone}">${escapeHtml(text)}</span>`;
   }
   function loadingRow(columns) {
-    return `<tr><td colspan="${columns}" class="empty-cell">טוען נתונים מהמסד…</td></tr>`;
+    const text = state.loadFailed ? "טעינת הנתונים נכשלה. יש לרענן את הדף או לנסות שוב בעוד רגע." : "טוען נתונים מהמסד…";
+    return `<tr><td colspan="${columns}" class="empty-cell">${text}</td></tr>`;
   }
 
   // ---------- data ----------
@@ -96,7 +98,7 @@
     ]);
     const sheets = await loadSheetStatus();
     if (token !== state.loadToken) return false;
-    Object.assign(state, { packages, installments, obligations, loaded: true });
+    Object.assign(state, { packages, installments, obligations, loaded: true, loadFailed: false });
     state.sheetsInstalled = sheets !== null;
     state.sheetStatus = new Map((sheets || []).map((row) => [row.sheet_number, row]));
     state.balances = new Map(balances.map((row) => [row.client_id, Number(row.credit_balance)]));
@@ -392,6 +394,12 @@
     $("#sheets-status-note").hidden = !state.loaded || state.sheetsInstalled;
     const query = $("#sheets-search").value.trim();
     const filter = $("#sheets-filter").value;
+    // Until the sheet statuses are loaded, an open/closed split (and "no sheets") would be a guess.
+    if (!state.loaded) {
+      $("#sheets-body").innerHTML = loadingRow(7);
+      $("#sheets-empty").hidden = true;
+      return;
+    }
     const groups = sheetGroups().filter((group) => group.sheet.includes(query)
       && (filter === "all" || (filter === "closed") === sheetClosed(group.sheet)));
     $("#sheets-body").innerHTML = groups.map((group) => `<tr>
@@ -410,7 +418,7 @@
     const group = sheetGroups().find((item) => item.sheet === sheetNumber);
     const closed = sheetClosed(sheetNumber);
     $("#sheet-page-number").textContent = sheetNumber;
-    $("#sheet-page-status").outerHTML = `<span id="sheet-page-status">${sheetStatusPill(sheetNumber)}</span>`;
+    $("#sheet-page-status").outerHTML = `<span id="sheet-page-status">${state.loaded ? sheetStatusPill(sheetNumber) : ""}</span>`;
     const statusRow = state.sheetStatus.get(sheetNumber);
     $("#sheet-page-subtitle").textContent = closed
       ? `הגיליון נסגר ב-${displayDate(String(statusRow.closed_at).slice(0, 10))}. סגירה אינה משנה תשלומים: לקוחות שטרם שילמו עדיין מופיעים כממתינים.`
@@ -426,6 +434,12 @@
     $("#sheet-paid").textContent = money.format(group ? group.paid : 0);
     $("#sheet-pending").textContent = money.format(group ? group.pending : 0);
     $("#sheet-credits").textContent = number.format(group ? group.credits : 0);
+    if (!state.loaded) {
+      toggle.hidden = true;
+      $("#sheet-orders-body").innerHTML = loadingRow(8);
+      $("#sheet-orders-empty").hidden = true;
+      return;
+    }
     $("#sheet-orders-body").innerHTML = orders.map((order) => {
       const credits = order.billingMode === "credits";
       const status = credits ? pill("neutral", "קרדיטים") : pill(order.paymentStatus === "paid" ? "paid" : "pending", order.paymentStatus === "paid" ? "שולם" : "ממתין לתשלום");
@@ -449,11 +463,15 @@
     const closing = $("#sheet-toggle-status").dataset.closed !== "1";
     let reason = "";
     if (closing) {
-      if (!window.confirm(`לסגור את גיליון ${sheetNumber}? ההזמנות וסטטוסי התשלום לא ישתנו.`)) return;
+      const answer = await app().ask({ kicker: "סגירת גיליון", title: `לסגור את גיליון ${sheetNumber}?`,
+        message: "ההזמנות, התשלומים והקרדיטים לא ישתנו.", confirmText: "סגירת הגיליון" });
+      if (!answer) return;
       reason = "סגירת גיליון";
     } else {
-      reason = (window.prompt("סיבת פתיחה מחדש של הגיליון:") || "").trim();
-      if (reason.length < 3) { app().toast("פתיחת הגיליון בוטלה: נדרשת סיבה (3 תווים לפחות).", true); return; }
+      const answer = await app().ask({ kicker: "פתיחה מחדש", title: `לפתוח מחדש את גיליון ${sheetNumber}?`,
+        confirmText: "פתיחה מחדש", reason: { label: "סיבת הפתיחה מחדש", min: 3, placeholder: "לדוגמה: תיקון מודעה של לקוח" } });
+      if (!answer) return;
+      reason = answer.reason;
     }
     const button = $("#sheet-toggle-status");
     button.disabled = true;
@@ -523,10 +541,12 @@
     try {
       await app().refresh();
       await loadBusinessData();
+      app().reportSyncIssue("business", null);
       renderCurrent();
       app().toast(message);
     } catch (error) {
       console.error("רענון לאחר שמירה נכשל:", error);
+      app().reportSyncIssue("business", BUSINESS_SYNC_ERROR);
       app().toast(`${message} הרענון נכשל — רענני את הדף לצפייה בנתונים העדכניים.`, true);
     }
   }
@@ -535,8 +555,10 @@
   async function setObligationPaid(obligationId, expected, isPaid) {
     let reason = "סומן כשולם";
     if (!isPaid) {
-      reason = (window.prompt("סיבת פתיחה מחדש של תשלום שסומן כשולם:") || "").trim();
-      if (!reason) { app().toast("פתיחת התשלום בוטלה: נדרשת סיבה.", true); return false; }
+      const answer = await app().ask({ kicker: "ביטול סימון תשלום", title: "להחזיר את החיוב למצב ממתין?",
+        message: "החיוב יופיע שוב כממתין לתשלום.", confirmText: "ביטול הסימון", reason: { label: "סיבה", min: 1 } });
+      if (!answer) return false;
+      reason = answer.reason;
     }
     try {
       await q(sb().rpc("set_obligation_paid", {
@@ -949,9 +971,13 @@
     try {
       await loadReference();
       await loadBusinessData();
+      app().reportSyncIssue("business", null);
       renderCurrent();
     } catch (error) {
       console.error("טעינת נתוני העסק נכשלה:", error);
+      state.loadFailed = true;
+      app().reportSyncIssue("business", BUSINESS_SYNC_ERROR);
+      renderCurrent();
       app().toast(`טעינת נתוני החבילות והתשלומים נכשלה: ${errorText(error)}`, true);
     }
   });
@@ -962,8 +988,19 @@
     }
     window.clearTimeout(refreshTimer);
     refreshTimer = window.setTimeout(() => {
-      Promise.all([loadReference(), loadBusinessData()]).then(([, applied]) => { if (applied) renderCurrent(); })
-        .catch((error) => console.error("רענון נתוני העסק נכשל:", error));
+      Promise.all([loadReference(), loadBusinessData()]).then(([, applied]) => {
+        if (!applied) return;
+        app().reportSyncIssue("business", null);
+        renderCurrent();
+      }).catch((error) => {
+        // A background refresh failure must be visible: the screens may show outdated packages, payments or sheets.
+        console.error("רענון נתוני העסק נכשל:", error);
+        state.loadFailed = !state.loaded;
+        if (app().reportSyncIssue("business", BUSINESS_SYNC_ERROR)) {
+          app().toast(`רענון נתוני התשלומים, החבילות והגיליונות נכשל: ${errorText(error)}`, true);
+        }
+        renderCurrent();
+      });
     }, 150);
   });
   document.addEventListener("modaat:view", (event) => {
