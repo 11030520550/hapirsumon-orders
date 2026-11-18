@@ -39,6 +39,90 @@
   }));
   let orderCounter = 22030;
 
+  // ===== Sheets model v2 (?sheets=2; mirrors supabase-sheets-v2.sql). ?enforce=1 adds stage B (closed-sheet guard).
+  const sheetsV2 = params.get("sheets") === "2";
+  const enforce = params.get("enforce") === "1";
+  let clockOffset = 0; // __mock.setNow() moves the "server" clock (deadline tests)
+  const serverMs = () => Date.now() + clockOffset;
+  const serverIso = () => new Date(serverMs()).toISOString();
+  // Israel wall time → UTC, with DST (same rule as  (local::timestamp) at time zone 'Asia/Jerusalem').
+  const jerusalemParts = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Jerusalem", hourCycle: "h23",
+    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  function jerusalemOffsetMs(utcMs) {
+    const parts = Object.fromEntries(jerusalemParts.formatToParts(new Date(utcMs)).map((p) => [p.type, p.value]));
+    return Date.UTC(+parts.year, +parts.month - 1, +parts.day, +parts.hour, +parts.minute, +parts.second) - utcMs;
+  }
+  function jerusalemTime(local) {
+    if (local == null || String(local).trim() === "") return null;
+    const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(String(local).trim());
+    if (!match) throw "מועד הסגירה אינו תקין.";
+    const wall = Date.UTC(+match[1], +match[2] - 1, +match[3], +match[4], +match[5]);
+    let utc = wall;
+    for (let i = 0; i < 3; i += 1) utc = wall - jerusalemOffsetMs(utc);
+    return new Date(utc).toISOString();
+  }
+  const addDays = (dateValue, days) => {
+    const [y, m, d] = dateValue.split("-").map(Number);
+    return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
+  };
+  const jerusalemToday = () => { const p = Object.fromEntries(jerusalemParts.formatToParts(new Date(serverMs())).map((x) => [x.type, x.value])); return `${p.year}-${p.month}-${p.day}`; };
+  const endOfDayUtc = (dateValue) => jerusalemTime(`${addDays(dateValue, 1)}T00:00`);
+  const sheetIsClosed = (row) => row.status === "closed" || (row.closes_at != null && Date.parse(row.closes_at) <= serverMs());
+  function seedSheetsV2() {
+    // Historical sheet 124 (has orders): closed by the migration backfill, no publication date.
+    db.sheets.push({ sheet_number: "124", status: "closed", status_reason: "גיליון היסטורי — סומן כסגור במעבר למודל הגיליונות",
+      closed_at: now(), publication_date: null, closes_at: null, description: "", created_at: now(), created_via: "backfill",
+      reopened_at: null, updated_at: now() });
+    // Planned sheets 125–128: the next four Sundays, closing Friday 00:00 Israel time.
+    const today = jerusalemToday();
+    const weekday = new Date(`${today}T12:00:00Z`).getUTCDay();
+    const firstSunday = addDays(today, weekday === 0 ? 7 : 7 - weekday);
+    for (let i = 0; i < 4; i += 1) {
+      const publication = addDays(firstSunday, i * 7);
+      db.sheets.push({ sheet_number: String(125 + i), status: "open", status_reason: "", closed_at: null, publication_date: publication,
+        closes_at: jerusalemTime(`${addDays(publication, -2)}T00:00`), description: i === 2 ? "גיליון חג" : "", created_at: now(),
+        created_via: "planned", reopened_at: null, updated_at: now() });
+    }
+  }
+  const overviewRows = () => db.sheets.map((row) => ({
+    sheet_number: row.sheet_number, publication_date: row.publication_date ?? null, closes_at: row.closes_at ?? null,
+    description: row.description ?? "", status: row.status, is_closed: sheetIsClosed(row),
+    closed_by_kind: row.status === "closed" ? "manual" : (row.closes_at != null && Date.parse(row.closes_at) <= serverMs() ? "deadline" : null),
+    closed_at: row.closed_at ?? null, status_reason: row.status_reason ?? "", reopened_at: row.reopened_at ?? null,
+    created_at: row.created_at ?? null, created_via: row.created_via ?? "status", updated_at: row.updated_at, server_now: serverIso()
+  }));
+  function staleError(message) { const e = new Error(message); e.code = "40001"; return e; }
+  function setSheetState(p) {
+    const number = (p.p_sheet_number || "").trim();
+    if (!number || p.p_is_closed == null) throw "יש לבחור גיליון וסטטוס.";
+    let row = db.sheets.find((s) => s.sheet_number === number);
+    if (row && (p.p_expected_updated_at == null || row.updated_at !== p.p_expected_updated_at)) throw staleError("סטטוס הגיליון השתנה אצל משתמשת אחרת. רענני ונסי שוב.");
+    if (!row && !db.orders.some((o) => (o.sheet_number || "").trim() === number)) throw "הגיליון לא נמצא.";
+    const closed = Boolean(row) && sheetIsClosed(row);
+    const newCloses = jerusalemTime(p.p_reopen_closes_at_local);
+    if (p.p_is_closed) {
+      if (closed) throw "הגיליון כבר סגור.";
+      if (!row) { row = { sheet_number: number, publication_date: null, closes_at: null, description: "", created_at: now(), created_via: "status", reopened_at: null }; db.sheets.push(row); }
+      Object.assign(row, { status: "closed", status_reason: (p.p_reason || "").trim() || "סגירת גיליון", closed_at: serverIso(), updated_at: now() });
+    } else {
+      if (!closed) throw "הגיליון כבר פתוח.";
+      if ((p.p_reason || "").trim().length < 3) throw "נדרש הסבר קצר לפתיחה מחדש של גיליון סגור.";
+      if (!newCloses && row.closes_at && Date.parse(row.closes_at) <= serverMs()) throw "מועד הסגירה של הגיליון עבר. יש לבחור מועד סגירה חדש בעתיד.";
+      if (newCloses && Date.parse(newCloses) <= serverMs()) throw "מועד הסגירה החדש חייב להיות בעתיד.";
+      Object.assign(row, { status: "open", status_reason: p.p_reason.trim(), closed_at: null, closes_at: newCloses || row.closes_at,
+        reopened_at: serverIso(), updated_at: now() });
+    }
+    return { sheet_number: row.sheet_number, status: row.status, closes_at: row.closes_at, is_closed: sheetIsClosed(row), updated_at: row.updated_at };
+  }
+  // Stage B guard (supabase-sheets-v2-enforce.sql): only for inserts and sheet changes.
+  function enforceOpenSheet(sheetNumber) {
+    if (!enforce || sheetNumber == null) return;
+    const row = db.sheets.find((s) => s.sheet_number === sheetNumber);
+    if (!row) { const e = new Error(`גיליון ${sheetNumber} אינו קיים במערכת. יש לבחור גיליון מהרשימה.`); e.code = "23503"; throw e; }
+    if (sheetIsClosed(row)) { const e = new Error(`גיליון ${sheetNumber} סגור להזמנות. יש לבחור גיליון פתוח.`); e.code = "HPS01"; throw e; }
+  }
+  if (sheetsV2) seedSheetsV2();
+
   const user = { id: "00000000-0000-4000-8000-0000000000aa" };
   const state = { session: params.get("session") === "1" ? { user } : null, approvalDelay: Number(params.get("delay") || 0), listeners: [], failNext: null, failTables: {}, rpcCalls: [] };
   const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -53,6 +137,7 @@
       return [{ total_cash_billed: sum(db.financial_obligations), total_cash_received: sum(db.financial_obligations.filter((o) => o.status === "paid")),
         total_cash_outstanding: sum(open), total_overdue: sum(open.filter((o) => o.due_on && o.due_on < t)) }];
     }
+    if (table === "sheet_overview") return overviewRows();
     if (table === "business_client_credit_balances") {
       return db.clients.map((c) => ({ client_id: c.id, credit_balance: String(r2(db.credit_ledger.filter((l) => l.client_id === c.id).reduce((s, l) => s + Number(l.delta), 0))) }));
     }
@@ -75,7 +160,8 @@
       update(values) { patch = values; return chain; },
       maybeSingle() { single = true; return chain; },
       then(resolve, reject) {
-        if ((businessTable && !business) || (table === "sheets" && params.get("sheets") !== "1")) return Promise.resolve({ data: null, error: { code: "PGRST205", message: `Could not find the table 'public.${table}' in the schema cache` } }).then(resolve, reject);
+        if ((businessTable && !business) || (table === "sheets" && !["1", "2"].includes(params.get("sheets")))
+          || (table === "sheet_overview" && !sheetsV2)) return Promise.resolve({ data: null, error: { code: "PGRST205", message: `Could not find the table 'public.${table}' in the schema cache` } }).then(resolve, reject);
         if (state.failTables[table] > 0) { state.failTables[table] -= 1; return Promise.resolve({ data: null, error: { message: "Failed to fetch" } }).then(resolve, reject); }
         // ?bizdelay=ms: business data tables answer late (to test loading states). business_settings is exempt:
         // app.js reads it to detect the business schema before showing the app.
@@ -116,7 +202,53 @@
       if (p.p_product_id) { const existing = db.product_catalog.find((x) => x.id === p.p_product_id); if (!existing) throw "המוצר לא נמצא."; Object.assign(existing, row); return existing.id; }
       const id = uuid(); db.product_catalog.push({ id, ...row }); return id;
     },
+    create_sheets_batch(p) {
+      if (!sheetsV2) throw "Could not find the function public.create_sheets_batch";
+      const list = Array.isArray(p.p_sheets) ? p.p_sheets : [];
+      if (list.length < 1 || list.length > 60) throw "יש ליצור בין גיליון אחד ל-60 גיליונות בפעולה אחת.";
+      const numbers = [];
+      const rows = list.map((item, index) => {
+        const number = String(item.sheet_number ?? "").trim();
+        if (!/^[1-9][0-9]{0,8}$/.test(number)) throw `מספר הגיליון בשורה ${index + 1} אינו תקין: ספרות בלבד, מספר חיובי, ללא אפס מוביל.`;
+        if (numbers.includes(number)) throw `גיליון ${number} מופיע פעמיים ברשימה.`;
+        numbers.push(number);
+        if (!item.publication_date) throw `חסר תאריך פרסום לגיליון ${number}.`;
+        const closes = jerusalemTime(item.closes_at_local);
+        if (!closes) throw `חסר מועד סגירה לגיליון ${number}.`;
+        if (Date.parse(closes) >= Date.parse(endOfDayUtc(item.publication_date))) throw `מועד הסגירה של גיליון ${number} חייב להיות לפני סוף יום הפרסום.`;
+        if (Date.parse(closes) <= serverMs()) throw `מועד הסגירה של גיליון ${number} כבר עבר.`;
+        if (String(item.description || "").length > 200) throw `התיאור של גיליון ${number} ארוך מ-200 תווים.`;
+        return { sheet_number: number, status: "open", status_reason: "", closed_at: null, publication_date: item.publication_date,
+          closes_at: closes, description: String(item.description || "").trim(), created_at: now(), created_via: "planned", reopened_at: null, updated_at: now() };
+      });
+      const existing = numbers.filter((n) => db.sheets.some((s) => s.sheet_number === n)).sort();
+      if (existing.length) { const e = new Error(`הגיליונות הבאים כבר קיימים: ${existing.join(", ")}. לא נוצר אף גיליון.`); e.code = "23505"; throw e; }
+      db.sheets.push(...rows);
+      return { created: numbers, count: numbers.length };
+    },
+    update_sheet_details(p) {
+      if (!sheetsV2) throw "Could not find the function public.update_sheet_details";
+      const row = db.sheets.find((s) => s.sheet_number === (p.p_sheet_number || "").trim());
+      if (!row) throw "הגיליון לא נמצא.";
+      if (p.p_expected_updated_at == null || row.updated_at !== p.p_expected_updated_at) throw staleError("פרטי הגיליון השתנו אצל משתמשת אחרת. רענני ונסי שוב.");
+      if (String(p.p_description || "").length > 200) throw "התיאור ארוך מ-200 תווים.";
+      const closes = jerusalemTime(p.p_closes_at_local);
+      if (!closes && row.closes_at) throw "מועד סגירה הוא שדה חובה לגיליון זה.";
+      if (closes && !p.p_publication_date) throw "יש להזין תאריך פרסום.";
+      if (closes && Date.parse(closes) >= Date.parse(endOfDayUtc(p.p_publication_date))) throw "מועד הסגירה חייב להיות לפני סוף יום הפרסום.";
+      if (closes !== row.closes_at && row.status !== "closed") {
+        if (row.closes_at && Date.parse(row.closes_at) <= serverMs()) throw "הגיליון נסגר במועד הסגירה. כדי לשנות את המועד יש לפתוח אותו מחדש (עם סיבה).";
+        if (Date.parse(closes) <= serverMs()) throw "מועד הסגירה החדש כבר עבר. לסגירה מיידית יש להשתמש ב\"סגירת הגיליון\".";
+      }
+      Object.assign(row, { publication_date: p.p_publication_date || null, closes_at: closes, description: String(p.p_description || "").trim(), updated_at: now() });
+      return { sheet_number: row.sheet_number, updated_at: row.updated_at };
+    },
+    set_sheet_state(p) {
+      if (!sheetsV2) throw "Could not find the function public.set_sheet_state";
+      return setSheetState(p);
+    },
     set_sheet_status(p) {
+      if (sheetsV2) return setSheetState({ ...p, p_reopen_closes_at_local: null });
       const sheet = (p.p_sheet_number || "").trim();
       if (!db.orders.some((o) => (o.sheet_number || "").trim() === sheet)) throw "לגיליון זה אין הזמנות במערכת.";
       if (!p.p_is_closed && (p.p_reason || "").trim().length < 3) throw "נדרש הסבר קצר לפתיחה מחדש של גיליון סגור.";
@@ -152,6 +284,7 @@
       return balance(p.p_client_id);
     },
     create_orders_batch(p) {
+      for (const row of p.p_orders) enforceOpenSheet(row.sheet_number); // whole batch rejected, nothing written
       return p.p_orders.map((row) => {
         const product = db.product_catalog.find((x) => x.id === row.product_id && x.is_active);
         if (!product) throw "המוצר בשורה 1 אינו קיים או אינו פעיל.";
@@ -239,6 +372,11 @@
     db, state,
     expireSession() { state.session = null; emit("SIGNED_OUT", null); },
     failNext(mode) { state.failNext = mode; },
+    // Server clock control for deadline tests (sheets v2). setNow(iso) / advance(ms).
+    setNow(iso) { clockOffset = Date.parse(iso) - Date.now(); },
+    advance(ms) { clockOffset += ms; },
+    serverNow: () => serverIso(),
+    jerusalemTime,
     // The next `times` reads of `table` fail like a dropped network request.
     failTable(table, times = 1) { state.failTables[table] = times; },
     get signInCalls() { return state.signInCalls || 0; }

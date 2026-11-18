@@ -29,10 +29,19 @@ async function login() {
 }
 const nav = async (view) => { $(`.main-nav [data-view="${view}"]`).click(); await sleep(150); };
 const db = () => w.__mock.db;
+async function waitFor(condition, timeout = 3000) {
+  for (let waited = 0; waited < timeout; waited += 50) { if (condition()) return true; await sleep(50); }
+  return false;
+}
 // Answers the system confirmation dialog (#app-confirm-modal). Returns false if the dialog is not open.
 async function answerDialog({ reason = null, cancel = false } = {}) {
-  await sleep(80);
-  const modal = $("#app-confirm-modal");
+  // The dialog opens after any pending refresh/render; poll instead of a fixed wait (stable under load).
+  let modal = null;
+  for (let waited = 0; waited < 2000; waited += 50) {
+    modal = $("#app-confirm-modal");
+    if (modal && modal.open) break;
+    await sleep(50);
+  }
   if (!modal || !modal.open) return false;
   if (cancel) { modal.querySelector("[data-close-modal]").click(); await sleep(40); return true; }
   if (reason !== null) $("#app-confirm-reason").value = reason;
@@ -184,6 +193,7 @@ async function run() {
   check("R10 sheet page: address, 10 orders, summary", page() === "sheet" && w.location.hash === "#/sheet/124" && $$("#sheet-orders-body tr").length === 10 && text("#sheet-count") === "10");
   check("R11 sheet columns: product, credits, before/after VAT, status, notes", ["מוצר", "קרדיטים", "לפני מע", "כולל מע", "סטטוס תשלום", "הערות"].every((h) => text('[data-page="sheet"] thead').includes(h)));
   const statusesBefore = db().orders.filter((o) => o.sheet_number === "124").map((o) => o.payment_status).join();
+  await waitFor(() => !$("#sheet-toggle-status").hidden && !$("#sheet-toggle-status").disabled);
   $("#sheet-toggle-status").click();
   check("I1 closing a sheet asks in the system dialog (no window.confirm)", await answerDialog({ cancel: true }) && text("#sheet-page-status") === "פתוח");
   $("#sheet-toggle-status").click(); await answerDialog(); await sleep(600);
@@ -243,6 +253,94 @@ async function run() {
   check("I10 sheet page shows loading, no guessed status or toggle", text("#sheet-orders-body").includes("טוען") && text("#sheet-page-status") === "" && $("#sheet-toggle-status").hidden, text("#sheet-page-status"));
   await sleep(5500); // three sequential delayed reads: reference data, business lists, sheet statuses
   check("I11 after loading: real rows and status", $$("#sheet-orders-body tr").length === 10 && text("#sheet-page-status") === "פתוח" && !$("#sheet-toggle-status").hidden);
+
+  // ===== Stage 4: sheets model v2 contract (the Mock mirrors supabase-sheets-v2*.sql)
+  await load("session=1&business=1&sheets=2&enforce=1", "#/sheets"); await sleep(800);
+  const sbc = w.ModaatApp.client();
+  const rpcOk = async (name, args) => { const r = await sbc.rpc(name, args); return r; };
+  const overview = async () => (await sbc.from("sheet_overview").select("*")).data;
+  const ov = (list, n) => list.find((r) => r.sheet_number === n);
+  const addDaysT = (v, d) => { const [y, m, dd] = v.split("-").map(Number); return new Date(Date.UTC(y, m - 1, dd + d)).toISOString().slice(0, 10); };
+  const jParts = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Jerusalem", hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+  const jLocal = (ms) => { const p = Object.fromEntries(jParts.formatToParts(new Date(ms)).map((x) => [x.type, x.value])); return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`; };
+  const serverMsNow = () => Date.parse(w.__mock.serverNow());
+  let sv = await overview();
+  check("V1 overview: historical 124 closed, no publication date; planned 125-128 dated and open",
+    ov(sv, "124").is_closed && ov(sv, "124").publication_date === null && ov(sv, "124").created_via === "backfill"
+    && ["125", "126", "127", "128"].every((n) => ov(sv, n) && ov(sv, n).publication_date) && !ov(sv, "127").is_closed);
+  const s126 = ov(sv, "126");
+  check("V2 default closing = Friday 00:00 Israel time before a Sunday publication",
+    new Date(`${s126.publication_date}T12:00:00Z`).getUTCDay() === 0 && w.__mock.jerusalemTime(`${addDaysT(s126.publication_date, -2)}T00:00`) === s126.closes_at, s126.closes_at);
+  check("V3 Israel winter time: Fri 27/11/2026 00:00 = 26/11 22:00 UTC", w.__mock.jerusalemTime("2026-11-27T00:00") === "2026-11-26T22:00:00.000Z");
+  check("V4 Israel summer time: Fri 03/07/2026 00:00 = 02/07 21:00 UTC", w.__mock.jerusalemTime("2026-07-03T00:00") === "2026-07-02T21:00:00.000Z");
+  check("V5 DST change day (27/03/2026, clocks move at 02:00): 00:00 is still winter time; next day is summer time",
+    w.__mock.jerusalemTime("2026-03-27T00:00") === "2026-03-26T22:00:00.000Z" && w.__mock.jerusalemTime("2026-03-28T00:00") === "2026-03-27T21:00:00.000Z");
+
+  const p128 = ov(sv, "128").publication_date;
+  const planned = [0, 1, 2].map((i) => ({ sheet_number: String(129 + i), publication_date: addDaysT(p128, 7 * (i + 1)),
+    closes_at_local: `${addDaysT(p128, 7 * (i + 1) - 2)}T00:00`, description: i === 1 ? "לפני חג" : "" }));
+  const keyA = w.crypto.randomUUID();
+  const createdA = await rpcOk("create_sheets_batch", { p_sheets: planned, p_idempotency_key: keyA });
+  sv = await overview();
+  check("V6 'הוספת גיליונות': 3 sheets created together, open, with dates and description",
+    !createdA.error && createdA.data.count === 3 && ["129", "130", "131"].every((n) => ov(sv, n) && !ov(sv, n).is_closed) && ov(sv, "130").description === "לפני חג", JSON.stringify(createdA.error));
+  const again = await rpcOk("create_sheets_batch", { p_sheets: planned, p_idempotency_key: keyA });
+  check("V7 same request again (double click): same result, no duplicates", !again.error && again.data.count === 3 && (await overview()).length === sv.length);
+  const dup = await rpcOk("create_sheets_batch", { p_sheets: [
+    { sheet_number: "132", publication_date: addDaysT(p128, 28), closes_at_local: `${addDaysT(p128, 26)}T00:00` },
+    { sheet_number: "131", publication_date: addDaysT(p128, 35), closes_at_local: `${addDaysT(p128, 33)}T00:00` }], p_idempotency_key: w.crypto.randomUUID() });
+  check("V8 existing number in the batch: clear error, nothing created (no partial creation)",
+    dup.error && dup.error.message.includes("131") && dup.error.message.includes("לא נוצר") && !ov(await overview(), "132"), dup.error && dup.error.message);
+  const bad = await Promise.all(["0133", "13a", "-5", ""].map((n) => rpcOk("create_sheets_batch", { p_sheets: [
+    { sheet_number: n, publication_date: addDaysT(p128, 28), closes_at_local: `${addDaysT(p128, 26)}T00:00` }], p_idempotency_key: w.crypto.randomUUID() })));
+  check("V9 sheet number: digits only, positive, no leading zero", bad.every((r) => r.error && r.error.message.includes("ספרות בלבד")));
+  const late = await rpcOk("create_sheets_batch", { p_sheets: [{ sheet_number: "140", publication_date: addDaysT(p128, 28), closes_at_local: `${addDaysT(p128, 29)}T00:00` }], p_idempotency_key: w.crypto.randomUUID() });
+  const past = await rpcOk("create_sheets_batch", { p_sheets: [{ sheet_number: "141", publication_date: "2020-01-05", closes_at_local: "2020-01-03T00:00" }], p_idempotency_key: w.crypto.randomUUID() });
+  check("V10 closing after the publication day, or already passed: rejected", late.error && past.error && !ov(await overview(), "140") && !ov(await overview(), "141"));
+
+  let s129 = ov(await overview(), "129");
+  const close129 = await rpcOk("set_sheet_state", { p_sheet_number: "129", p_is_closed: true, p_reason: "", p_reopen_closes_at_local: null, p_expected_updated_at: s129.updated_at });
+  s129 = ov(await overview(), "129");
+  const closeAgain = await rpcOk("set_sheet_state", { p_sheet_number: "129", p_is_closed: true, p_reason: "", p_reopen_closes_at_local: null, p_expected_updated_at: s129.updated_at });
+  check("V11 manual close: closed (manual); closing twice is refused", !close129.error && s129.is_closed && s129.closed_by_kind === "manual" && closeAgain.error && closeAgain.error.message.includes("כבר סגור"));
+  const shortReason = await rpcOk("set_sheet_state", { p_sheet_number: "129", p_is_closed: false, p_reason: "ab", p_reopen_closes_at_local: null, p_expected_updated_at: s129.updated_at });
+  const reopen129 = await rpcOk("set_sheet_state", { p_sheet_number: "129", p_is_closed: false, p_reason: "תיקון מודעה", p_reopen_closes_at_local: null, p_expected_updated_at: s129.updated_at });
+  check("V12 reopen before the deadline: needs a 3+ character reason; deadline unchanged",
+    shortReason.error && !reopen129.error && !ov(await overview(), "129").is_closed && ov(await overview(), "129").closes_at === s129.closes_at);
+  const stale = await rpcOk("set_sheet_state", { p_sheet_number: "129", p_is_closed: true, p_reason: "", p_reopen_closes_at_local: null, p_expected_updated_at: s129.updated_at });
+  check("V13 stale version (another user changed the sheet): refused", stale.error && stale.error.code === "40001");
+
+  const s125 = ov(await overview(), "125");
+  w.__mock.setNow(new Date(Date.parse(s125.closes_at) + 60000).toISOString());
+  let s125b = ov(await overview(), "125");
+  check("V14 automatic closing at the deadline (no scheduler, no open browser needed)", s125b.is_closed && s125b.closed_by_kind === "deadline" && !ov(await overview(), "126").is_closed);
+  const extend = await rpcOk("update_sheet_details", { p_sheet_number: "125", p_publication_date: s125b.publication_date, p_closes_at_local: `${s125b.publication_date}T00:00`, p_description: "", p_expected_updated_at: s125b.updated_at });
+  check("V15 moving the deadline cannot reopen a sheet closed by its deadline", extend.error && extend.error.message.includes("לפתוח אותו מחדש"), extend.error && extend.error.message);
+  const noNewTime = await rpcOk("set_sheet_state", { p_sheet_number: "125", p_is_closed: false, p_reason: "תיקון מאוחר", p_reopen_closes_at_local: null, p_expected_updated_at: s125b.updated_at });
+  const pastTime = await rpcOk("set_sheet_state", { p_sheet_number: "125", p_is_closed: false, p_reason: "תיקון מאוחר", p_reopen_closes_at_local: jLocal(serverMsNow() - 3600000), p_expected_updated_at: s125b.updated_at });
+  const twoHours = jLocal(serverMsNow() + 2 * 3600000);
+  const reopen125 = await rpcOk("set_sheet_state", { p_sheet_number: "125", p_is_closed: false, p_reason: "תיקון מאוחר", p_reopen_closes_at_local: twoHours, p_expected_updated_at: s125b.updated_at });
+  s125b = ov(await overview(), "125");
+  check("V16 reopen after the deadline: requires a new FUTURE closing time (+2h works); not closed again immediately",
+    noNewTime.error && pastTime.error && !reopen125.error && !s125b.is_closed && s125b.closes_at === w.__mock.jerusalemTime(twoHours) && s125b.reopened_at, JSON.stringify([noNewTime.error?.message, reopen125.error?.message]));
+  w.__mock.advance(2 * 3600000 + 60000);
+  check("V17 the reopened sheet closes again at its new closing time", ov(await overview(), "125").is_closed);
+
+  const ordersCount = db().orders.length;
+  const orderArgs = (sheet) => ({ p_client_id: "c-test-1", p_idempotency_key: w.crypto.randomUUID(), p_orders: [{ sheet_number: sheet,
+    product_id: "44444444-4444-4444-8444-444444444444", publication_date: "2026-11-18", cash_amount_before_vat: 100, credits_used: null, payment_status: "pending", due_on: null, notes: "" }] });
+  const toClosed = await rpcOk("create_orders_batch", orderArgs("124"));
+  const toUnknown = await rpcOk("create_orders_batch", orderArgs("999"));
+  const mixed = orderArgs("126"); mixed.p_orders.push({ ...mixed.p_orders[0], sheet_number: "129" }); mixed.p_orders.push({ ...mixed.p_orders[0], sheet_number: "125" });
+  const toMixed = await rpcOk("create_orders_batch", mixed);
+  check("V18 enforcement: closed sheet, unknown sheet and a batch with one closed row are all refused; nothing written",
+    toClosed.error?.code === "HPS01" && toUnknown.error?.code === "23503" && toMixed.error?.code === "HPS01" && db().orders.length === ordersCount, JSON.stringify([toClosed.error?.message, toMixed.error?.message]));
+  const toOpen = await rpcOk("create_orders_batch", orderArgs("126"));
+  check("V19 an order to an open sheet is accepted", !toOpen.error && db().orders.length === ordersCount + 1 && db().orders.some((o) => o.sheet_number === "126"));
+  const s124 = ov(await overview(), "124");
+  const legacyReopen = await rpcOk("set_sheet_status", { p_sheet_number: "124", p_is_closed: false, p_reason: "בדיקת תאימות", p_expected_updated_at: s124.updated_at });
+  check("V20 the current UI's set_sheet_status still works (historical sheet without a deadline)", !legacyReopen.error && !ov(await overview(), "124").is_closed, legacyReopen.error && legacyReopen.error.message);
+  w.__mock.setNow(new Date().toISOString());
 
   // ===== deep link restored after login
   await load("session=1&business=1", "#/client/c-test-3");
