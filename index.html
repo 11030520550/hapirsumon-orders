@@ -8,12 +8,12 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@500;700&family=Heebo:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20261118-1">
+  <link rel="stylesheet" href="styles.css?v=20261119-2">
   <!-- supabase-js pinned to 2.119.0 and served locally (vendor/); SHA-384 verified against jsDelivr's published hash. -->
   <script src="vendor/supabase-js-2.119.0.js" integrity="sha384-uteMfOloLDGt042uDz+xHGF3ym63/WQ6rFq7murQRG8Ih7QrXGEGNtWd8688sb4O"></script>
   <script src="supabase-config.js"></script>
   <script src="app.js?v=20261118-1" defer></script>
-  <script src="business-app.js?v=20261118-1" defer></script>
+  <script src="business-app.js?v=20261119-2" defer></script>
 </head>
 <body>
   <svg class="svg-defs" width="0" height="0" aria-hidden="true">
@@ -268,26 +268,48 @@
         </section>
 
         <!-- Sheets list -->
-        <section class="page-view" data-page="sheets" hidden>
-          <div class="welcome-row">
-            <div><p class="eyebrow">גיליונות</p><h1>גיליונות</h1><p class="page-subtitle">כל הגיליונות שיש בהם הזמנות. לחיצה על גיליון פותחת את כל ההזמנות שבו.</p></div>
-          </div>
+        <section class="page-view sheets-page" data-page="sheets" hidden>
+          <!-- Banner: reproduces the owner's approved reference one to one (illustration, text, sizes). Keep it free of data and buttons. -->
+          <header class="sheets-banner">
+            <div class="sheets-banner-art"><img src="assets/sheets-banner-reader.png" width="142" height="189" alt=""></div>
+            <div class="sheets-banner-text">
+              <p class="sheets-banner-eyebrow">מערכת הפרסומון</p>
+              <h1 class="sheets-banner-title">הגיליונות שלנו</h1>
+              <p class="sheets-banner-sub">כל גיליון, כל הזמנה, הכול במקום אחד.</p>
+            </div>
+          </header>
           <div class="biz-required" hidden><p>מספרי גיליון נשמרים בהזמנות לאחר התקנת הסכימה העסקית ב-Supabase.</p></div>
           <p class="import-preview warning biz-only" id="sheets-status-note" hidden>סגירת גיליון תהיה זמינה לאחר הפעלת הקובץ supabase-sheets-and-order-numbers.sql. עד אז כל הגיליונות מוצגים כפתוחים.</p>
-          <section class="orders-section biz-only">
-            <div class="table-toolbar">
-              <label class="search-box"><span aria-hidden="true">⌕</span><input id="sheets-search" type="search" placeholder="חיפוש מספר גיליון..." aria-label="חיפוש גיליון"></label>
-              <label class="filter-label">סטטוס
-                <select id="sheets-filter"><option value="all">כל הגיליונות</option><option value="open">פתוחים</option><option value="closed">סגורים</option></select>
+          <section class="sheets-desk biz-only" aria-label="רשימת הגיליונות">
+            <div class="sheets-desk-head">
+              <!-- The two reference points of the week: they are different sheets after the Friday closing. -->
+              <div class="sheets-now" id="sheets-ribbon" aria-label="הגיליונות הקרובים" hidden></div>
+              <button class="button button-primary sheets-add-button" type="button" id="sheets-add" hidden><span class="button-plus">＋</span> הוספת גיליונות</button>
+            </div>
+            <div class="sheets-tools">
+              <label class="sheets-search"><span aria-hidden="true">⌕</span><input id="sheets-search" type="search" placeholder="מספר גיליון, תיאור או תאריך (22/11)" aria-label="חיפוש גיליון"></label>
+              <div class="sheets-chips" id="sheets-filter" role="group" aria-label="סינון גיליונות">
+                <button type="button" data-sheets-filter="upcoming" aria-pressed="false">קרובים<span class="seg-count"></span></button>
+                <button type="button" data-sheets-filter="open" aria-pressed="false">פתוחים להזמנות<span class="seg-count"></span></button>
+                <button type="button" data-sheets-filter="closed" aria-pressed="false">סגורים<span class="seg-count"></span></button>
+                <button type="button" data-sheets-filter="due" aria-pressed="false">יתרה לתשלום<span class="seg-count"></span></button>
+                <button type="button" data-sheets-filter="all" aria-pressed="false">הכול<span class="seg-count"></span></button>
+              </div>
+              <label class="sheets-sort">מיון
+                <select id="sheets-sort">
+                  <option value="number:asc">מספר גיליון — עולה</option>
+                  <option value="number:desc">מספר גיליון — יורד</option>
+                  <option value="publication:asc">תאריך פרסום — הקרוב קודם</option>
+                  <option value="publication:desc">תאריך פרסום — האחרון קודם</option>
+                  <option value="status:asc">סטטוס — הפתוחים קודם</option>
+                  <option value="pending:desc">יתרה לתשלום — הגבוהה קודם</option>
+                  <option value="orders:desc">הזמנות — הרבות קודם</option>
+                </select>
               </label>
             </div>
-            <div class="table-wrap">
-              <table>
-                <thead><tr><th scope="col">גיליון</th><th scope="col">סטטוס</th><th scope="col">הזמנות</th><th scope="col">לקוחות</th><th scope="col">סך חיובים</th><th scope="col">ממתין לתשלום</th><th scope="col">קרדיטים שנוצלו</th></tr></thead>
-                <tbody id="sheets-body"></tbody>
-              </table>
-              <div class="empty-state" id="sheets-empty" hidden><strong>אין גיליונות להצגה</strong><p>גיליון מופיע כאן כשיש בו לפחות הזמנה אחת.</p></div>
-            </div>
+            <ol class="sheet-list" id="sheets-body" aria-live="polite"></ol>
+            <div class="empty-state sheets-empty" id="sheets-empty" hidden><strong id="sheets-empty-title">אין גיליונות להצגה</strong><p id="sheets-empty-text"></p></div>
+            <footer class="sheets-desk-foot"><span id="sheets-count"></span><span id="sheets-legend">סגירה בשישי 00:00 = חצות שבין חמישי לשישי · יתרות כוללות מע"מ · כל הפירוט בתוך הגיליון</span></footer>
           </section>
         </section>
 
@@ -950,6 +972,43 @@
         <button class="button button-primary" id="run-local-import" type="button" disabled>ייבוא רשומות חדשות בלבד</button>
       </div>
     </div>
+  </dialog>
+
+  <dialog class="modal sheets-add-modal" id="sheets-add-modal" aria-labelledby="sheets-add-title">
+    <form class="modal-card" id="sheets-add-form" novalidate>
+      <div class="modal-heading">
+        <div><span class="modal-kicker">תכנון גיליונות</span><h2 id="sheets-add-title">הוספת גיליונות</h2></div>
+        <button class="close-button" type="button" data-close-modal aria-label="סגירה">×</button>
+      </div>
+      <p class="sheets-add-intro">הגיליונות נוצרים מראש, ריקים ופתוחים להזמנות עד מועד הסגירה. אפשר לשנות כל שורה לפני השמירה.</p>
+      <div class="sheets-add-settings">
+        <label class="field-label">מגיליון מספר<input name="start" type="number" min="1" step="1" inputmode="numeric" required></label>
+        <label class="field-label">כמות<input name="count" type="number" min="1" max="60" step="1" inputmode="numeric" required></label>
+        <label class="field-label">פרסום ראשון<input name="first" type="date" required></label>
+        <label class="field-label">סגירה להזמנות
+          <span class="sheets-add-closing">
+            <select name="close_day" aria-label="יום הסגירה"></select>
+            <input name="close_time" type="time" step="60" aria-label="שעת הסגירה" required>
+          </span>
+        </label>
+      </div>
+      <p class="sheets-add-rule" id="sheets-add-rule" aria-live="polite"></p>
+      <div class="sheets-add-preview">
+        <table class="sheets-add-table">
+          <thead><tr><th scope="col">גיליון</th><th scope="col">תאריך פרסום</th><th scope="col">סגירה להזמנות (שעון ישראל)</th><th scope="col">תיאור <span class="optional">(לא חובה)</span></th><th scope="col"><span class="sr-only">בדיקה</span></th></tr></thead>
+          <tbody id="sheets-add-rows"></tbody>
+        </table>
+      </div>
+      <!-- Stays at the bottom of the dialog while the preview scrolls (10–20 sheets on a phone). -->
+      <div class="sheets-add-footer">
+        <p class="form-message" id="sheets-add-message" role="alert"></p>
+        <div class="modal-actions sheets-add-actions">
+          <button class="button button-outline" type="button" data-close-modal>ביטול</button>
+          <button class="button button-primary" type="submit" id="sheets-add-submit">יצירת הגיליונות</button>
+          <span class="sheets-add-summary" id="sheets-add-summary" aria-live="polite"></span>
+        </div>
+      </div>
+    </form>
   </dialog>
 
   <dialog class="modal confirm-modal" id="app-confirm-modal" aria-labelledby="app-confirm-title">

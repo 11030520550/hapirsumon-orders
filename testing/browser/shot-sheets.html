@@ -1,0 +1,75 @@
+<!doctype html><html><head><meta charset="utf-8"><title>sheets screenshots (mock)</title>
+<style>body{margin:0;background:#D9D4CC}iframe{display:block;margin:0 auto;border:0;width:100vw;height:100vh;background:#fff}</style></head><body>
+<!-- Headless Chrome does not lay out below ~500px, so phone shots load the app in a 390px iframe (centred). -->
+<iframe id="f"></iframe>
+<script>
+// Screenshot scenes for the sheets board (Mock only, fake data; nothing leaves the browser).
+//   ?scene=list | weekend | monday | states | add | add-errors | add-20   &w=<iframe width>   &h=<iframe height>
+// weekend: the Mock server clock is moved to Saturday 10:00 (Israel), after sheet 125 closed for orders.
+// monday: Monday 10:00, sheet 125 already published.
+// states: Saturday after sheet 126 closed: 125 published, 126 closed for orders, 127 open (with orders), 128 empty, 124 historical.
+// add-20: the add dialog with 20 sheets, scrolled to the middle (fixed action bar).
+const params = new URLSearchParams(location.search);
+const f = document.getElementById("f");
+if (params.get("w")) f.style.width = params.get("w") + "px";
+if (params.get("h")) f.style.height = params.get("h") + "px";
+const scene = params.get("scene") || "list";
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+f.onload = async () => {
+  await sleep(900);
+  const w = f.contentWindow, d = f.contentDocument;
+  // Screenshots only: headless virtual time does not advance CSS transitions, so frames would catch them half-way.
+  // (An inline <style> would be blocked by the CSP from _headers; adding the rule through the CSSOM is allowed.)
+  const css = [...d.styleSheets].find((sheet) => (sheet.href || "").includes("styles.css"));
+  css.insertRule("*, *::before, *::after { transition: none !important; animation: none !important; }", css.cssRules.length);
+  const set = (el, v) => { el.value = v; el.dispatchEvent(new w.Event("input", { bubbles: true })); el.dispatchEvent(new w.Event("change", { bubbles: true })); };
+  const sb = w.ModaatApp.client();
+  const product = "44444444-4444-4444-8444-444444444444";
+  const order = (sheet, cash, credits, paid) => ({ sheet_number: sheet, product_id: product, publication_date: "2026-11-18",
+    cash_amount_before_vat: cash, credits_used: credits, payment_status: paid ? "paid" : "pending", due_on: null, notes: "" });
+  // Fake orders in the two nearest sheets (same RPC as the real order screen).
+  const batches = [
+    ["c-test-1", [order("125", 500, null, true), order("126", 500, null, false)]],
+    ["c-test-2", [order("125", 850, null, false)]],
+    ["c-test-4", [order("125", null, 2.5, true), order("126", null, 2.5, true)]],
+    ["c-test-5", [order("125", 1200, null, true)]],
+    ["c-test-7", [order("125", 320, null, false)]],
+    ["c-test-8", [order("126", 640, null, false)]],
+    ...(scene === "states" ? [["c-test-3", [order("127", 900, null, false)]], ["c-test-6", [order("127", 450, null, true)]]] : [])
+  ];
+  for (const [client, rows] of batches) await sb.rpc("create_orders_batch", { p_client_id: client, p_orders: rows, p_idempotency_key: w.crypto.randomUUID() });
+  if (["weekend", "monday", "states"].includes(scene)) {
+    const s125 = w.__mock.db.sheets.find((s) => s.sheet_number === "125");
+    const hours = scene === "monday" ? 82 : scene === "states" ? 34 + 7 * 24 : 34;
+    const saturday = new Date(Date.parse(s125.closes_at) + hours * 3600000); // Friday 00:00 + 34h = Saturday 10:00 (+82h = Monday; +1 week = next Saturday)
+    w.__mock.setNow(saturday.toISOString());
+  }
+  await w.ModaatApp.refresh(); await sleep(700);
+  w.location.hash = "#/sheets"; await sleep(500);
+  if (scene === "monday" || scene === "states") { d.querySelector('[data-sheets-filter="all"]').click(); await sleep(600); } // let the chip colour transition finish
+  if (scene === "states") { const sort = d.querySelector("#sheets-sort"); set(sort, "number:asc"); await sleep(80); }
+  if (scene === "add" || scene === "add-errors" || scene === "add-20") {
+    d.querySelector("#sheets-add").click(); await sleep(250);
+    if (scene === "add-20") {
+      set(d.querySelector("#sheets-add-form").elements.count, "20"); await sleep(120);
+      const card = d.querySelector("#sheets-add-modal .modal-card");
+      card.scrollTop = card.scrollHeight / 2; await sleep(80);
+    }
+    if (scene === "add-errors") {
+      const form = d.querySelector("#sheets-add-form");
+      set(form.elements.start, "127"); await sleep(80);
+      set(form.elements.count, "6"); await sleep(80);
+      const rows = d.querySelectorAll("#sheets-add-rows tr");
+      set(rows[4].querySelector('[data-field="description"]'), "גיליון חנוכה");
+      set(rows[5].querySelector('[data-field="closes"]'), `${rows[5].querySelector('[data-field="publication"]').value}T12:00`);
+      const pub = rows[3].querySelector('[data-field="publication"]').value;
+      const dayAfter = new Date(Date.parse(`${pub}T12:00:00Z`) + 86400000).toISOString().slice(0, 10);
+      set(rows[3].querySelector('[data-field="closes"]'), `${dayAfter}T00:00`); // after the publication day: rejected
+      await sleep(100);
+    }
+  }
+  w.scrollTo(0, 0);
+  document.title = "READY";
+};
+f.src = `/__test/app.html?session=1&business=1&sheets=2&t=${Math.random()}#/sheets`;
+</script></body></html>
