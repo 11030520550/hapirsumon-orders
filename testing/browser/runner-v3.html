@@ -195,7 +195,8 @@ async function run() {
   const sheetRows = $$("#sheets-body [data-sheet]").map((row) => row.dataset.sheet);
   check("R9 sheets list from real orders, newest number first; without the v2 model: no 'add sheets', no current-sheet line, no timeline column",
     sheetRows[0] === "130" && sheetRows.includes("124") && $("#sheets-status-note").hidden && $("#sheets-add").hidden && $("#sheets-banner-current").hidden
-    && $("#sheets-table").classList.contains("no-places") && text('#sheets-body [data-sheet="124"] .sheet-intake') === "פתוח להזמנות", sheetRows.join("|"));
+    && $("#sheets-table").classList.contains("no-places") && text('#sheets-body [data-sheet="124"] .sheet-intake') === "פתוח להזמנות"
+    && $("#sheets-table .sheet-col-date").offsetParent === null && $('#sheets-body [data-sheet="124"] .sheet-row-date').offsetParent === null, sheetRows.join("|"));
   $('[data-sheet-view="124"]').click(); await sleep(250);
   const orderRows = () => $$("#sheet-orders-table tr[data-order]");
   check("R10 sheet page: address, 10 orders, summary", page() === "sheet" && w.location.hash === "#/sheet/124" && orderRows().length === 10 && text("#sheet-count") === "10");
