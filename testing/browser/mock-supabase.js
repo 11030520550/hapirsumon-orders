@@ -420,4 +420,13 @@
     get signInCalls() { return state.signInCalls || 0; }
   };
   window.supabase = { createClient: () => client };
+
+  // ?bannerdraft=1 — local design review only: shows the owner's generated concept (a draft, not an approved asset,
+  // kept git-ignored in design-references/inspiration/) in the sheets banner's photo area. Never part of the site.
+  if (params.get("bannerdraft") === "1") {
+    window.addEventListener("DOMContentLoaded", () => {
+      const css = [...document.styleSheets].find((sheet) => (sheet.href || "").includes("styles.css"));
+      css?.insertRule('.sheets-banner-photo { background-image: url("/design-references/inspiration/zip-2026-11-19/generated-concept/concept-newspapers.png"); }', css.cssRules.length);
+    });
+  }
 })();

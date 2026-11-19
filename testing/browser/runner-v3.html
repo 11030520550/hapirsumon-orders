@@ -375,11 +375,11 @@ async function run() {
     product_id: "44444444-4444-4444-8444-444444444444", publication_date: seeded(sheet).publication_date, cash_amount_before_vat: cash, credits_used: credits, payment_status: paid ? "paid" : "pending", due_on: null, notes }] });
   const close125 = Date.parse(seeded("125").closes_at);
   const at = async (hoursFromClosing) => { w.__mock.setNow(new Date(close125 + hoursFromClosing * 3600000).toISOString()); await reloadBoard(); };
-  const dmy = (iso) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
+  const dmy = (iso) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}.${iso.slice(0, 4)}`;
   await at(-30); // Wednesday 18:00, sheet 125 still open
-  check("G1 one banner names the current sheet (125, its date); one continuous list of every sheet, newest number first: 128/127 future, 126 next, 125 current, 124 historical; add button shown",
-    currentNo() === "125" && text("#sheets-banner-current").startsWith("הגיליון הנוכחי") && text("#sheets-banner-current .sheets-banner-date").startsWith("יום ראשון")
-    && listRows().join() === "128,127,126,125,124" && placeOf("128") === "עתידי" && placeOf("127") === "עתידי" && placeOf("126") === "הגיליון הבא"
+  check("G1 one banner names the current sheet (125, 'יום ראשון · DD.MM.YYYY'); one continuous list in working order: 125 current, 126 next, 127/128 future (nearest first), 124 historical; add button shown",
+    currentNo() === "125" && text("#sheets-banner-current").startsWith("הגיליון הנוכחי") && text("#sheets-banner-current .sheets-banner-date") === `יום ראשון · ${dmy(seeded("125").publication_date)}`
+    && listRows().join() === "125,126,127,128,124" && placeOf("128") === "עתידי" && placeOf("127") === "עתידי" && placeOf("126") === "הגיליון הבא"
     && placeOf("125") === "הגיליון הנוכחי" && placeOf("124") === "היסטורי" && sheetRow("127").textContent.includes("גיליון חג") && !$("#sheets-add").hidden,
     `${currentNo()} | ${listRows()} | ${listRows().map(placeOf)}`);
   // Friday 00:00 (the moment in the model) is shown as "until Thursday 23:59"; the moment itself is unchanged.
@@ -396,8 +396,8 @@ async function run() {
   const sunday = [currentNo(), placeOf("125"), placeNote("125")];
   await at(82); // Monday 10:00
   const pub125 = seeded("125").publication_date;
-  check("G15 timeline: on Sunday 125 is current and 'מתפרסם היום'; from Monday 125 is 'פורסם' with its date, 126 is current, 127 next; 124 historical without a date",
-    sunday.join() === "125,הגיליון הנוכחי,מתפרסם היום" && currentNo() === "126" && placeOf("125") === "פורסם" && sheetRow("125").textContent.includes(dmy(pub125))
+  check("G15 timeline: on Sunday 125 is current and 'מתפרסם היום'; from Monday 125 is 'פורסם' with its date, 126 is current, 127 next; 124 historical without a date; list order 126, 127, 128, then published 125, then historical 124",
+    sunday.join() === "125,הגיליון הנוכחי,מתפרסם היום" && currentNo() === "126" && listRows().join() === "126,127,128,125,124" && placeOf("125") === "פורסם" && sheetRow("125").textContent.includes(dmy(pub125))
     && placeOf("126") === "הגיליון הנוכחי" && placeOf("127") === "הגיליון הבא" && placeOf("124") === "היסטורי" && sheetRow("124").textContent.includes("תאריך לא תועד"),
     JSON.stringify({ sunday, cur: currentNo(), places: listRows().map(placeOf) }));
   // Only "גיליון N" in the banner is a link: the title, the photo area and the background do nothing.
@@ -460,7 +460,7 @@ async function run() {
   await waitFor(() => !$("#sheets-add-modal").open, 3000); await sleep(400);
   check("G10 create: one save (double click safe) creates 129–131 open, with dates and the description; they appear in the list as future sheets open for orders",
     db().sheets.length === sheetsBefore + 3 && seeded("130").description === "לפני חג" && seeded("131").closes_at === w.__mock.jerusalemTime(`${addDaysT(firstNew, 12)}T12:00`)
-    && ["129", "130", "131"].every((n) => placeOf(n) === "עתידי" && intakeOf(n) === "פתוח להזמנות") && listRows()[0] === "131" && text("#toast").includes("נוצרו 3 גיליונות"),
+    && ["129", "130", "131"].every((n) => placeOf(n) === "עתידי" && intakeOf(n) === "פתוח להזמנות") && listRows().slice(0, 7).join() === "125,126,127,128,129,130,131" && text("#toast").includes("נוצרו 3 גיליונות"),
     `${db().sheets.length - sheetsBefore} created; toast: ${text("#toast")}`);
   $("#sheets-add").click(); await sleep(150);
   const start2 = addForm.elements.start.value;
@@ -569,12 +569,18 @@ async function run() {
     JSON.stringify({ widths, err: made.map((r) => r.error?.message).filter(Boolean) }));
   // The banner: title, subtitle and the current-sheet line; the photo slot is the licensed file only (no illustration, no frame).
   const photo = w.getComputedStyle($(".sheets-banner-photo"));
-  const bannerOk = text(".sheets-banner-title") === "הגיליונות שלנו" && text(".sheets-banner-sub") === "כל גיליונות הפרסומון, במקום אחד"
+  const bannerHeight = $(".sheets-banner").getBoundingClientRect().height;
+  const bannerOk = text(".sheets-banner-title") === "הגיליונות שלנו" && text(".sheets-banner-sub") === "כל גיליונות הפרסומון, במקום אחד." && bannerHeight >= 220 && bannerHeight <= 250
     && !$(".sheets-banner img") && /sheets-banner\.jpg/.test(photo.backgroundImage) && photo.borderTopWidth === "0px" && photo.backgroundSize === "cover"
     && $(".sheets-banner-photo").getBoundingClientRect().left <= $(".sheets-banner").getBoundingClientRect().left + 1
     && $(".sheets-banner-text").getBoundingClientRect().right >= $(".sheets-banner").getBoundingClientRect().right - 2;
   check("G16 banner composition: title 'הגיליונות שלנו' and the subtitle on the right; the photo area on the left uses only the licensed photo file (cover, never stretched out of proportion), with no illustration and no frame",
-    bannerOk, JSON.stringify({ bg: photo.backgroundImage.slice(-40), size: photo.backgroundSize }));
+    bannerOk, JSON.stringify({ bg: photo.backgroundImage.slice(-40), size: photo.backgroundSize, bannerHeight }));
+  // Editorial language: square corners on both sheets screens (banner, list frame, search, buttons, sheet summary, order table).
+  const squares = [".sheets-banner", ".sheets-list", ".sheets-search", "#sheets-add", ".sheets-banner-link", ".sheet-hero", ".sheet-orders", "#sheet-new-order", "#sheet-toggle-status", "#sheet-page-status .payment-select"]
+    .map((sel) => [sel, $(sel) ? w.getComputedStyle($(sel)).borderTopLeftRadius : "missing"]).filter(([, radius]) => radius !== "0px");
+  check("G23 square corners on the sheets screens: banner, list, search, buttons, the sheet's summary banner and table; statuses are words, not pills",
+    squares.length === 0, JSON.stringify(squares));
 
   // ===== deep link restored after login
   await load("session=1&business=1", "#/client/c-test-3");

@@ -6,6 +6,7 @@
 // Screenshot scenes for the sheets board (Mock only, fake data; nothing leaves the browser).
 //   ?scene=list | weekend | monday | states | add | add-errors | add-20 | demo   &w=<iframe width>   &h=<iframe height>
 // demo: the Mock demo newspaper (?demo=1: published, historical, current and future sheets); &page=sheet/125 opens one sheet.
+// &bannerdraft=1: the local, git-ignored concept image in the banner photo area (design review only).
 // weekend: the Mock server clock is moved to Saturday 10:00 (Israel), after sheet 125 closed for orders.
 // monday: Monday 10:00, sheet 125 already published.
 // states: Saturday after sheet 126 closed: 125 published, 126 closed for orders, 127 open (with orders), 128 empty, 124 historical.
@@ -70,5 +71,5 @@ f.onload = async () => {
   w.scrollTo(0, 0);
   document.title = "READY";
 };
-f.src = `/__test/app.html?session=1&business=1&sheets=2${scene === "demo" ? "&demo=1" : ""}&t=${Math.random()}#/sheets`;
+f.src = `/__test/app.html?session=1&business=1&sheets=2${scene === "demo" ? "&demo=1" : ""}${params.get("bannerdraft") === "1" ? "&bannerdraft=1" : ""}&t=${Math.random()}#/sheets`;
 </script></body></html>

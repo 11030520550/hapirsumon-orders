@@ -506,7 +506,9 @@
     const label = `יום ${WEEKDAYS[weekdayOf(day)]} ${dayMonth(day)}, ${midnight ? "23:59" : local.time}`;
     return { label, title: `הזמנות מתקבלות עד ${label}. מועד הסגירה במערכת: ${closingWords(closesAt).title} (שעון ישראל).` };
   }
-  const weekdayDate = (publication) => `יום ${WEEKDAYS[weekdayOf(publication)]}, ${displayDate(publication)}`;
+  // Sheets screens: "יום ראשון · 22.11.2026" (the owner's editorial format; search also accepts 22/11).
+  const dotDate = (iso) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}.${iso.slice(0, 4)}`;
+  const weekdayDate = (publication) => `יום ${WEEKDAYS[weekdayOf(publication)]} · ${dotDate(publication)}`;
 
   // One short line under the status: what happens next for this sheet (text is plain; callers escape it).
   function sheetNote(sheet) {
@@ -559,11 +561,26 @@
     line.hidden = !state.loaded || state.sheetModel !== "v2";
     if (line.hidden) { line.innerHTML = ""; return; }
     const { current } = sections;
+    // Three lines: the kicker, the link (the only clickable words), the publication day and date.
     line.innerHTML = current
-      ? `<span class="sheets-banner-kicker">הגיליון הנוכחי</span><span class="sheets-banner-sep" aria-hidden="true">·</span>`
+      ? `<span class="sheets-banner-kicker">הגיליון הנוכחי</span>`
         + `<button class="sheets-banner-link" type="button" data-sheet-view="${escapeHtml(current.number)}">גיליון ${escapeHtml(current.number)}</button>`
         + `<span class="sheets-banner-date">${escapeHtml(weekdayDate(current.publication))}</span>`
-      : '<span class="sheets-banner-kicker">הגיליון הנוכחי</span><span class="sheets-banner-sep" aria-hidden="true">·</span><span class="sheets-banner-none">אין גיליון מתוכנן לפרסום הקרוב</span>';
+      : '<span class="sheets-banner-kicker">הגיליון הנוכחי</span><span class="sheets-banner-none">אין גיליון מתוכנן לפרסום הקרוב</span>';
+  }
+
+  // The working order of the list (one list, no sub-headings), from the timeline rather than the number:
+  // current → next → other future sheets (nearest first) → published (newest first) → historical → the rest.
+  // A sheet whose date passed while still open sits after the future ones. Without dates (v1): newest number first.
+  const PLACE_ORDER = { current: 0, next: 1, future: 2, past: 3, published: 4, historical: 5, undated: 6, none: 6 };
+  function sortSheetRows(list, sections) {
+    return list.map((sheet) => ({ sheet, place: sheetPlace(sheet, sections).key })).sort((a, b) => {
+      const byPlace = PLACE_ORDER[a.place] - PLACE_ORDER[b.place];
+      if (byPlace) return byPlace;
+      const pa = a.sheet.publication, pb = b.sheet.publication;
+      const byDate = pa && pb ? (a.place === "future" ? pa.localeCompare(pb) : pb.localeCompare(pa)) : 0;
+      return byDate || compareSheets(a.sheet.number, b.sheet.number);
+    }).map((item) => item.sheet);
   }
 
   // One row per sheet: number, publication date, place on the timeline, order intake. No money in the list.
@@ -606,9 +623,8 @@
     table.classList.toggle("no-places", !v2);
     const query = $("#sheets-search").value.trim().toLocaleLowerCase("he");
     const matches = (sheet) => !query || sheet.number.includes(query) || sheet.description.toLocaleLowerCase("he").includes(query)
-      || (sheet.publication && `${displayDate(sheet.publication)} ${WEEKDAYS[weekdayOf(sheet.publication)]}`.includes(query));
-    // One continuous list, newest number first: future sheets, the current one, then the published ones.
-    const rows = board.filter(matches).sort((left, right) => compareSheets(left.number, right.number));
+      || (sheet.publication && `${displayDate(sheet.publication)} ${dotDate(sheet.publication)} ${WEEKDAYS[weekdayOf(sheet.publication)]}`.includes(query));
+    const rows = sortSheetRows(board.filter(matches), sections);
     body.innerHTML = rows.map((sheet) => sheetRowMarkup(sheet, sections)).join("");
     table.hidden = rows.length === 0;
     emptyBox.hidden = rows.length !== 0;
