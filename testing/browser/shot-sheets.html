@@ -4,7 +4,8 @@
 <iframe id="f"></iframe>
 <script>
 // Screenshot scenes for the sheets board (Mock only, fake data; nothing leaves the browser).
-//   ?scene=list | weekend | monday | states | add | add-errors | add-20   &w=<iframe width>   &h=<iframe height>
+//   ?scene=list | weekend | monday | states | add | add-errors | add-20 | demo   &w=<iframe width>   &h=<iframe height>
+// demo: the Mock demo newspaper (?demo=1: published, historical, current and future sheets); &page=sheet/125 opens one sheet.
 // weekend: the Mock server clock is moved to Saturday 10:00 (Israel), after sheet 125 closed for orders.
 // monday: Monday 10:00, sheet 125 already published.
 // states: Saturday after sheet 126 closed: 125 published, 126 closed for orders, 127 open (with orders), 128 empty, 124 historical.
@@ -37,7 +38,7 @@ f.onload = async () => {
     ["c-test-8", [order("126", 640, null, false)]],
     ...(scene === "states" ? [["c-test-3", [order("127", 900, null, false)]], ["c-test-6", [order("127", 450, null, true)]]] : [])
   ];
-  for (const [client, rows] of batches) await sb.rpc("create_orders_batch", { p_client_id: client, p_orders: rows, p_idempotency_key: w.crypto.randomUUID() });
+  if (scene !== "demo") for (const [client, rows] of batches) await sb.rpc("create_orders_batch", { p_client_id: client, p_orders: rows, p_idempotency_key: w.crypto.randomUUID() });
   if (["weekend", "monday", "states"].includes(scene)) {
     const s125 = w.__mock.db.sheets.find((s) => s.sheet_number === "125");
     const hours = scene === "monday" ? 82 : scene === "states" ? 34 + 7 * 24 : 34;
@@ -45,7 +46,7 @@ f.onload = async () => {
     w.__mock.setNow(saturday.toISOString());
   }
   await w.ModaatApp.refresh(); await sleep(700);
-  w.location.hash = "#/sheets"; await sleep(500);
+  w.location.hash = `#/${params.get("page") || "sheets"}`; await sleep(500);
   if (scene === "monday" || scene === "states") { d.querySelector('[data-sheets-filter="all"]').click(); await sleep(600); } // let the chip colour transition finish
   if (scene === "states") { const sort = d.querySelector("#sheets-sort"); set(sort, "number:asc"); await sleep(80); }
   if (scene === "add" || scene === "add-errors" || scene === "add-20") {
@@ -71,5 +72,5 @@ f.onload = async () => {
   w.scrollTo(0, 0);
   document.title = "READY";
 };
-f.src = `/__test/app.html?session=1&business=1&sheets=2&t=${Math.random()}#/sheets`;
+f.src = `/__test/app.html?session=1&business=1&sheets=2${scene === "demo" ? "&demo=1" : ""}&t=${Math.random()}#/sheets`;
 </script></body></html>

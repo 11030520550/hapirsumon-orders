@@ -163,10 +163,6 @@
     return [...groups.values()].sort((left, right) => compareSheets(left.sheet, right.sheet));
   }
 
-  function sheetStatusPill(sheetNumber) {
-    return sheetClosed(sheetNumber) ? pill("neutral", "סגור") : pill("open", "פתוח");
-  }
-
   function activePackage(clientId, today = localDateValue()) {
     return state.packages.find((item) => item.client_id === clientId && item.status === "active"
       && item.starts_on <= today && today <= item.ends_on) || null;
@@ -447,7 +443,8 @@
       const closed = sheetRowClosed(row);
       const publication = row?.publication_date || null;
       // Closed for orders is not the same as published: the next sheet is closed from Friday until it comes out on Sunday.
-      const phase = !closed ? "open" : !publication ? "closed" : publication < today ? "published" : publication === today ? "today" : "awaiting";
+      const phase = !closed ? "open" : !publication ? (row?.created_via === "backfill" ? "historical" : "closed")
+        : publication < today ? "published" : publication === today ? "today" : "awaiting";
       return {
         number: sheetNumber, row, publication, closesAt: row?.closes_at || null, description: row?.description || "",
         closed, phase, closedKind: !closed ? null : row.status === "closed" ? "manual" : "deadline",
@@ -469,140 +466,196 @@
     return { next: dated[0] || null, openNext: open[0] || null, planned: dated, horizon: dated.length ? dated[dated.length - 1] : null };
   }
 
-  // Status shown per sheet; rank = order when sorting by status.
+  // Status of a sheet. Closed for orders is not "published": the sheet of the week stays the current sheet from
+  // its closing until it comes out. A historical sheet (closed when the sheets model was installed, no publication
+  // date) is shown as such, never as if its date or file were known.
   const SHEET_PHASES = {
-    open: { rank: 0, tone: "open", label: "פתוח" },
-    awaiting: { rank: 1, tone: "neutral", label: "סגור להזמנות" },
-    today: { rank: 2, tone: "neutral", label: "מתפרסם היום" },
-    published: { rank: 3, tone: "paid", label: "פורסם" },
-    closed: { rank: 4, tone: "neutral", label: "סגור" }
+    open: { tone: "open", label: "פתוח להזמנות" },
+    awaiting: { tone: "neutral", label: "סגור להזמנות" },
+    today: { tone: "neutral", label: "מתפרסם היום" },
+    published: { tone: "paid", label: "פורסם" },
+    historical: { tone: "neutral", label: "היסטורי" },
+    closed: { tone: "neutral", label: "סגור" }
   };
-  const SHEET_FILTERS = {
-    upcoming: (sheet) => sheet.upcoming, open: (sheet) => !sheet.closed, closed: (sheet) => sheet.closed,
-    due: (sheet) => sheet.pending > 0, all: () => true
-  };
-  const SHEET_SORTS = {
+  // The archive (published / historical / closed sheets) keeps its own filter and sort.
+  const ARCHIVE_FILTERS = { all: () => true, due: (sheet) => sheet.pending > 0, undated: (sheet) => !sheet.publication };
+  const ARCHIVE_SORTS = {
     number: (left, right) => compareSheetNumbers(left.number, right.number),
     publication: (left, right) => nullsLast(left.publication, right.publication, (a, b) => a.localeCompare(b)),
-    closes: (left, right) => nullsLast(left.closesAt, right.closesAt, (a, b) => Date.parse(a) - Date.parse(b)),
-    status: (left, right) => SHEET_PHASES[left.phase].rank - SHEET_PHASES[right.phase].rank,
     orders: (left, right) => left.orders - right.orders, billed: (left, right) => left.billed - right.billed,
-    paid: (left, right) => left.paid - right.paid, pending: (left, right) => left.pending - right.pending,
-    credits: (left, right) => left.credits - right.credits
+    pending: (left, right) => left.pending - right.pending
   };
   function nullsLast(left, right, compare) {
     if (left == null || right == null) return left == null && right == null ? 0 : left == null ? 1 : -1;
     return compare(left, right);
   }
-  // Defaults: the planning view (not yet published, nearest first) when sheets have dates; otherwise all, newest first.
-  const sheetFilter = () => state.sheetFilter || (state.sheetModel === "v2" ? "upcoming" : "all");
-  function sheetSort() {
-    if (state.sheetSort) return state.sheetSort;
-    return sheetFilter() === "upcoming" ? { key: "number", dir: "asc" } : { key: "number", dir: "desc" };
-  }
-  function sortSheets(list) {
-    const { key, dir } = sheetSort();
-    const compare = SHEET_SORTS[key] || SHEET_SORTS.number;
+  const archiveFilter = () => (ARCHIVE_FILTERS[state.sheetFilter] ? state.sheetFilter : "all");
+  const archiveSort = () => (state.sheetSort && ARCHIVE_SORTS[state.sheetSort.key] ? state.sheetSort : { key: "number", dir: "desc" });
+  function sortArchive(list) {
+    const { key, dir } = archiveSort();
     const sign = dir === "asc" ? 1 : -1;
-    // nulls stay last in both directions; ties fall back to the sheet number
+    // undated sheets stay last in both directions; ties fall back to the newest number first
     return list.sort((left, right) => {
-      const nullish = (sheet) => (key === "publication" && !sheet.publication) || (key === "closes" && !sheet.closesAt);
-      if (nullish(left) !== nullish(right)) return nullish(left) ? 1 : -1;
-      return sign * compare(left, right) || compareSheetNumbers(left.number, right.number);
+      if (key === "publication" && !left.publication !== !right.publication) return left.publication ? -1 : 1;
+      return sign * ARCHIVE_SORTS[key](left, right) || compareSheetNumbers(right.number, left.number);
     });
   }
 
-  // ---------- sheets list (one calm row per sheet; every detail lives on the sheet page) ----------
-  // "שישי 27/11, 00:00" and, for 00:00, the plain-language meaning (midnight between Thursday and Friday).
+  // The three areas of the sheets screen:
+  //   current  — the sheet of the week: the nearest sheet that is not yet published (open or already closed for orders);
+  //   upcoming — every other sheet that is not yet published, nearest first;
+  //   archive  — closed sheets whose publication day has passed, and closed sheets without a date (historical).
+  // Without dated sheets (model v1 / none) there is no "sheet of the week": open sheets and closed sheets only.
+  function sheetSections(board) {
+    const today = jerusalemLocal(serverMs()).date;
+    const marks = sheetHighlights(board);
+    const current = state.sheetModel === "v2" ? marks.next : null;
+    const archived = (sheet) => sheet.closed && (!sheet.publication || sheet.publication < today);
+    const rest = board.filter((sheet) => sheet !== current);
+    const upcoming = rest.filter((sheet) => !archived(sheet)).sort(state.sheetModel === "v2"
+      ? (left, right) => nullsLast(left.publication, right.publication, (a, b) => a.localeCompare(b)) || compareSheetNumbers(left.number, right.number)
+      : (left, right) => compareSheetNumbers(right.number, left.number));
+    return { ...marks, current, upcoming, archive: rest.filter(archived) };
+  }
+
+  // "שישי 27/11 · 00:00" and, for 00:00, the plain-language meaning (midnight between Thursday and Friday).
   function closingWords(closesAt) {
     const local = jerusalemLocal(Date.parse(closesAt));
     const day = weekdayOf(local.date);
     const label = `${WEEKDAYS[day]} ${dayMonth(local.date)} · ${local.time}`;
     return { label, title: local.time === "00:00" ? `${label} — חצות שבין יום ${WEEKDAYS[(day + 6) % 7]} ליום ${WEEKDAYS[day]}` : label };
   }
-  function sheetStatusLabel(sheet) {
-    const phase = !state.sheetsInstalled ? SHEET_PHASES.open : SHEET_PHASES[sheet.phase];
-    return pill(phase.tone, phase.label);
+  // The closing moment stored in the model is unchanged (default: Friday 00:00, Israel time). People read it as the
+  // last minute in which an order is still accepted: "Thursday 23:59". Only the wording changes, never the moment.
+  function orderDeadline(closesAt) {
+    const local = jerusalemLocal(Date.parse(closesAt));
+    const midnight = local.time === "00:00";
+    const day = midnight ? shiftDate(local.date, -1) : local.date;
+    const label = `יום ${WEEKDAYS[weekdayOf(day)]} ${dayMonth(day)}, ${midnight ? "23:59" : local.time}`;
+    return { label, title: `הזמנות מתקבלות עד ${label}. מועד הסגירה במערכת: ${closingWords(closesAt).title} (שעון ישראל).` };
   }
-  // One short line under the status: what happens next for this sheet.
-  function sheetStatusNote(sheet) {
+  const weekdayDate = (publication) => `יום ${WEEKDAYS[weekdayOf(publication)]}, ${displayDate(publication)}`;
+
+  // One short line under the status: what happens next for this sheet (text is plain; callers escape it).
+  function sheetNote(sheet) {
     if (!state.sheetsInstalled) return { text: "", title: "" };
-    const why = sheet.closedKind === "manual" ? `נסגר ידנית${sheet.row?.status_reason ? `: ${sheet.row.status_reason}` : ""}` : "";
+    const manual = sheet.closedKind === "manual" && sheet.phase !== "historical"
+      ? `נסגר ידנית${sheet.row?.status_reason ? `: ${sheet.row.status_reason}` : ""}` : "";
     if (sheet.phase === "open") {
       if (!sheet.closesAt) return { text: "", title: "פתוח להזמנות" };
       const left = Date.parse(sheet.closesAt) - serverMs();
-      const when = closingWords(sheet.closesAt);
-      return { text: left < 7 * 86400000 ? `נסגר ${untilText(left)}` : `עד ${when.label}`, title: `פתוח להזמנות עד ${when.title}`, soon: left < 86400000 };
+      const deadline = orderDeadline(sheet.closesAt);
+      return { text: `הזמנות עד ${deadline.label}`, until: untilText(left), title: deadline.title, soon: left < 86400000 };
     }
-    if (sheet.phase === "awaiting") return { text: `יוצא לאור ביום ${WEEKDAYS[weekdayOf(sheet.publication)]}`, title: `סגור להזמנות, עדיין לא פורסם. ${why || "נסגר במועד הסגירה"}.` };
-    if (sheet.phase === "today") return { text: "יוצא לאור היום", title: why || "נסגר במועד הסגירה" };
-    if (sheet.phase === "published") return { text: `יצא לאור ב-${dayMonth(sheet.publication)}`, title: `פורסם ב-${displayDate(sheet.publication)}` };
-    return { text: why ? "נסגר ידנית" : "", title: why || "סגור" };
+    if (sheet.phase === "awaiting") return { text: `יוצא לאור ביום ${WEEKDAYS[weekdayOf(sheet.publication)]}`, title: manual || "נסגר להזמנות במועד הסגירה" };
+    if (sheet.phase === "today") return { text: "יוצא לאור היום", title: manual };
+    if (sheet.phase === "published") return { text: `יצא לאור ב-${displayDate(sheet.publication)}`, title: "" };
+    if (sheet.phase === "historical") return { text: "מידע חלקי", title: HISTORICAL_NOTE };
+    return { text: manual, title: manual || "סגור" };
+  }
+  const HISTORICAL_NOTE = "גיליון מלפני מעבר המערכת לניהול גיליונות: תאריך הפרסום וקובץ העיתון לא תועדו. ההזמנות והסכומים מחושבים מההזמנות השמורות.";
+
+  const plural = (count, one, many) => `${number.format(count)} ${count === 1 ? one : many}`;
+  function figure(value, label, tone = "") {
+    return `<span class="sheet-figure${tone}"><span class="sheet-figure-value">${escapeHtml(value)}</span><span class="sheet-figure-label">${escapeHtml(label)}</span></span>`;
   }
 
-  function sheetRowMarkup(sheet, marks) {
+  // Area A: the sheet of the week, identifiable at a glance.
+  function renderCurrentSheet(sections) {
+    const box = $("#sheets-current");
+    box.hidden = state.sheetModel !== "v2";
+    if (box.hidden) return;
+    const { current, openNext } = sections;
+    if (!current) {
+      box.innerHTML = `<div class="sheet-feature is-empty">
+        <span class="sheet-feature-paper" aria-hidden="true"></span>
+        <span class="sheet-feature-head"><span class="sheet-feature-kicker">הגיליון של השבוע</span>
+          <strong class="sheet-feature-none">אין גיליון מתוכנן לפרסום הקרוב</strong>
+          <span class="sheet-feature-hint">אפשר ליצור את הגיליונות הקרובים מראש בלחיצה על "הוספת גיליונות".</span></span>
+      </div>`;
+      return;
+    }
+    const n = escapeHtml(current.number);
+    const phase = SHEET_PHASES[current.phase];
+    const note = sheetNote(current);
+    const figures = current.orders
+      ? figure(number.format(current.orders), current.orders === 1 ? "הזמנה" : "הזמנות")
+        + figure(number.format(current.clients.size), current.clients.size === 1 ? "לקוח" : "לקוחות")
+        + figure(money.format(current.billed), 'סך חיובים כולל מע"מ')
+        + (current.pending > 0 ? figure(money.format(current.pending), "יתרה לתשלום", " is-due") : figure("✓", "אין יתרה פתוחה", " is-settled"))
+      : '<span class="sheet-feature-quiet">עדיין אין הזמנות בגיליון הזה</span>';
+    // After the closing, new orders go to another sheet: say which one (or that none is open).
+    let next = "";
+    if (current.closed && openNext) {
+      const deadline = orderDeadline(openNext.closesAt);
+      next = `<button class="sheet-feature-next" type="button" data-sheet-view="${escapeHtml(openNext.number)}" title="${escapeHtml(deadline.title)}">
+        <span>הזמנות חדשות מתקבלות לגיליון <strong>${escapeHtml(openNext.number)}</strong></span><span class="sheet-feature-next-meta">עד ${escapeHtml(deadline.label)}</span><span aria-hidden="true">‹</span></button>`;
+    } else if (current.closed) {
+      next = '<p class="sheet-feature-next is-missing">אין כרגע גיליון פתוח להזמנות חדשות.</p>';
+    }
+    box.innerHTML = `<div class="sheet-feature${current.closed ? " is-closed" : ""}">
+      <button class="sheet-feature-main" type="button" data-sheet="${n}" data-sheet-view="${n}">
+        <span class="sheet-feature-paper" aria-hidden="true"></span>
+        <span class="sheet-feature-head">
+          <span class="sheet-feature-kicker">הגיליון של השבוע</span>
+          <span class="sheet-feature-title">גיליון <span class="sheet-feature-no">${n}</span></span>
+          <span class="sheet-feature-date">${escapeHtml(weekdayDate(current.publication))}</span>
+          ${current.description ? `<span class="sheet-feature-desc">${escapeHtml(current.description)}</span>` : ""}
+          <span class="sheet-feature-status"${note.title ? ` title="${escapeHtml(note.title)}"` : ""}><span class="sheet-status-label">${pill(phase.tone, phase.label)}</span>${note.text ? `<span class="sheet-feature-note${note.soon ? " is-soon" : ""}">${escapeHtml(note.text)}${note.until ? ` · ${escapeHtml(note.until)}` : ""}</span>` : ""}</span>
+        </span>
+        <span class="sheet-feature-figures">${figures}</span>
+        <span class="sheet-feature-go">לדף הגיליון <span aria-hidden="true">‹</span></span>
+      </button>
+      ${next}
+    </div>`;
+  }
+
+  // Area B: future sheets — one compact line each (number, date, status, orders). Money stays on the sheet page.
+  function upcomingMarkup(sheet) {
     const n = escapeHtml(sheet.number);
-    const tags = [];
-    if (marks.next === sheet.number) tags.push('<span class="sheet-tag is-next">הבא לפרסום</span>');
-    if (marks.openNext === sheet.number) tags.push('<span class="sheet-tag is-open">פתוח להזמנות</span>');
-    const rowClass = ["sheet-row", tags.length ? "is-marked" : "", sheet.closed ? "is-closed" : "", sheet.orders === 0 ? "is-empty" : ""].filter(Boolean).join(" ");
-    const note = sheetStatusNote(sheet);
+    const phase = state.sheetsInstalled ? SHEET_PHASES[sheet.phase] : null;
+    const note = sheetNote(sheet);
+    const noteText = sheet.phase === "open" && sheet.closesAt ? `עד ${orderDeadline(sheet.closesAt).label}` : note.text;
     const date = sheet.publication
-      ? `<span class="sheet-row-day">יום ${escapeHtml(WEEKDAYS[weekdayOf(sheet.publication)])}</span><span class="sheet-row-dmy">${escapeHtml(displayDate(sheet.publication))}</span>`
-      : `<span class="sheet-row-day">פרסום</span><span class="sheet-row-dmy is-quiet">ללא תאריך</span>`;
-    const orders = sheet.orders
-      ? `<span class="sheet-row-figure">${escapeHtml(number.format(sheet.orders))}</span><span class="sheet-row-caption">${sheet.orders === 1 ? "הזמנה" : "הזמנות"} · ${escapeHtml(number.format(sheet.clients.size))} ${sheet.clients.size === 1 ? "לקוח" : "לקוחות"}</span>`
-      : `<span class="sheet-row-caption is-quiet">עדיין אין הזמנות</span>`;
-    let due = "";
-    if (sheet.pending > 0) due = `<span class="sheet-row-caption">יתרה לתשלום</span><span class="sheet-row-money">${escapeHtml(money.format(sheet.pending))}</span>`;
-    else if (sheet.orders) due = `<span class="sheet-row-caption is-settled">אין יתרה פתוחה</span>`;
-    return `<li><button class="${rowClass}" type="button" data-sheet="${n}" data-sheet-view="${n}">
-      <span class="sheet-row-art" aria-hidden="true"><span class="sheet-row-paper"></span></span>
-      <span class="sheet-row-id">
-        <span class="sheet-row-title">גיליון <span class="sheet-row-no">${n}</span></span>
-        ${tags.length ? `<span class="sheet-row-tags">${tags.join("")}</span>` : ""}
-        ${sheet.description ? `<span class="sheet-row-desc" title="${escapeHtml(sheet.description)}">${escapeHtml(sheet.description)}</span>` : ""}
-      </span>
-      <span class="sheet-row-date">${date}</span>
-      <span class="sheet-row-status"${note.title ? ` title="${escapeHtml(note.title)}"` : ""}><span class="sheet-status-label">${sheetStatusLabel(sheet)}</span>${note.text ? `<span class="sheet-row-note${note.soon ? " is-soon" : ""}">${escapeHtml(note.text)}</span>` : ""}</span>
-      <span class="sheet-row-orders">${orders}</span>
-      <span class="sheet-row-due">${due}</span>
-      <span class="sheet-row-go" aria-hidden="true">‹</span>
-      <span class="sr-only">פתיחת הגיליון</span>
+      ? `<span class="sheet-line-day">יום ${escapeHtml(WEEKDAYS[weekdayOf(sheet.publication)])}</span><span class="sheet-line-dmy">${escapeHtml(displayDate(sheet.publication))}</span>`
+      : '<span class="sheet-line-dmy is-quiet">ללא תאריך פרסום</span>';
+    return `<li><button class="sheet-line${sheet.closed ? " is-closed" : ""}${sheet.orders ? "" : " is-empty"}" type="button" data-sheet="${n}" data-sheet-view="${n}">
+      <span class="sheet-line-paper" aria-hidden="true"></span>
+      <span class="sheet-line-id"><span class="sheet-line-title">גיליון <span class="sheet-line-no">${n}</span></span>${sheet.description ? `<span class="sheet-line-desc" title="${escapeHtml(sheet.description)}">${escapeHtml(sheet.description)}</span>` : ""}</span>
+      <span class="sheet-line-date">${date}</span>
+      <span class="sheet-line-status"${note.title ? ` title="${escapeHtml(note.title)}"` : ""}>${phase ? `<span class="sheet-dot is-${phase.tone}" aria-hidden="true"></span><span class="sheet-status-label">${escapeHtml(phase.label)}</span>` : ""}${noteText ? `<span class="sheet-line-note${note.soon ? " is-soon" : ""}">${escapeHtml(noteText)}</span>` : ""}</span>
+      <span class="sheet-line-orders${sheet.orders ? "" : " is-quiet"}">${escapeHtml(sheet.orders ? plural(sheet.orders, "הזמנה", "הזמנות") : "עדיין אין הזמנות")}</span>
+      <span class="sheet-line-go" aria-hidden="true">‹</span>
     </button></li>`;
   }
 
-  // The week's reference points, as one quiet line above the list (not inside the banner).
-  function renderSheetRibbon(board) {
-    const ribbon = $("#sheets-ribbon");
-    const { next, openNext, planned, horizon } = sheetHighlights(board);
-    // Without dated sheets (model v1, or nothing planned yet) the reference points do not exist.
-    ribbon.hidden = state.sheetModel !== "v2";
-    if (ribbon.hidden) return;
-    const today = jerusalemLocal(serverMs()).date;
-    // meta is already escaped by the caller
-    const slot = (label, sheet, meta, tone = "", value = sheet ? `גיליון ${sheet.number}` : "—") => sheet
-      ? `<button class="ribbon-slot" type="button" data-sheet-view="${escapeHtml(sheet.number)}"><span class="ribbon-label">${escapeHtml(label)}</span><span class="ribbon-value">${escapeHtml(value)}</span><span class="ribbon-meta${tone}">${meta}</span></button>`
-      : `<div class="ribbon-slot is-missing"><span class="ribbon-label">${escapeHtml(label)}</span><span class="ribbon-value">—</span><span class="ribbon-meta">${meta}</span></div>`;
-    let nextMeta = "אין גיליון עתידי עם תאריך";
-    if (next) {
-      const when = next.publication === today ? "היום" : `יום ${WEEKDAYS[weekdayOf(next.publication)]} ${dayMonth(next.publication)}`;
-      nextMeta = `${escapeHtml(when)} · ${next.closed ? "סגור להזמנות" : "פתוח להזמנות"}`;
-    }
-    let openMeta = "אין גיליון פתוח";
-    let openTone = "";
-    if (openNext) {
-      const left = Date.parse(openNext.closesAt) - serverMs();
-      const when = closingWords(openNext.closesAt);
-      openMeta = `<span title="${escapeHtml(when.title)}">נסגר ${escapeHtml(untilText(left))}</span>`;
-      if (left < 86400000) openTone = " is-soon";
-    }
-    // Planning horizon: until when sheets exist ahead (a prompt to add more in time).
-    const horizonMeta = horizon ? `${escapeHtml(number.format(planned.length))} ${planned.length === 1 ? "גיליון מתוכנן" : "גיליונות מתוכננים"}` : "אין גיליונות מתוכננים";
-    const horizonTone = planned.length > 0 && planned.length < 3 ? " is-soon" : "";
-    ribbon.innerHTML = slot("הבא לפרסום", next, nextMeta)
-      + slot("פתוח להזמנות", openNext, openMeta, openTone)
-      + slot("הלוח מתוכנן עד", horizon, horizonMeta, horizonTone, horizon ? displayDate(horizon.publication) : "—");
+  // Area C: the archive — one ledger line per sheet with its business summary.
+  function archiveMarkup(sheet) {
+    const n = escapeHtml(sheet.number);
+    const phase = state.sheetsInstalled ? SHEET_PHASES[sheet.phase] : null;
+    const note = sheetNote(sheet);
+    const date = sheet.publication
+      ? `<span class="sheet-row-day">יום ${escapeHtml(WEEKDAYS[weekdayOf(sheet.publication)])}</span><span class="sheet-row-dmy">${escapeHtml(displayDate(sheet.publication))}</span>`
+      : `<span class="sheet-row-dmy is-quiet">${state.sheetModel === "v2" ? "תאריך לא תועד" : "—"}</span>`;
+    const people = sheet.orders
+      ? `<span class="sheet-row-figure">${escapeHtml(plural(sheet.orders, "הזמנה", "הזמנות"))}</span><span class="sheet-row-caption">${escapeHtml(plural(sheet.clients.size, "לקוח", "לקוחות"))}</span>`
+      : '<span class="sheet-row-caption is-quiet">ללא הזמנות</span>';
+    const billed = sheet.billed > 0 ? `<span class="sheet-row-amount">${escapeHtml(money.format(sheet.billed))}</span>` : '<span class="sheet-row-caption is-quiet">—</span>';
+    let due = "";
+    if (sheet.pending > 0) due = `<span class="sheet-row-money">${escapeHtml(money.format(sheet.pending))}</span>`;
+    else if (sheet.orders) due = '<span class="sheet-row-caption is-settled">אין יתרה פתוחה</span>';
+    const status = phase ? `<span class="sheet-row-state is-${sheet.phase}"><span class="sheet-status-label">${escapeHtml(phase.label)}</span>${note.text && sheet.phase !== "published" ? `<span class="sheet-row-note">${escapeHtml(note.text)}</span>` : ""}</span>` : "";
+    return `<li><button class="sheet-row is-${sheet.phase}${sheet.orders ? "" : " is-empty"}" type="button" data-sheet="${n}" data-sheet-view="${n}">
+      <span class="sheet-row-paper" aria-hidden="true"></span>
+      <span class="sheet-row-id"><span class="sheet-row-title">גיליון <span class="sheet-row-no">${n}</span></span>${sheet.description ? `<span class="sheet-row-desc" title="${escapeHtml(sheet.description)}">${escapeHtml(sheet.description)}</span>` : ""}</span>
+      <span class="sheet-row-date" data-label="תאריך פרסום">${date}</span>
+      <span class="sheet-row-orders" data-label="הזמנות">${people}</span>
+      <span class="sheet-row-billed" data-label="סך חיובים">${billed}</span>
+      <span class="sheet-row-due" data-label="יתרה לתשלום">${due}</span>
+      <span class="sheet-row-status"${note.title ? ` title="${escapeHtml(note.title)}"` : ""}>${status}</span>
+      <span class="sheet-row-go" aria-hidden="true">‹</span>
+      <span class="sr-only">פתיחת הגיליון</span>
+    </button></li>`;
   }
 
   function listMessage() {
@@ -611,52 +664,85 @@
   }
 
   function renderSheetsPage() {
+    const v2 = state.sheetModel === "v2";
     $("#sheets-status-note").hidden = !state.loaded || state.sheetsInstalled;
-    $("#sheets-add").hidden = !(state.loaded && state.sheetModel === "v2");
-    const filter = sheetFilter();
-    const sort = sheetSort();
+    $("#sheets-add").hidden = !(state.loaded && v2);
+    const filter = archiveFilter();
+    const sort = archiveSort();
     for (const button of $$("#sheets-filter [data-sheets-filter]")) button.setAttribute("aria-pressed", String(button.dataset.sheetsFilter === filter));
     const sortSelect = $("#sheets-sort");
     const sortValue = `${sort.key}:${sort.dir}`;
     if (![...sortSelect.options].some((option) => option.value === sortValue)) sortSelect.insertAdjacentHTML("beforeend", `<option value="${escapeHtml(sortValue)}" data-extra>מיון מותאם</option>`);
     sortSelect.value = sortValue;
     const count = $("#sheets-count");
-    // Until the sheet statuses are loaded, an open/closed split (and "no sheets") would be a guess.
+    const upcomingSection = $("#sheets-upcoming-section");
+    const archiveSection = $("#sheets-archive-section");
+    // Until the sheet statuses are loaded, any split into current / future / published would be a guess.
     if (!state.loaded) {
+      $("#sheets-current").hidden = true;
+      upcomingSection.hidden = true;
+      archiveSection.hidden = false;
+      $("#sheets-ledger-head").hidden = true;
       $("#sheets-body").innerHTML = listMessage();
       $("#sheets-empty").hidden = true;
-      $("#sheets-ribbon").hidden = true;
       count.textContent = "";
       for (const seg of $$("#sheets-filter .seg-count")) seg.textContent = "";
       return;
     }
     const board = sheetBoard();
-    renderSheetRibbon(board);
-    const { next, openNext } = sheetHighlights(board);
-    for (const button of $$("#sheets-filter [data-sheets-filter]")) {
-      button.querySelector(".seg-count").textContent = number.format(board.filter(SHEET_FILTERS[button.dataset.sheetsFilter]).length);
-    }
+    const sections = sheetSections(board);
+    renderCurrentSheet(sections);
     const query = $("#sheets-search").value.trim().toLocaleLowerCase("he");
     const matches = (sheet) => !query || sheet.number.includes(query) || sheet.description.toLocaleLowerCase("he").includes(query)
       || (sheet.publication && `${displayDate(sheet.publication)} ${WEEKDAYS[weekdayOf(sheet.publication)]}`.includes(query));
-    const rows = sortSheets(board.filter((sheet) => SHEET_FILTERS[filter](sheet) && matches(sheet)));
-    const marks = { next: next?.number, openNext: openNext?.number };
-    $("#sheets-body").innerHTML = rows.map((sheet) => sheetRowMarkup(sheet, marks)).join("");
 
     const emptyBox = $("#sheets-empty");
+    if (board.length === 0) {
+      upcomingSection.hidden = true;
+      archiveSection.hidden = true;
+      emptyBox.hidden = false;
+      $("#sheets-empty-title").textContent = "עדיין אין גיליונות";
+      $("#sheets-empty-text").textContent = v2 ? "אפשר ליצור את הגיליונות הקרובים מראש בלחיצה על \"הוספת גיליונות\"." : "גיליון מופיע כאן כשיש בו לפחות הזמנה אחת.";
+      count.textContent = "";
+      return;
+    }
+
+    // B: future sheets (v1 / none: the open sheets)
+    const upcoming = sections.upcoming.filter(matches);
+    upcomingSection.hidden = !v2 && sections.upcoming.length === 0;
+    $("#sheets-upcoming-title").textContent = v2 ? "גיליונות עתידיים" : "גיליונות פתוחים";
+    const horizon = $("#sheets-horizon");
+    horizon.classList.toggle("is-soon", v2 && sections.planned.length > 0 && sections.planned.length < 3);
+    horizon.textContent = v2
+      ? (sections.horizon ? `${plural(sections.planned.length, "גיליון מתוכנן", "גיליונות מתוכננים")} · עד ${displayDate(sections.horizon.publication)}` : "אין גיליונות מתוכננים")
+      : plural(sections.upcoming.length, "גיליון", "גיליונות");
+    $("#sheets-upcoming").innerHTML = upcoming.map(upcomingMarkup).join("")
+      || `<li class="sheet-line-empty">${escapeHtml(query ? "אין גיליון עתידי שמתאים לחיפוש." : v2 ? "אין גיליונות עתידיים מעבר לגיליון של השבוע. אפשר להוסיף בלחיצה על \"הוספת גיליונות\"." : "אין גיליונות פתוחים.")}</li>`;
+
+    // C: the archive
+    archiveSection.hidden = false;
+    $("#sheets-archive-title").textContent = v2 ? "גיליונות שפורסמו" : "גיליונות סגורים";
+    for (const button of $$("#sheets-filter [data-sheets-filter]")) {
+      const size = sections.archive.filter(ARCHIVE_FILTERS[button.dataset.sheetsFilter]).length;
+      button.querySelector(".seg-count").textContent = number.format(size);
+      // "ללא תאריך" is offered only when such sheets exist
+      if (button.dataset.sheetsFilter === "undated") button.hidden = !v2 || (size === 0 && filter !== "undated");
+    }
+    const rows = sortArchive(sections.archive.filter((sheet) => ARCHIVE_FILTERS[filter](sheet) && matches(sheet)));
+    $("#sheets-body").innerHTML = rows.map(archiveMarkup).join("");
+    $("#sheets-ledger-head").hidden = rows.length === 0;
     emptyBox.hidden = rows.length !== 0;
     if (!rows.length) {
-      const nothing = board.length === 0;
-      $("#sheets-empty-title").textContent = nothing ? "עדיין אין גיליונות" : "לא נמצאו גיליונות";
-      $("#sheets-empty-text").textContent = nothing
-        ? (state.sheetModel === "v2" ? "אפשר ליצור את הגיליונות הקרובים מראש בלחיצה על \"הוספת גיליונות\"." : "גיליון מופיע כאן כשיש בו לפחות הזמנה אחת.")
-        : query ? "אין גיליון שמתאים לחיפוש. נסו מספר אחר או נקו את החיפוש." : "אין גיליונות בסינון הזה. בחרו \"הכול\" כדי לראות את כל הגיליונות.";
+      $("#sheets-empty-title").textContent = query ? "לא נמצאו גיליונות" : sections.archive.length === 0 ? (v2 ? "עדיין אין גיליונות שפורסמו" : "אין גיליונות סגורים") : "אין גיליונות בסינון הזה";
+      $("#sheets-empty-text").textContent = query ? "אין גיליון שמתאים לחיפוש. נסו מספר אחר או נקו את החיפוש."
+        : sections.archive.length === 0 ? (v2 ? "גיליון עובר לכאן אחרי יום הפרסום שלו." : "גיליון עובר לכאן כשהוא נסגר.") : "בחרו \"הכול\" כדי לראות את כל הגיליונות.";
     }
-    // Summary of the visible rows (the full breakdown is on each sheet's page).
+    // Summary of the visible archive rows (the full breakdown is on each sheet's page).
     const orders = rows.reduce((total, sheet) => total + sheet.orders, 0);
     const pending = rows.reduce((total, sheet) => total + sheet.pending, 0);
-    const shown = rows.length === board.length ? `${number.format(board.length)} גיליונות` : `${number.format(rows.length)} מתוך ${number.format(board.length)} גיליונות`;
-    count.textContent = [shown, rows.length ? `${number.format(orders)} הזמנות` : "", pending > 0 ? `יתרה פתוחה ${money.format(pending)}` : ""].filter(Boolean).join(" · ");
+    const size = sections.archive.length;
+    const shown = rows.length === size ? plural(size, "גיליון", "גיליונות") : `${number.format(rows.length)} מתוך ${plural(size, "גיליון", "גיליונות")}`;
+    count.textContent = [shown, rows.length ? plural(orders, "הזמנה", "הזמנות") : "", pending > 0 ? `יתרה פתוחה ${money.format(pending)}` : ""].filter(Boolean).join(" · ");
     count.dataset.orders = String(orders);
     count.dataset.pending = String(pending);
   }
@@ -857,46 +943,112 @@
     }
   }
 
+  // ---------- single sheet: header, financial summary, clients and their orders, publication archive ----------
+  // Columns appear only when they have a real source in the sheet's orders (no empty or invented columns).
+  // Ad-file and placement status, the final newspaper file and the published ads depend on the files stage.
+  function sheetOrderColumns(orders) {
+    return [
+      { key: "number", head: "מס׳ הזמנה" },
+      { key: "product", head: "מוצר / גודל מודעה" },
+      orders.some((order) => order.notes) && { key: "notes", head: "פירוט ההזמנה" },
+      orders.some((order) => order.billingMode !== "credits") && { key: "price", head: 'מחיר כולל מע"מ' },
+      orders.some((order) => order.billingMode === "credits") && { key: "credits", head: "קרדיטים" },
+      { key: "status", head: "סטטוס תשלום" },
+      orders.some((order) => order.billingMode !== "credits") && { key: "due", head: "יתרה לתשלום" }
+    ].filter(Boolean);
+  }
+  function sheetOrderCell(order, key) {
+    const credits = order.billingMode === "credits";
+    const due = !credits && order.paymentStatus !== "paid";
+    switch (key) {
+      case "number": return `<td class="order-number" data-label="מס׳ הזמנה">${escapeHtml(order.orderNumber ?? "—")}</td>`;
+      case "product": return `<td class="sheet-order-product" data-label="מוצר">${escapeHtml(order.product || "—")}${order.dimensions ? ` <span class="muted">· ${escapeHtml(order.dimensions)}</span>` : ""}</td>`;
+      case "notes": return `<td class="sheet-order-notes" data-label="פירוט">${escapeHtml(order.notes || "")}</td>`;
+      case "price": return `<td class="amount-cell" data-label="מחיר">${credits ? "—" : `${escapeHtml(money.format(order.amount))}${order.cashBeforeVat != null ? `<span class="sheet-order-net">לפני מע"מ ${escapeHtml(money.format(order.cashBeforeVat))}</span>` : ""}`}</td>`;
+      case "credits": return `<td data-label="קרדיטים">${credits ? escapeHtml(number.format(order.creditsUsed)) : "—"}</td>`;
+      case "status": return `<td data-label="תשלום">${credits ? pill("neutral", "קרדיטים") : pill(due ? "pending" : "paid", due ? "ממתין לתשלום" : "שולם")}</td>`;
+      case "due": return `<td class="amount-cell${due ? " is-due" : ""}" data-label="יתרה">${due ? escapeHtml(money.format(order.amount)) : "—"}</td>`;
+      default: return "<td></td>";
+    }
+  }
+
   function renderSheetPage(sheetNumber) {
+    const board = state.loaded ? sheetBoard() : [];
+    const sheet = board.find((item) => item.number === sheetNumber) || null;
     const group = sheetGroups().find((item) => item.sheet === sheetNumber);
     const closed = sheetClosed(sheetNumber);
     $("#sheet-page-number").textContent = sheetNumber;
-    $("#sheet-page-status").outerHTML = `<span id="sheet-page-status">${state.loaded ? sheetStatusPill(sheetNumber) : ""}</span>`;
+    const phase = sheet && state.sheetsInstalled ? sheet.phase : "open";
+    const note = sheet ? sheetNote(sheet) : { text: "", title: "" };
+    $("#sheet-page-status").innerHTML = state.loaded ? pill(SHEET_PHASES[phase].tone, SHEET_PHASES[phase].label) : "";
+    const noteBox = $("#sheet-page-note");
+    noteBox.textContent = state.loaded && note.text ? `${note.text}${note.until ? ` · ${note.until}` : ""}` : "";
+    noteBox.title = note.title || "";
+    noteBox.classList.toggle("is-soon", Boolean(note.soon));
+    const dateBox = $("#sheet-page-date");
+    dateBox.textContent = sheet?.publication ? weekdayDate(sheet.publication) : state.sheetModel === "v2" && state.loaded ? "תאריך הפרסום לא תועד" : "";
+    dateBox.classList.toggle("is-quiet", !sheet?.publication);
+    $("#sheet-page-desc").textContent = sheet?.description || "";
+    // Why it is closed (by hand, with the reason), or why its information is partial (historical).
     const statusRow = state.sheetStatus.get(sheetNumber);
-    $("#sheet-page-subtitle").textContent = closed
-      ? `הגיליון נסגר ב-${displayDate(String(statusRow.closed_at).slice(0, 10))}. סגירה אינה משנה תשלומים: לקוחות שטרם שילמו עדיין מופיעים כממתינים.`
-      : "סטטוס הגיליון (פתוח/סגור) נפרד מסטטוס התשלום של כל לקוח.";
+    let subtitle = "";
+    if (phase === "historical") subtitle = HISTORICAL_NOTE;
+    else if (closed && sheet?.closedKind === "manual" && statusRow?.closed_at) {
+      subtitle = `נסגר ידנית ב-${displayDate(String(statusRow.closed_at).slice(0, 10))}${statusRow.status_reason ? `: ${statusRow.status_reason}` : ""}.`;
+    }
+    $("#sheet-page-subtitle").textContent = subtitle;
+    $("#sheet-page-subtitle").hidden = !subtitle;
+
     const toggle = $("#sheet-toggle-status");
     toggle.hidden = !state.sheetsInstalled || !group;
     toggle.textContent = closed ? "פתיחה מחדש של הגיליון" : "סגירת הגיליון";
     toggle.dataset.closed = closed ? "1" : "0";
-    const orders = group ? [...group.orders].sort((left, right) => (Number(left.orderNumber) || 0) - (Number(right.orderNumber) || 0)) : [];
+    // New orders only for a sheet that is open for orders.
+    $("#sheet-new-order").hidden = !state.loaded || closed;
+    // The publication archive belongs to sheets that are closed for orders.
+    $("#sheet-archive").hidden = !state.loaded || !state.sheetsInstalled || !closed;
+
+    const orders = group ? group.orders : [];
     $("#sheet-count").textContent = number.format(orders.length);
-    $("#sheet-clients").textContent = `${number.format(group ? group.clients.size : 0)} לקוחות`;
+    $("#sheet-clients").textContent = number.format(group ? group.clients.size : 0);
     $("#sheet-billed").textContent = money.format(group ? group.billed : 0);
     $("#sheet-paid").textContent = money.format(group ? group.paid : 0);
     $("#sheet-pending").textContent = money.format(group ? group.pending : 0);
+    $("#sheet-pending").closest(".sheet-sum").classList.toggle("is-due", Boolean(group && group.pending > 0));
     $("#sheet-credits").textContent = number.format(group ? group.credits : 0);
+    const table = $("#sheet-orders-table");
+    for (const body of [...table.tBodies]) body.remove();
     if (!state.loaded) {
       toggle.hidden = true;
-      $("#sheet-orders-body").innerHTML = loadingRow(8);
+      $("#sheet-orders-head").innerHTML = "";
+      $("#sheet-orders-meta").textContent = "";
+      table.insertAdjacentHTML("beforeend", `<tbody>${loadingRow(7)}</tbody>`);
       $("#sheet-orders-empty").hidden = true;
       return;
     }
-    $("#sheet-orders-body").innerHTML = orders.map((order) => {
-      const credits = order.billingMode === "credits";
-      const status = credits ? pill("neutral", "קרדיטים") : pill(order.paymentStatus === "paid" ? "paid" : "pending", order.paymentStatus === "paid" ? "שולם" : "ממתין לתשלום");
-      return `<tr>
-        <td class="order-number">${escapeHtml(order.orderNumber ?? "—")}</td>
-        <td class="client-name"><button class="link-button" type="button" data-client-view="${escapeHtml(order.clientId)}">${escapeHtml(clientName(order.clientId))}</button></td>
-        <td>${escapeHtml(order.product || "—")}${order.dimensions ? ` <span class="muted">· ${escapeHtml(order.dimensions)}</span>` : ""}</td>
-        <td>${credits ? escapeHtml(number.format(order.creditsUsed)) : "—"}</td>
-        <td class="amount-cell">${order.cashBeforeVat != null ? escapeHtml(money.format(order.cashBeforeVat)) : "—"}</td>
-        <td class="amount-cell">${credits ? "—" : escapeHtml(money.format(order.amount))}</td>
-        <td>${status}</td>
-        <td>${escapeHtml(order.notes || "")}</td>
-      </tr>`;
-    }).join("");
+    // One group per client (all of the client's orders in this sheet stay together), clients by name.
+    const byClient = new Map();
+    for (const order of orders) {
+      if (!byClient.has(order.clientId)) byClient.set(order.clientId, []);
+      byClient.get(order.clientId).push(order);
+    }
+    const clients = [...byClient.entries()].map(([clientId, list]) => ({ clientId, name: clientName(clientId),
+      orders: list.sort((left, right) => (Number(left.orderNumber) || 0) - (Number(right.orderNumber) || 0)) }))
+      .sort((left, right) => left.name.localeCompare(right.name, "he"));
+    const columns = sheetOrderColumns(orders);
+    $("#sheet-orders-head").innerHTML = orders.length ? `<tr>${columns.map((column) => `<th scope="col">${escapeHtml(column.head)}</th>`).join("")}</tr>` : "";
+    $("#sheet-orders-meta").textContent = orders.length ? `${plural(clients.length, "לקוח", "לקוחות")} · ${plural(orders.length, "הזמנה", "הזמנות")}` : "";
+    table.insertAdjacentHTML("beforeend", clients.map((client) => {
+      const billed = client.orders.filter((order) => order.billingMode !== "credits").reduce((total, order) => total + Number(order.amount), 0);
+      const pending = client.orders.filter((order) => order.billingMode !== "credits" && order.paymentStatus !== "paid").reduce((total, order) => total + Number(order.amount), 0);
+      const meta = [plural(client.orders.length, "הזמנה", "הזמנות"), billed > 0 ? `חיובים ${money.format(billed)}` : "", pending > 0 ? `יתרה ${money.format(pending)}` : ""].filter(Boolean).join(" · ");
+      return `<tbody class="sheet-client" data-client="${escapeHtml(client.clientId)}">
+        <tr class="sheet-client-row"><th colspan="${columns.length}" scope="rowgroup"><span class="sheet-client-head">
+          <button class="link-button sheet-client-name" type="button" data-client-view="${escapeHtml(client.clientId)}">${escapeHtml(client.name)}</button>
+          <span class="sheet-client-meta${pending > 0 ? " is-due" : ""}">${escapeHtml(meta)}</span></span></th></tr>
+        ${client.orders.map((order) => `<tr class="sheet-order" data-order="${escapeHtml(order.id)}">${columns.map((column) => sheetOrderCell(order, column.key)).join("")}</tr>`).join("")}
+      </tbody>`;
+    }).join(""));
     $("#sheet-orders-empty").hidden = orders.length !== 0;
   }
 

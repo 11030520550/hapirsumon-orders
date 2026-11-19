@@ -326,6 +326,44 @@
     }
   };
 
+  // ?demo=1 (with sheets=2): a believable newspaper for the local preview only — published sheets with dates,
+  // historical sheets without a date, the sheet of the week with several orders (one client with two), a future
+  // sheet with orders and empty ones. Fake data only; the tests do not use it.
+  if (sheetsV2 && params.get("demo") === "1") {
+    db.product_catalog.push(
+      { id: "55555555-5555-4555-8555-555555555555", name: "הדגמה — רבע עמוד", dimensions: "9.5×13 ס״מ", base_price_before_vat: "420.00", credit_cost: "2.00", is_active: true },
+      { id: "66666666-6666-4666-8666-666666666666", name: "הדגמה — חצי עמוד", dimensions: "19.5×13 ס״מ", base_price_before_vat: "780.00", credit_cost: "4.00", is_active: true },
+      { id: "77777777-7777-4777-8777-777777777777", name: "הדגמה — מודעת לוח", dimensions: "עד 4 שורות", base_price_before_vat: "90.00", credit_cost: "0.50", is_active: true });
+    const firstSunday = db.sheets.find((s) => s.sheet_number === "125").publication_date;
+    const published = (number, weeksAgo) => {
+      const publication = addDays(firstSunday, -7 * weeksAgo);
+      return { sheet_number: number, status: "open", status_reason: "", closed_at: null, publication_date: publication,
+        closes_at: jerusalemTime(`${addDays(publication, -2)}T00:00`), description: "", created_at: now(), created_via: "planned", reopened_at: null, updated_at: now() };
+    };
+    const historical = (number) => ({ sheet_number: number, status: "closed", status_reason: "גיליון היסטורי — סומן כסגור במעבר למודל הגיליונות",
+      closed_at: now(), publication_date: null, closes_at: null, description: "", created_at: now(), created_via: "backfill", reopened_at: null, updated_at: now() });
+    Object.assign(db.sheets.find((s) => s.sheet_number === "124"), published("124", 1));
+    db.sheets.push(published("123", 2), published("122", 3), historical("121"), historical("120"));
+    const Q = "55555555-5555-4555-8555-555555555555", H = "66666666-6666-4666-8666-666666666666", L = "77777777-7777-4777-8777-777777777777";
+    const line = (sheet, product, cash, credits, paid, notes = "") => ({ sheet_number: sheet, product_id: product,
+      publication_date: db.sheets.find((s) => s.sheet_number === sheet).publication_date || "2026-10-01",
+      cash_amount_before_vat: cash, credits_used: credits, payment_status: paid ? "paid" : "pending", due_on: null, notes });
+    const seedOrders = [
+      ["c-test-1", [line("125", Q, 420, null, true, "טקסט כמו בשבוע שעבר, תמונה חדשה"), line("125", L, 90, null, false, "מודעת דרושים — 3 שורות")]],
+      ["c-test-2", [line("125", H, 780, null, false, "מבצע סוף עונה, לוגו מצורף במייל")]],
+      ["c-test-4", [line("125", Q, null, 2, true)]],
+      ["c-test-5", [line("125", Q, 420, null, true)]],
+      ["c-test-7", [line("125", L, 90, null, false, "דירה להשכרה במרכז")]],
+      ["c-test-8", [line("126", H, 780, null, false, "פרסום לקראת חנוכה")]],
+      ["c-test-9", [line("126", Q, 420, null, true)]],
+      ["c-test-3", [line("123", H, 780, null, true), line("122", Q, 420, null, true)]],
+      ["c-test-6", [line("123", Q, 420, null, false, "התשלום יועבר בסוף החודש")]],
+      ["c-test-10", [line("123", L, 90, null, true), line("122", L, 90, null, true)]],
+      ["c-test-11", [line("121", Q, 420, null, true), line("120", H, 780, null, false)]]
+    ];
+    for (const [clientId, orders] of seedOrders) rpcs.create_orders_batch({ p_client_id: clientId, p_orders: orders });
+  }
+
   const client = {
     auth: {
       async getSession() { return { data: { session: state.session }, error: null }; },
