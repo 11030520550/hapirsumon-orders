@@ -8,12 +8,12 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@500;700&family=Heebo:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20261119-3">
+  <link rel="stylesheet" href="styles.css?v=20261119-4">
   <!-- supabase-js pinned to 2.119.0 and served locally (vendor/); SHA-384 verified against jsDelivr's published hash. -->
   <script src="vendor/supabase-js-2.119.0.js" integrity="sha384-uteMfOloLDGt042uDz+xHGF3ym63/WQ6rFq7murQRG8Ih7QrXGEGNtWd8688sb4O"></script>
   <script src="supabase-config.js"></script>
   <script src="app.js?v=20261118-1" defer></script>
-  <script src="business-app.js?v=20261119-3" defer></script>
+  <script src="business-app.js?v=20261119-4" defer></script>
 </head>
 <body>
   <svg class="svg-defs" width="0" height="0" aria-hidden="true">
@@ -267,110 +267,77 @@
           </section>
         </section>
 
-        <!-- Sheets: the newspaper's information centre and archive (orders are entered on the orders screen).
-             Three areas: the sheet of the week, future sheets, published sheets. -->
+        <!-- Sheets: one banner (photo on the left, title on the right, a link to the current sheet), then one
+             continuous list of every sheet. Money and order details live only on each sheet's own page. -->
         <section class="page-view sheets-page" data-page="sheets" hidden>
-          <!-- Banner: the owner's concept (the reader illustration + "הגיליונות שלנו"). The illustration is shown at or
-               below its natural size (142×189), never enlarged. Keep the banner free of data and buttons. -->
-          <header class="sheets-banner">
-            <div class="sheets-banner-art"><img src="assets/sheets-banner-reader.png" width="142" height="189" alt=""></div>
+          <!-- Only "גיליון N" in the banner is clickable. The photo is shown only when the licensed file exists
+               (assets/sheets-banner.jpg, see design-references/README.md); never stretched, never an illustration. -->
+          <header class="sheets-banner" id="sheets-banner">
             <div class="sheets-banner-text">
-              <p class="sheets-banner-eyebrow">מערכת הפרסומון</p>
               <h1 class="sheets-banner-title">הגיליונות שלנו</h1>
-              <p class="sheets-banner-sub">הגיליון של השבוע, הגיליונות הבאים וכל מה שכבר פורסם.</p>
+              <p class="sheets-banner-sub">כל גיליונות הפרסומון, במקום אחד</p>
+              <p class="sheets-banner-current" id="sheets-banner-current" hidden></p>
             </div>
+            <div class="sheets-banner-photo" aria-hidden="true"></div>
           </header>
           <div class="biz-required" hidden><p>מספרי גיליון נשמרים בהזמנות לאחר התקנת הסכימה העסקית ב-Supabase.</p></div>
           <p class="import-preview warning biz-only" id="sheets-status-note" hidden>סגירת גיליון תהיה זמינה לאחר הפעלת הקובץ supabase-sheets-and-order-numbers.sql. עד אז כל הגיליונות מוצגים כפתוחים.</p>
-          <div class="sheets-desk biz-only">
-            <!-- A: the sheet of the week -->
-            <section class="sheets-current" id="sheets-current" aria-label="הגיליון של השבוע" hidden></section>
-            <div class="sheets-toolbar">
-              <label class="sheets-search"><span aria-hidden="true">⌕</span><input id="sheets-search" type="search" placeholder="חיפוש גיליון: מספר, תיאור או תאריך (22/11)" aria-label="חיפוש גיליון"></label>
-              <button class="button button-primary sheets-add-button" type="button" id="sheets-add" hidden><span class="button-plus">＋</span> הוספת גיליונות</button>
+          <section class="orders-section sheets-list biz-only" aria-label="כל הגיליונות">
+            <div class="table-toolbar sheets-toolbar">
+              <label class="search-box sheets-search"><span aria-hidden="true">⌕</span><input id="sheets-search" type="search" placeholder="חיפוש לפי מספר גיליון או תאריך (22/11)" aria-label="חיפוש גיליון לפי מספר או תאריך"></label>
+              <button class="button button-outline sheets-add-button" type="button" id="sheets-add" hidden><span class="button-plus">＋</span> הוספת גיליונות</button>
             </div>
-            <!-- B: future sheets (compact) -->
-            <section class="sheets-section" id="sheets-upcoming-section" aria-labelledby="sheets-upcoming-title" hidden>
-              <div class="sheets-section-head">
-                <h2 class="sheets-section-title" id="sheets-upcoming-title">גיליונות עתידיים</h2>
-                <span class="sheets-section-meta" id="sheets-horizon"></span>
-              </div>
-              <ol class="sheet-lines" id="sheets-upcoming"></ol>
-            </section>
-            <!-- C: published sheets (the archive) -->
-            <section class="sheets-section sheets-archive" id="sheets-archive-section" aria-labelledby="sheets-archive-title">
-              <div class="sheets-section-head">
-                <h2 class="sheets-section-title" id="sheets-archive-title">גיליונות שפורסמו</h2>
-                <div class="sheets-tools">
-                  <div class="sheets-chips" id="sheets-filter" role="group" aria-label="סינון הארכיון">
-                    <button type="button" data-sheets-filter="all" aria-pressed="false">הכול<span class="seg-count"></span></button>
-                    <button type="button" data-sheets-filter="due" aria-pressed="false">יתרה לתשלום<span class="seg-count"></span></button>
-                    <button type="button" data-sheets-filter="undated" aria-pressed="false" hidden>ללא תאריך<span class="seg-count"></span></button>
-                  </div>
-                  <label class="sheets-sort">מיון
-                    <select id="sheets-sort">
-                      <option value="number:desc">החדשים קודם</option>
-                      <option value="number:asc">הישנים קודם</option>
-                      <option value="publication:desc">תאריך פרסום — האחרון קודם</option>
-                      <option value="pending:desc">יתרה לתשלום — הגבוהה קודם</option>
-                      <option value="billed:desc">סך חיובים — הגבוה קודם</option>
-                      <option value="orders:desc">הזמנות — הרבות קודם</option>
-                    </select>
-                  </label>
-                </div>
-              </div>
-              <div class="sheet-ledger">
-                <div class="sheet-ledger-head" id="sheets-ledger-head" aria-hidden="true"><span></span><span>גיליון</span><span>תאריך פרסום</span><span>הזמנות ולקוחות</span><span>סך חיובים</span><span>יתרה לתשלום</span><span>סטטוס</span><span></span></div>
-                <ol class="sheet-list" id="sheets-body" aria-live="polite"></ol>
-              </div>
-            </section>
-            <div class="empty-state sheets-empty" id="sheets-empty" hidden><strong id="sheets-empty-title">אין גיליונות להצגה</strong><p id="sheets-empty-text"></p></div>
-            <footer class="sheets-desk-foot"><span id="sheets-count"></span><span id="sheets-legend">מועדי הסגירה בשעון ישראל · סכומים כוללים מע"מ · הפירוט המלא בדף כל גיליון</span></footer>
-          </div>
+            <div class="table-wrap sheets-table-wrap">
+              <table class="sheets-table" id="sheets-table">
+                <thead><tr><th scope="col">גיליון</th><th scope="col">תאריך פרסום</th><th scope="col" class="sheet-col-place">מיקום</th><th scope="col">קבלת הזמנות</th><th scope="col"><span class="sr-only">כניסה לגיליון</span></th></tr></thead>
+                <tbody id="sheets-body" aria-live="polite"></tbody>
+              </table>
+              <div class="empty-state sheets-empty" id="sheets-empty" hidden><strong id="sheets-empty-title">אין גיליונות להצגה</strong><p id="sheets-empty-text"></p></div>
+            </div>
+          </section>
         </section>
 
-        <!-- Single sheet: everything about one edition (header, financial summary, clients and orders, publication archive) -->
+        <!-- Single sheet: a summary banner (number, date, status and figures), then every order of the sheet -->
         <section class="page-view sheet-page" data-page="sheet" hidden>
           <button class="back-link" type="button" data-go="sheets">→ חזרה לגיליונות</button>
-          <header class="sheet-head">
-            <span class="sheet-head-paper" aria-hidden="true"></span>
-            <div class="sheet-head-text">
-              <p class="eyebrow">גיליון הפרסומון</p>
-              <h1 class="sheet-head-title">גיליון <span id="sheet-page-number"></span></h1>
-              <p class="sheet-head-date" id="sheet-page-date"></p>
-              <p class="sheet-head-desc" id="sheet-page-desc"></p>
-              <p class="sheet-head-status"><span id="sheet-page-status"></span><span class="sheet-head-note" id="sheet-page-note"></span></p>
-              <p class="page-subtitle sheet-head-sub" id="sheet-page-subtitle" hidden></p>
+          <header class="sheet-hero">
+            <div class="sheet-hero-top">
+              <div class="sheet-hero-id">
+                <h1 class="sheet-head-title">גיליון <span id="sheet-page-number"></span></h1>
+                <p class="sheet-head-meta"><span class="sheet-head-date" id="sheet-page-date"></span><span class="sheet-head-place" id="sheet-page-place"></span><span id="sheet-page-status"></span><span class="sheet-head-note" id="sheet-page-note"></span></p>
+                <p class="sheet-head-desc" id="sheet-page-desc"></p>
+                <p class="sheet-head-sub" id="sheet-page-subtitle" hidden></p>
+              </div>
+              <div class="page-actions sheet-head-actions">
+                <button class="button button-outline" type="button" id="sheet-toggle-status" hidden></button>
+                <button class="button button-primary" type="button" id="sheet-new-order" hidden><span class="button-plus">＋</span> הזמנה לגיליון זה</button>
+              </div>
             </div>
-            <div class="page-actions sheet-head-actions">
-              <button class="button button-outline" type="button" id="sheet-toggle-status" hidden></button>
-              <button class="button button-primary" type="button" id="sheet-new-order" hidden><span class="button-plus">＋</span> הזמנה לגיליון זה</button>
-            </div>
+            <dl class="sheet-summary" aria-label="סיכום הגיליון">
+              <div class="sheet-sum"><dt>הזמנות</dt><dd id="sheet-count">0</dd></div>
+              <div class="sheet-sum"><dt>לקוחות</dt><dd id="sheet-clients">0</dd></div>
+              <div class="sheet-sum"><dt>סך חיובים כולל מע״מ</dt><dd id="sheet-billed">₪0</dd></div>
+              <div class="sheet-sum"><dt>שולם</dt><dd id="sheet-paid">₪0</dd></div>
+              <div class="sheet-sum sheet-sum-due"><dt>יתרה לתשלום</dt><dd id="sheet-pending">₪0</dd></div>
+              <div class="sheet-sum" hidden><dt>קרדיטים שנוצלו</dt><dd id="sheet-credits">0</dd></div>
+            </dl>
           </header>
-          <section class="sheet-summary" aria-label="סיכום הגיליון">
-            <div class="sheet-sum"><span class="sheet-sum-label">הזמנות</span><span class="sheet-sum-value" id="sheet-count">0</span></div>
-            <div class="sheet-sum"><span class="sheet-sum-label">לקוחות</span><span class="sheet-sum-value" id="sheet-clients">0</span></div>
-            <div class="sheet-sum"><span class="sheet-sum-label">סך חיובים כולל מע"מ</span><span class="sheet-sum-value" id="sheet-billed">₪0</span></div>
-            <div class="sheet-sum"><span class="sheet-sum-label">שולם</span><span class="sheet-sum-value" id="sheet-paid">₪0</span></div>
-            <div class="sheet-sum sheet-sum-due"><span class="sheet-sum-label">יתרה לתשלום</span><span class="sheet-sum-value" id="sheet-pending">₪0</span></div>
-            <div class="sheet-sum"><span class="sheet-sum-label">קרדיטים שנוצלו</span><span class="sheet-sum-value" id="sheet-credits">0</span></div>
-          </section>
-          <p class="sheet-summary-note">סך החיובים אינו רווח (הוצאות אינן חלק מהחישוב). "שולם" ו"יתרה" לפי סטטוס התשלום של כל הזמנה; את התשלומים מעדכנים בכרטיס הלקוח או במסך התשלומים, גם אחרי סגירה ופרסום.</p>
-          <section class="sheet-orders" aria-labelledby="sheet-orders-title">
-            <div class="sheets-section-head">
-              <h2 class="sheets-section-title" id="sheet-orders-title">לקוחות והזמנות</h2>
-              <span class="sheets-section-meta" id="sheet-orders-meta"></span>
+          <section class="orders-section sheet-orders" aria-labelledby="sheet-orders-title">
+            <div class="sheet-orders-head">
+              <h2 class="sheet-orders-title" id="sheet-orders-title">הזמנות הגיליון</h2>
+              <span class="sheet-orders-meta" id="sheet-orders-meta"></span>
             </div>
             <div class="table-wrap sheet-orders-wrap">
               <table class="sheet-orders-table" id="sheet-orders-table">
                 <thead id="sheet-orders-head"></thead>
+                <tbody id="sheet-orders-body"></tbody>
               </table>
               <div class="empty-state" id="sheet-orders-empty" hidden><strong>אין הזמנות בגיליון זה</strong></div>
             </div>
           </section>
           <!-- Files stage (future): the full newspaper file and each ad as published. Nothing is shown as available before it exists. -->
           <section class="sheet-archive-box" id="sheet-archive" aria-labelledby="sheet-archive-title" hidden>
-            <div class="sheets-section-head"><h2 class="sheets-section-title" id="sheet-archive-title">ארכיון הפרסום</h2></div>
+            <h2 class="sheet-orders-title" id="sheet-archive-title">ארכיון הגיליון</h2>
             <ul class="sheet-archive-list">
               <li><strong>קובץ העיתון המלא</strong><span>צפייה והורדה יתאפשרו לאחר הפעלת אחסון הקבצים. כרגע לא שמור קובץ לגיליון הזה.</span></li>
               <li><strong>המודעות שפורסמו</strong><span>כל מודעה תישמר כפי שפורסמה בגיליון הזה, גם אם תשתנה בגיליון הבא. יתאפשר בשלב קובצי המודעות.</span></li>

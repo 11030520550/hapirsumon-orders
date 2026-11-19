@@ -191,20 +191,19 @@ async function run() {
   check("R8 new order continues the 5-digit sequence + today's order date", created && created.order_number === 22031 && created.entered_at === new Date().toISOString().slice(0, 10) || (created && created.order_number === 22031), created ? `${created.order_number} ${created.entered_at}` : "none");
 
   await nav("sheets");
-  // Without dated sheets (model v1) there is no "sheet of the week": open sheets, then closed sheets.
-  const sheetRows = $$("#sheets-upcoming [data-sheet]").map((row) => row.dataset.sheet);
-  check("R9 sheets list from real orders, open sheets newest number first; no 'add sheets' or sheet of the week without the v2 model",
-    sheetRows[0] === "130" && sheetRows.includes("124") && $("#sheets-status-note").hidden && $("#sheets-add").hidden && $("#sheets-current").hidden
-    && text("#sheets-upcoming-title") === "גיליונות פתוחים", sheetRows.join("|"));
+  // Without dated sheets (model v1) there is no current sheet and no timeline: one list with the order intake only.
+  const sheetRows = $$("#sheets-body [data-sheet]").map((row) => row.dataset.sheet);
+  check("R9 sheets list from real orders, newest number first; without the v2 model: no 'add sheets', no current-sheet line, no timeline column",
+    sheetRows[0] === "130" && sheetRows.includes("124") && $("#sheets-status-note").hidden && $("#sheets-add").hidden && $("#sheets-banner-current").hidden
+    && $("#sheets-table").classList.contains("no-places") && text('#sheets-body [data-sheet="124"] .sheet-intake') === "פתוח להזמנות", sheetRows.join("|"));
   $('[data-sheet-view="124"]').click(); await sleep(250);
   const orderRows = () => $$("#sheet-orders-table tr[data-order]");
   check("R10 sheet page: address, 10 orders, summary", page() === "sheet" && w.location.hash === "#/sheet/124" && orderRows().length === 10 && text("#sheet-count") === "10");
-  // Only columns with a real source: these legacy orders have no credits and no notes, so those columns are not shown.
+  // Only columns with a real source: these legacy orders have no credits, no price before VAT and no notes.
   const heads = $$("#sheet-orders-head th").map((th) => th.textContent);
-  const clients124 = new Set(db().orders.filter((o) => o.sheet_number === "124").map((o) => o.client_id)).size;
-  check("R11 sheet columns: order, product, price incl. VAT, payment status, balance; empty columns hidden; one group per client",
-    ["מס׳ הזמנה", "מוצר", "כולל מע", "סטטוס תשלום", "יתרה לתשלום"].every((h) => heads.some((t) => t.includes(h))) && !heads.some((t) => /קרדיטים|פירוט/.test(t))
-    && $$("#sheet-orders-table tbody.sheet-client").length === clients124, heads.join("|"));
+  check("R11 sheet columns: order no., order date, client, ad description, price incl. VAT, payment status; empty columns hidden; every row links to its client",
+    heads.join("|") === "מס׳ הזמנה|תאריך הזמנה|לקוח|תיאור פרסום|מחיר כולל מע״מ|סטטוס תשלום"
+    && $$("#sheet-orders-table tr[data-order] [data-client-view]").length === 10, heads.join("|"));
   const statusesBefore = db().orders.filter((o) => o.sheet_number === "124").map((o) => o.payment_status).join();
   await waitFor(() => !$("#sheet-toggle-status").hidden && !$("#sheet-toggle-status").disabled);
   $("#sheet-toggle-status").click();
@@ -358,78 +357,74 @@ async function run() {
   check("V20 the current UI's set_sheet_status still works (historical sheet without a deadline)", !legacyReopen.error && !ov(await overview(), "124").is_closed, legacyReopen.error && legacyReopen.error.message);
   w.__mock.setNow(new Date().toISOString());
 
-  // ===== Stage 5–6: the sheets screen (sheet of the week / future / published) + "הוספת גיליונות" + the sheet page.
+  // ===== Stage 5–6: the sheets screen (one banner + one continuous list) + "הוספת גיליונות" + the sheet page.
   // Mock v2 only. The server clock is pinned relative to the seeded sheets, so results do not depend on the weekday.
   await load("session=1&business=1&sheets=2", "#/sheets");
   await waitFor(() => $$('[data-page="sheets"] [data-sheet]').length > 0);
-  const upcomingRows = () => $$("#sheets-upcoming [data-sheet]").map((row) => row.dataset.sheet);
-  const archiveRows = () => $$("#sheets-body [data-sheet]").map((row) => row.dataset.sheet);
-  const currentNo = () => $("#sheets-current .sheet-feature-main")?.dataset.sheet || "";
-  const anyRow = (n) => $(`#sheets-upcoming [data-sheet="${n}"]`) || $(`#sheets-body [data-sheet="${n}"]`);
-  const archiveRow = (n) => $(`#sheets-body [data-sheet="${n}"]`);
-  const filterBy = async (f) => { $(`#sheets-filter [data-sheets-filter="${f}"]`).click(); await sleep(60); };
+  const listRows = () => $$("#sheets-body [data-sheet]").map((row) => row.dataset.sheet);
+  const sheetRow = (n) => $(`#sheets-body [data-sheet="${n}"]`);
+  const placeOf = (n) => sheetRow(n)?.querySelector(".sheet-place")?.textContent || "";
+  const placeNote = (n) => sheetRow(n)?.querySelector(".sheet-row-place .sheet-row-note")?.textContent || "";
+  const intakeOf = (n) => sheetRow(n)?.querySelector(".sheet-intake")?.textContent || "";
+  const intakeNote = (n) => sheetRow(n)?.querySelector(".sheet-row-intake .sheet-row-note")?.textContent || "";
+  const bannerLink = () => $("#sheets-banner-current .sheets-banner-link");
+  const currentNo = () => bannerLink()?.dataset.sheetView || "";
   const seeded = (n) => db().sheets.find((s) => s.sheet_number === n);
   const reloadBoard = async () => { await w.ModaatApp.refresh(); await sleep(400); await nav("orders"); await nav("sheets"); await sleep(100); };
   const orderTo = (sheet, client, cash, credits, paid, notes = "") => w.ModaatApp.client().rpc("create_orders_batch", { p_client_id: client, p_idempotency_key: w.crypto.randomUUID(), p_orders: [{ sheet_number: sheet,
     product_id: "44444444-4444-4444-8444-444444444444", publication_date: seeded(sheet).publication_date, cash_amount_before_vat: cash, credits_used: credits, payment_status: paid ? "paid" : "pending", due_on: null, notes }] });
   const close125 = Date.parse(seeded("125").closes_at);
   const at = async (hoursFromClosing) => { w.__mock.setNow(new Date(close125 + hoursFromClosing * 3600000).toISOString()); await reloadBoard(); };
+  const dmy = (iso) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
   await at(-30); // Wednesday 18:00, sheet 125 still open
-  const heroNote = () => $("#sheets-current .sheet-feature-note");
-  check("G1 three areas: sheet of the week 125 at the top; future 126–128 (also empty ones) nearest first; historical 124 in the archive; add button shown",
-    currentNo() === "125" && text("#sheets-current .sheet-status-label") === "פתוח להזמנות" && text("#sheets-current .sheet-feature-date").startsWith("יום ראשון")
-    && upcomingRows().join() === "126,127,128" && anyRow("127").textContent.includes("עדיין אין הזמנות") && anyRow("127").textContent.includes("גיליון חג")
-    && archiveRows().join() === "124" && !$("#sheets-add").hidden, `${currentNo()} | ${upcomingRows()} | ${archiveRows()}`);
+  check("G1 one banner names the current sheet (125, its date); one continuous list of every sheet, newest number first: 128/127 future, 126 next, 125 current, 124 historical; add button shown",
+    currentNo() === "125" && text("#sheets-banner-current").startsWith("הגיליון הנוכחי") && text("#sheets-banner-current .sheets-banner-date").startsWith("יום ראשון")
+    && listRows().join() === "128,127,126,125,124" && placeOf("128") === "עתידי" && placeOf("127") === "עתידי" && placeOf("126") === "הגיליון הבא"
+    && placeOf("125") === "הגיליון הנוכחי" && placeOf("124") === "היסטורי" && sheetRow("127").textContent.includes("גיליון חג") && !$("#sheets-add").hidden,
+    `${currentNo()} | ${listRows()} | ${listRows().map(placeOf)}`);
   // Friday 00:00 (the moment in the model) is shown as "until Thursday 23:59"; the moment itself is unchanged.
-  check("G2 closing wording: 'orders until Thursday 23:59' with time left; the tooltip names the real moment (Friday 00:00); the stored deadline is still Friday 00:00",
-    /עד יום חמישי \d\d\/\d\d, 23:59/.test(heroNote().textContent) && heroNote().textContent.includes(" · ") && /שישי .* 00:00/.test($("#sheets-current .sheet-feature-status").title)
-    && seeded("125").closes_at === w.__mock.jerusalemTime(`${addDaysT(seeded("125").publication_date, -2)}T00:00`), heroNote().textContent);
+  check("G2 closing wording: 'until Thursday 23:59' with time left; the tooltip names the real moment (Friday 00:00); the stored deadline is still Friday 00:00",
+    intakeOf("125") === "פתוח להזמנות" && /^עד יום חמישי \d\d\/\d\d, 23:59 · /.test(intakeNote("125")) && /שישי .* 00:00/.test(sheetRow("125").querySelector(".sheet-row-intake").title)
+    && seeded("125").closes_at === w.__mock.jerusalemTime(`${addDaysT(seeded("125").publication_date, -2)}T00:00`), intakeNote("125"));
   const unpaid = await orderTo("126", "c-test-2", 500, null, false);
   const unpaid125 = await orderTo("125", "c-test-5", 300, null, false);
   await at(34); // Saturday 10:00, after Friday's closing
-  check("G3 weekend: 125 is still the sheet of the week ('סגור להזמנות', comes out on Sunday) and points to 126 for new orders; it is not in the archive",
-    currentNo() === "125" && text("#sheets-current .sheet-status-label") === "סגור להזמנות" && heroNote().textContent.includes("יוצא לאור ביום ראשון")
-    && $("#sheets-current .sheet-feature-next")?.dataset.sheetView === "126" && !archiveRow("125") && upcomingRows()[0] === "126", `${currentNo()} ${text("#sheets-current .sheet-feature-next")}`);
+  check("G3 weekend: 125 is still the current sheet but 'סגור להזמנות' (closed is not published); 126 is the next sheet and open for orders",
+    !unpaid.error && !unpaid125.error && currentNo() === "125" && placeOf("125") === "הגיליון הנוכחי" && intakeOf("125") === "סגור להזמנות"
+    && placeOf("126") === "הגיליון הבא" && intakeOf("126") === "פתוח להזמנות" && !listRows().some((n) => placeOf(n) === "פורסם"), `${listRows().map((n) => `${n}:${placeOf(n)}/${intakeOf(n)}`)}`);
   await at(58); // Sunday 10:00
-  const sunday = [currentNo(), text("#sheets-current .sheet-status-label")];
+  const sunday = [currentNo(), placeOf("125"), placeNote("125")];
   await at(82); // Monday 10:00
   const pub125 = seeded("125").publication_date;
-  check("G15 statuses: 'מתפרסם היום' on Sunday; from Monday 125 is in the archive as 'פורסם' with its date, 126 is the sheet of the week; 124 'היסטורי' without a date",
-    sunday.join() === "125,מתפרסם היום" && currentNo() === "126" && archiveRows().join() === "125,124"
-    && archiveRow("125").querySelector(".sheet-status-label").textContent === "פורסם" && archiveRow("125").textContent.includes(`${pub125.slice(8, 10)}/${pub125.slice(5, 7)}/${pub125.slice(0, 4)}`)
-    && archiveRow("124").querySelector(".sheet-status-label").textContent === "היסטורי" && archiveRow("124").textContent.includes("תאריך לא תועד"), JSON.stringify({ sunday, cur: currentNo(), arch: archiveRows() }));
-  const filterResults = {};
-  for (const f of ["all", "due", "undated"]) {
-    await filterBy(f);
-    filterResults[f] = { rows: archiveRows(), count: $(`[data-sheets-filter="${f}"] .seg-count`).textContent, shown: !$(`[data-sheets-filter="${f}"]`).hidden };
-  }
-  await filterBy("all");
-  check("G4 archive filters: all / amount due / without a date match the rows, and each button's count matches its rows",
-    !unpaid.error && !unpaid125.error && filterResults.all.rows.join() === "125,124" && filterResults.due.rows.join() === "125" && filterResults.undated.rows.join() === "124"
-    && Object.values(filterResults).every((r) => r.shown && r.count === String(r.rows.length)), JSON.stringify(filterResults));
-  const search = async (q) => { setVal($("#sheets-search"), q); await sleep(60); return [...upcomingRows(), "|", ...archiveRows()].join(); };
+  check("G15 timeline: on Sunday 125 is current and 'מתפרסם היום'; from Monday 125 is 'פורסם' with its date, 126 is current, 127 next; 124 historical without a date",
+    sunday.join() === "125,הגיליון הנוכחי,מתפרסם היום" && currentNo() === "126" && placeOf("125") === "פורסם" && sheetRow("125").textContent.includes(dmy(pub125))
+    && placeOf("126") === "הגיליון הנוכחי" && placeOf("127") === "הגיליון הבא" && placeOf("124") === "היסטורי" && sheetRow("124").textContent.includes("תאריך לא תועד"),
+    JSON.stringify({ sunday, cur: currentNo(), places: listRows().map(placeOf) }));
+  // Only "גיליון N" in the banner is a link: the title, the photo area and the background do nothing.
+  $(".sheets-banner-title").click(); $(".sheets-banner").click(); $(".sheets-banner-photo").click(); await sleep(150);
+  const stayed = page() === "sheets";
+  const interactive = $$("#sheets-banner button, #sheets-banner a, #sheets-banner [data-sheet-view], #sheets-banner [tabindex]");
+  bannerLink().click(); await sleep(250);
+  check("G4 banner: the only interactive element is the 'גיליון 126' link; clicking the title, photo or background does nothing; the link opens the sheet page",
+    stayed && interactive.length === 1 && interactive[0].textContent === "גיליון 126" && page() === "sheet" && w.location.hash === "#/sheet/126", `${stayed} ${interactive.length} ${w.location.hash}`);
+  await nav("sheets");
+  const search = async (q) => { setVal($("#sheets-search"), q); await sleep(60); return listRows().join(); };
   const pub127 = seeded("127").publication_date;
   const byNumber = await search("128"), byDesc = await search("חג"), byDate = await search(`${pub127.slice(8, 10)}/${pub127.slice(5, 7)}`), none = await search("99999");
-  const noneEmpty = !$("#sheets-empty").hidden && text("#sheets-empty-title") === "לא נמצאו גיליונות" && text("#sheets-upcoming").includes("אין גיליון עתידי");
+  const noneEmpty = !$("#sheets-empty").hidden && text("#sheets-empty-title") === "לא נמצאו גיליונות" && $("#sheets-table").hidden;
   const old = await search("124");
   await search("");
-  check("G5 search covers future and published sheets: number, description, date (dd/mm); no match says so clearly",
-    byNumber === "128,|" && byDesc === "127,|" && byDate === "127,|" && none === "|" && noneEmpty && old === "|,124", JSON.stringify([byNumber, byDesc, byDate, none, old]));
-  const sortBy = async (value) => { setVal($("#sheets-sort"), value); await sleep(60); return archiveRows().join(); };
-  const sorts = { numDesc: await sortBy("number:desc"), numAsc: await sortBy("number:asc"), pubDesc: await sortBy("publication:desc"), ordersDesc: await sortBy("orders:desc") };
-  await sortBy("number:desc");
-  check("G6 archive sorting: newest / oldest number, publication date (undated last), most orders",
-    sorts.numDesc === "125,124" && sorts.numAsc === "124,125" && sorts.pubDesc === "125,124" && sorts.ordersDesc === "124,125", JSON.stringify(sorts));
-  const orders124 = db().orders.filter((o) => o.sheet_number === "124");
-  const pending124 = orders124.filter((o) => o.payment_status !== "paid").reduce((t, o) => t + Number(o.amount), 0);
-  const footPending = Number($("#sheets-count").dataset.pending);
-  const pending125 = db().orders.filter((o) => o.sheet_number === "125" && o.payment_status !== "paid").reduce((t, o) => t + Number(o.amount), 0);
-  check("G7 figures: orders, clients, charges and balance per archived sheet; the summary adds up the visible archive rows; future lines carry no amounts",
-    archiveRow("124").querySelector(".sheet-row-figure").textContent.includes(String(orders124.length))
-    && archiveRow("124").querySelector(".sheet-row-orders .sheet-row-caption").textContent.includes(String(new Set(orders124.map((o) => o.client_id)).size))
-    && Number($("#sheets-count").dataset.orders) === orders124.length + db().orders.filter((o) => o.sheet_number === "125").length
-    && Math.abs(footPending - (pending124 + pending125)) < 0.01 && !$$("#sheets-upcoming [data-sheet]").some((row) => row.textContent.includes("₪")),
-    `pending ${footPending} vs ${pending124 + pending125}`);
+  check("G5 one search: number, description, date (dd/mm); no match says so clearly; no filter chips or sort menu",
+    byNumber === "128" && byDesc === "127" && byDate === "127" && none === "" && noneEmpty && old === "124" && !$("#sheets-filter") && !$("#sheets-sort"),
+    JSON.stringify([byNumber, byDesc, byDate, none, old]));
+  const listHeads = $$("#sheets-table thead th").map((th) => th.textContent.trim());
+  sheetRow("124").querySelector(".sheet-row-date").click(); await sleep(250);
+  const rowClick = w.location.hash === "#/sheet/124";
+  await nav("sheets");
+  check("G6 the list is a table like the orders table (sheet, publication date, place, order intake); a click anywhere on a row opens the sheet; each row has a keyboard-reachable link",
+    listHeads.slice(0, 4).join() === "גיליון,תאריך פרסום,מיקום,קבלת הזמנות" && rowClick && listRows().every((n) => sheetRow(n).querySelector("button.sheet-row-link")?.dataset.sheetView === n), listHeads.join("|"));
+  check("G7 no money on the sheets screen: no amounts in the banner or the list (the figures are on each sheet's page); no newspaper icon repeated in the rows",
+    !text('[data-page="sheets"]').includes("₪") && $$('[data-page="sheets"] *').every((el) => !/sheet-newspaper/.test(w.getComputedStyle(el).backgroundImage)));
 
   // "הוספת גיליונות"
   await at(-30);
@@ -463,9 +458,9 @@ async function run() {
   const sheetsBefore = db().sheets.length;
   $("#sheets-add-submit").click(); $("#sheets-add-submit").click();
   await waitFor(() => !$("#sheets-add-modal").open, 3000); await sleep(400);
-  check("G10 create: one save (double click safe) creates 129–131 open, with dates and the description; they appear as empty future sheets",
+  check("G10 create: one save (double click safe) creates 129–131 open, with dates and the description; they appear in the list as future sheets open for orders",
     db().sheets.length === sheetsBefore + 3 && seeded("130").description === "לפני חג" && seeded("131").closes_at === w.__mock.jerusalemTime(`${addDaysT(firstNew, 12)}T12:00`)
-    && ["129", "130", "131"].every((n) => $(`#sheets-upcoming [data-sheet="${n}"]`)?.textContent.includes("אין הזמנות")) && text("#toast").includes("נוצרו 3 גיליונות"),
+    && ["129", "130", "131"].every((n) => placeOf(n) === "עתידי" && intakeOf(n) === "פתוח להזמנות") && listRows()[0] === "131" && text("#toast").includes("נוצרו 3 גיליונות"),
     `${db().sheets.length - sheetsBefore} created; toast: ${text("#toast")}`);
   $("#sheets-add").click(); await sleep(150);
   const start2 = addForm.elements.start.value;
@@ -484,46 +479,50 @@ async function run() {
   await orderTo("125", "c-test-5", 450, null, true, "מודעה שנייה של אותו לקוח");
   await orderTo("125", "c-test-4", null, 2.5, true);
   await at(34);
-  $("#sheets-current .sheet-feature-main").click(); await sleep(250);
+  bannerLink().click(); await sleep(250);
   const orders125 = db().orders.filter((o) => o.sheet_number === "125");
   const cash125 = orders125.filter((o) => o.billing_mode !== "credits");
   const sum = (rows) => rows.reduce((t, o) => t + Number(o.amount), 0);
   const moneyText = (v) => new Intl.NumberFormat("he-IL", { style: "currency", currency: "ILS" }).format(v);
-  const group5 = $('#sheet-orders-table tbody.sheet-client[data-client="c-test-5"]');
+  const rows5 = $$('#sheet-orders-table tr[data-order][data-client="c-test-5"]');
   const heads125 = $$("#sheet-orders-head th").map((th) => th.textContent);
-  check("G19 sheet page: header with date and status; summary = orders, clients, charges incl. VAT, paid, balance, credits; one group per client keeps all of the client's orders",
-    page() === "sheet" && w.location.hash === "#/sheet/125" && text("#sheet-page-date").startsWith("יום ראשון") && text("#sheet-page-status") === "סגור להזמנות"
+  const rowClients = $$("#sheet-orders-table tr[data-order]").map((tr) => tr.dataset.client);
+  check("G19 sheet page: summary banner = number, date, place, status, orders, clients, charges incl. VAT, paid, balance, credits; every order listed (a client's orders side by side, both shown)",
+    page() === "sheet" && w.location.hash === "#/sheet/125" && text("#sheet-page-date").startsWith("יום ראשון") && text("#sheet-page-status") === "סגור להזמנות" && text("#sheet-page-place") === "הגיליון הנוכחי"
     && text("#sheet-count") === String(orders125.length) && text("#sheet-clients") === String(new Set(orders125.map((o) => o.client_id)).size)
     && text("#sheet-billed") === moneyText(sum(cash125)).replace(/\s+/g, " ") && text("#sheet-pending") === moneyText(sum(cash125.filter((o) => o.payment_status !== "paid"))).replace(/\s+/g, " ")
-    && text("#sheet-paid") === moneyText(sum(cash125.filter((o) => o.payment_status === "paid"))).replace(/\s+/g, " ") && text("#sheet-credits") === "2.5"
-    && group5 && group5.querySelectorAll("tr[data-order]").length === 2 && group5.textContent.includes("מודעה שנייה של אותו לקוח")
-    && ["קרדיטים", "פירוט ההזמנה", "יתרה לתשלום"].every((h) => heads125.includes(h)) && $$("#sheet-orders-table tr[data-order]").length === orders125.length,
-    JSON.stringify({ billed: text("#sheet-billed"), pending: text("#sheet-pending"), heads125 }));
-  check("G20 closed sheet: no 'new order'; the publication archive says files are not available yet and offers no fake view/download buttons; payments stay manageable from the client",
+    && text("#sheet-paid") === moneyText(sum(cash125.filter((o) => o.payment_status === "paid"))).replace(/\s+/g, " ") && text("#sheet-credits") === "2.5" && !$("#sheet-credits").closest(".sheet-sum").hidden
+    && rows5.length === 2 && rows5.some((tr) => tr.textContent.includes("מודעה שנייה של אותו לקוח")) && rowClients.indexOf("c-test-5") + 1 === rowClients.lastIndexOf("c-test-5")
+    && $$("#sheet-orders-table tr[data-order]").length === orders125.length,
+    JSON.stringify({ billed: text("#sheet-billed"), pending: text("#sheet-pending"), place: text("#sheet-page-place"), rowClients }));
+  check("G22 order columns in the owner's order, only with a real source: order no., order date, client, ad description, credits, price before VAT, price incl. VAT, payment status, notes; no 'מוצר', no balance column",
+    heads125.join("|") === "מס׳ הזמנה|תאריך הזמנה|לקוח|תיאור פרסום|קרדיטים|מחיר לפני מע״מ|מחיר כולל מע״מ|סטטוס תשלום|הערות" && !heads125.some((h) => /מוצר|יתרה/.test(h)),
+    heads125.join("|"));
+  check("G20 closed sheet: no 'new order'; the publication archive says files are not available yet and offers no fake view/download buttons; every row links to its client (payments stay there)",
     $("#sheet-new-order").hidden && !$("#sheet-archive").hidden && !$("#sheet-archive").querySelector("a, button") && text("#sheet-archive").includes("אחסון הקבצים")
-    && $$("#sheet-orders-table [data-client-view]").length === new Set(orders125.map((o) => o.client_id)).size);
+    && $$("#sheet-orders-table [data-client-view]").length === orders125.length);
   $('[data-page="sheet"] .back-link').click(); await sleep(200);
   const backOk = page() === "sheets" && w.location.hash === "#/sheets";
-  archiveRow("124").click(); await sleep(250);
-  check("G21 navigation: back to the list; a historical sheet's page says its date was not recorded and explains the partial information",
+  sheetRow("124").click(); await sleep(250);
+  check("G21 navigation: back to the list; a historical sheet's page says its date was not recorded and explains the partial information; no credits figure when none were used",
     backOk && w.location.hash === "#/sheet/124" && text("#sheet-page-date") === "תאריך הפרסום לא תועד" && text("#sheet-page-status") === "היסטורי"
-    && !$("#sheet-page-subtitle").hidden && text("#sheet-page-subtitle").includes("לא תועדו"), text("#sheet-page-date"));
+    && !$("#sheet-page-subtitle").hidden && text("#sheet-page-subtitle").includes("לא תועדו") && $("#sheet-credits").closest(".sheet-sum").hidden, text("#sheet-page-date"));
   await nav("sheets");
 
   db().sheets.length = 0; db().orders.length = 0;
   await reloadBoard();
-  check("G12 no sheets at all: a friendly empty state with a hint to add sheets; the sheet of the week says nothing is planned",
+  check("G12 no sheets at all: a friendly empty state with a hint to add sheets; the banner says no sheet is planned",
     !$("#sheets-empty").hidden && text("#sheets-empty-title") === "עדיין אין גיליונות" && text("#sheets-empty-text").includes("הוספת גיליונות")
-    && text("#sheets-current").includes("אין גיליון מתוכנן") && $("#sheets-upcoming-section").hidden && $("#sheets-archive-section").hidden, text("#sheets-empty"));
+    && text("#sheets-banner-current").includes("אין גיליון מתוכנן") && !bannerLink() && $("#sheets-table").hidden, text("#sheets-empty"));
 
   await load("session=1&business=1&sheets=2", "#/sheets", 390);
   await waitFor(() => $$('[data-page="sheets"] [data-sheet]').length > 0);
-  const bannerImg = $(".sheets-banner-art img");
-  const mLine = $("#sheets-upcoming .sheet-line"), mArch = $("#sheets-body .sheet-row");
   const inside = (el) => { const r = el.getBoundingClientRect(); return r.left >= -1 && r.right <= w.innerWidth + 1; };
+  const phoneRows = $$("#sheets-body .sheet-row");
   const mobileList = d.documentElement.scrollWidth <= d.documentElement.clientWidth + 1 && $(".sheets-banner").scrollWidth <= $(".sheets-banner").clientWidth + 1
-    && Math.abs(bannerImg.getBoundingClientRect().width / bannerImg.getBoundingClientRect().height - 142 / 189) < 0.02
-    && inside($("#sheets-current .sheet-feature-main")) && inside(mLine) && inside(mArch) && w.getComputedStyle(mArch).display === "flex";
+    && inside(bannerLink()) && phoneRows.every((row) => inside(row) && w.getComputedStyle(row).display === "grid"
+      && [...row.children].filter((cell) => cell.offsetParent !== null).every(inside))
+    && phoneRows.every((row) => row.querySelector(".sheet-intake")?.offsetParent !== null);
   $("#sheets-add").click(); await sleep(200);
   const card = $("#sheets-add-modal .modal-card");
   const mobileAdd = $("#sheets-add-modal").getBoundingClientRect().width <= 390 && card.scrollWidth <= card.clientWidth + 1
@@ -536,43 +535,46 @@ async function run() {
   card.scrollTop = card.scrollHeight / 2; await sleep(60); bar.push(barOnScreen());
   card.scrollTop = card.scrollHeight; await sleep(60); bar.push(barOnScreen());
   const lastRowVisible = (() => { const last = $$("#sheets-add-rows tr").pop().getBoundingClientRect(), foot = $(".sheets-add-footer").getBoundingClientRect(); return last.bottom <= foot.top + 1; })();
-  check("G13 phone (390px): sheet of the week, future lines and archive cards fit with no sideways scrolling; the banner keeps the illustration's proportions; the add dialog fits",
+  check("G13 phone (390px): banner and every sheet row fit with no sideways scrolling (two lines per sheet, order intake visible); the add dialog fits",
     mobileList && mobileAdd, JSON.stringify({ mobileList, mobileAdd, sw: d.documentElement.scrollWidth, cw: card.scrollWidth + "/" + card.clientWidth }));
   check("G17 phone, 20 sheets: the save and cancel buttons stay visible while scrolling; the last sheet scrolls clear of the bar",
     $$("#sheets-add-rows tr").length === 20 && bar.every(Boolean) && lastRowVisible, JSON.stringify({ bar, lastRowVisible }));
   $("#sheets-add-modal [data-close-modal]").click(); await sleep(60);
-  $("#sheets-body [data-sheet]").click(); await sleep(250);
-  const phoneSheet = page() === "sheet" && d.documentElement.scrollWidth <= d.documentElement.clientWidth + 1;
-  check("G18 rows and lines are single buttons (keyboard reachable) that open the sheet page; on a phone the sheet page has no sideways scrolling",
-    mLine.tagName === "BUTTON" && mArch.tagName === "BUTTON" && $("#sheets-current .sheet-feature-main").tagName === "BUTTON" && phoneSheet, `${phoneSheet} ${w.location.hash}`);
+  sheetRow("125").querySelector(".sheet-row-link").click(); await sleep(250);
+  const wrap = $(".sheet-orders-wrap");
+  const phoneSheet = page() === "sheet" && d.documentElement.scrollWidth <= d.documentElement.clientWidth + 1 && $(".sheet-hero").scrollWidth <= $(".sheet-hero").clientWidth + 1
+    && (wrap.scrollWidth <= wrap.clientWidth + 1 || w.getComputedStyle(wrap).overflowX === "auto");
+  check("G18 phone sheet page: the summary banner fits; the page has no sideways scrolling; the order table keeps all its columns and scrolls inside its frame",
+    phoneSheet, `${phoneSheet} ${w.location.hash} ${wrap.scrollWidth}/${wrap.clientWidth}`);
 
   // Widths, measured in the widest realistic state: Saturday with paid, credit and large unpaid orders.
   await load("session=1&business=1&sheets=2", "#/sheets", 1440);
   await waitFor(() => $$('[data-page="sheets"] [data-sheet]').length > 0);
-  const made = [await orderTo("125", "c-test-1", 500, null, true), await orderTo("125", "c-test-4", null, 2.5, true), await orderTo("125", "c-test-2", 12500, null, false), await orderTo("126", "c-test-2", 12500, null, false)];
+  const made = [await orderTo("125", "c-test-1", 500, null, true, "טקסט ארוך של הערה כדי לבדוק שהעמודה נשברת לשורות ואינה מרחיבה את הטבלה"), await orderTo("125", "c-test-4", null, 2.5, true), await orderTo("125", "c-test-2", 12500, null, false), await orderTo("126", "c-test-2", 12500, null, false)];
   w.__mock.setNow(new Date(Date.parse(seeded("125").closes_at) + 34 * 3600000).toISOString());
   await reloadBoard();
-  const listFits = {};
   const fits = (el) => el.scrollWidth <= el.clientWidth + 1 && [...el.children].every((part) => { const r = part.getBoundingClientRect(), o = el.getBoundingClientRect(); return r.width === 0 || (r.left >= o.left - 1 && r.right <= o.right + 1); });
-  for (const width of [1440, 1366, 1280, 1024]) {
-    frame.style.width = width + "px"; await sleep(150);
-    const all = [$("#sheets-current .sheet-feature-main"), ...$$("#sheets-upcoming .sheet-line"), ...$$("#sheets-body .sheet-row")];
-    listFits[width] = all.every(fits) && d.documentElement.scrollWidth <= d.documentElement.clientWidth + 1 && $("#sheets-current .sheet-figure.is-due")?.offsetParent !== null ? true : `${d.documentElement.scrollWidth}/${d.documentElement.clientWidth}`;
+  const widths = {};
+  for (const width of [1440, 1366, 1280, 1024, 768]) {
+    frame.style.width = width + "px"; await nav("sheets"); await sleep(150);
+    const list = fits($(".sheets-table-wrap")) && fits($(".sheets-banner")) && d.documentElement.scrollWidth <= d.documentElement.clientWidth + 1;
+    sheetRow("125").click(); await sleep(200);
+    const sheet = fits($(".sheet-hero")) && fits($(".sheet-summary")) && d.documentElement.scrollWidth <= d.documentElement.clientWidth + 1
+      && $$(".sheet-summary .sheet-sum").filter((cell) => !cell.hidden).every((cell) => cell.querySelector("dd").scrollWidth <= cell.clientWidth);
+    widths[width] = list && sheet ? true : { list, sheet };
   }
-  frame.style.width = "1440px"; await sleep(150);
-  check("G14 tablet (1024px), laptops (1280px, 1366px) and desktop (1440px), Saturday with paid, credit and large unpaid orders: the sheet of the week, every line and row fit; the balance stays visible",
-    made.every((r) => !r.error) && text("#sheets-current .sheet-status-label") === "סגור להזמנות" && Object.values(listFits).every((ok) => ok === true),
-    JSON.stringify({ listFits, err: made.map((r) => r.error?.message).filter(Boolean) }));
-  // The banner keeps the owner's concept and never enlarges the soft source illustration; the newspaper image stands free.
-  const bn = $(".sheets-banner"), bImg = $(".sheets-banner-art img"), bBox = bImg.getBoundingClientRect();
-  const bannerOk = bImg.naturalWidth === 142 && bBox.width <= 142 && bBox.height <= 189 && Math.abs(bBox.width / bBox.height - 142 / 189) < 0.02
-    && text(".sheets-banner-title") === "הגיליונות שלנו" && text(".sheets-banner-eyebrow") === "מערכת הפרסומון" && !bn.querySelector("button, input, select, a") && !/\d/.test(bn.textContent);
-  const papers = [".sheet-feature-paper", ".sheet-line-paper", ".sheet-row-paper"].map((sel) => w.getComputedStyle($(sel)));
-  const paperUrl = (papers[0].backgroundImage.match(/url\("?([^")]+)"?\)/) || [])[1];
-  const freePaper = papers.every((css) => /sheet-newspaper\.png/.test(css.backgroundImage) && css.borderTopLeftRadius === "0px" && css.backgroundColor === "rgba(0, 0, 0, 0)" && css.borderTopWidth === "0px");
-  const paper = paperUrl ? await new Promise((resolve) => { const im = new w.Image(); im.onload = () => resolve(`${im.naturalWidth}x${im.naturalHeight}`); im.onerror = () => resolve("error"); im.src = paperUrl; }) : "none";
-  check("G16 banner: the reader illustration at or below its natural size (142×189, proportions kept), title and eyebrow kept, no data or buttons; the newspaper image (240×211) stands free in the card, lines and rows: no circle, frame or coloured backdrop",
-    bannerOk && freePaper && paper === "240x211", JSON.stringify({ bannerOk, freePaper, paper, w: bBox.width }));
+  frame.style.width = "1440px"; await nav("sheets"); await sleep(150);
+  check("G14 desktop 1440, laptops 1366/1280, tablet 1024/768 (Saturday, large amounts and long notes): the banner and the list fit; the sheet's summary banner fits with every figure whole",
+    made.every((r) => !r.error) && intakeOf("125") === "סגור להזמנות" && Object.values(widths).every((ok) => ok === true),
+    JSON.stringify({ widths, err: made.map((r) => r.error?.message).filter(Boolean) }));
+  // The banner: title, subtitle and the current-sheet line; the photo slot is the licensed file only (no illustration, no frame).
+  const photo = w.getComputedStyle($(".sheets-banner-photo"));
+  const bannerOk = text(".sheets-banner-title") === "הגיליונות שלנו" && text(".sheets-banner-sub") === "כל גיליונות הפרסומון, במקום אחד"
+    && !$(".sheets-banner img") && /sheets-banner\.jpg/.test(photo.backgroundImage) && photo.borderTopWidth === "0px" && photo.backgroundSize === "cover"
+    && $(".sheets-banner-photo").getBoundingClientRect().left <= $(".sheets-banner").getBoundingClientRect().left + 1
+    && $(".sheets-banner-text").getBoundingClientRect().right >= $(".sheets-banner").getBoundingClientRect().right - 2;
+  check("G16 banner composition: title 'הגיליונות שלנו' and the subtitle on the right; the photo area on the left uses only the licensed photo file (cover, never stretched out of proportion), with no illustration and no frame",
+    bannerOk, JSON.stringify({ bg: photo.backgroundImage.slice(-40), size: photo.backgroundSize }));
 
   // ===== deep link restored after login
   await load("session=1&business=1", "#/client/c-test-3");

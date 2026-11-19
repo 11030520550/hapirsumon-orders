@@ -47,8 +47,6 @@ f.onload = async () => {
   }
   await w.ModaatApp.refresh(); await sleep(700);
   w.location.hash = `#/${params.get("page") || "sheets"}`; await sleep(500);
-  if (scene === "monday" || scene === "states") { d.querySelector('[data-sheets-filter="all"]').click(); await sleep(600); } // let the chip colour transition finish
-  if (scene === "states") { const sort = d.querySelector("#sheets-sort"); set(sort, "number:asc"); await sleep(80); }
   if (scene === "add" || scene === "add-errors" || scene === "add-20") {
     d.querySelector("#sheets-add").click(); await sleep(250);
     if (scene === "add-20") {

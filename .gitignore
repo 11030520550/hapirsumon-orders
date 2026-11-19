@@ -65,3 +65,6 @@ orders-netlify-ready/
 !archive/**/*.pdf
 !archive/data-exports-2026-11-11/modaat-cloud-backup-2026-11-11.json
 !archive/data-exports-2026-11-11/modaat-local-backup-2026-11-11.json
+
+# Design inspiration (screenshots from stock-photo sites; not licensed for use) stays local only.
+design-references/inspiration/
