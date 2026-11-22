@@ -1859,6 +1859,7 @@
     form.elements.amount.value = open ? String(row.outstanding) : "";
     form.elements.amount.max = open ? String(row.outstanding) : "";
     form.elements.received_on.value = localDateValue();
+    form.elements.received_on.max = localDateValue();
     const reversed = new Set(state.events.filter((event) => event.reverses_event_id).map((event) => event.reverses_event_id));
     const events = state.events.filter((event) => event.obligation_id === obligationId);
     const lines = events.map((event) => {
@@ -1890,6 +1891,8 @@
     if (!(amount > 0) || roundMoney(amount) !== amount) { message.textContent = "יש להזין סכום חיובי, עד שתי ספרות אחרי הנקודה."; return; }
     if (amount > row.outstanding) { message.textContent = `הסכום גבוה מהיתרה לתשלום (${money.format(row.outstanding)}).`; return; }
     if (!/^\d{4}-\d{2}-\d{2}$/.test(receivedOn)) { message.textContent = "יש לבחור תאריך תקבול."; return; }
+    // The server refuses receipts dated in the future (record_obligation_payment); say so before sending.
+    if (receivedOn > localDateValue()) { message.textContent = "תאריך התקבול לא יכול להיות בעתיד."; return; }
     const button = $("#biz-pay-submit");
     setBusy(button, true, "רישום התקבול");
     message.textContent = "";

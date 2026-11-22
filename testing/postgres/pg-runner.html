@@ -27,13 +27,23 @@ async function rpc(name, args) {
   const values = keys.map((k) => (args[k] !== null && typeof args[k] === "object" ? JSON.stringify(args[k]) : args[k]));
   return (await q(sql, values))[0].r;
 }
-async function fails(fn) { try { await fn(); return null; } catch (e) { return e.message || String(e); } }
+// On error, end any transaction a file opened with "begin;" (as the Supabase SQL editor does after a failed run),
+// so the next statement does not run inside an aborted transaction. Outside a transaction this is a no-op warning.
+async function fails(fn) { try { await fn(); return null; } catch (e) { try { await db.exec("rollback"); } catch { } return e.message || String(e); } }
 
 const realFetch = window.fetch.bind(window);
 window.fetch = async (input, init) => { try { return await realFetch(input, init); } catch (e) { log(`fetch failed: ${input && input.url || input}`); throw e; } };
 async function run() {
   db = await PGlite.create();
   log(`postgres: ${(await one("select version() as v")).v.split(" on ")[0]}`);
+  // The optimistic-concurrency checks compare updated_at = now(). Headless Chrome with --virtual-time-budget
+  // freezes the clock (every statement gets the same now()), which makes the stale-version tests fail for a
+  // reason that has nothing to do with the SQL. Stop with a clear message instead of a misleading FAIL.
+  const t0 = (await one("select clock_timestamp()::text as t")).t;
+  for (let i = 0; i < 20 && (await one("select clock_timestamp()::text as t")).t === t0; i += 1) await q("select count(*) from generate_series(1, 20000)");
+  if ((await one("select clock_timestamp()::text as t")).t === t0) {
+    throw new Error("environment: the database clock does not advance (headless Chrome --virtual-time-budget?). Run with node testing/postgres/run-node.mjs or in a normal Chrome window.");
+  }
 
   // ----- Supabase stand-ins: only what the project SQL uses -----
   await db.exec(`
@@ -182,7 +192,7 @@ async function run() {
     const pk = await one("select id, updated_at, price_before_vat from public.customer_packages where id = $1", [pkg.customer_package_id]);
     const insts = await q("select f.id, f.due_on::text as due_on, i.amount_before_vat, f.updated_at from public.financial_obligations f join public.package_installments i on i.id = f.package_installment_id where i.customer_package_id = $1 order by f.due_on", [pk.id]);
     await rpc("record_obligation_payment", { p_obligation_id: insts[0].id, p_amount: 211.22, p_received_on: "2026-11-01", p_notes: "", p_expected_updated_at: insts[0].updated_at, p_idempotency_key: uuid() });
-    await rpc("record_obligation_payment", { p_obligation_id: insts[1].id, p_amount: 100, p_received_on: "2026-12-01", p_notes: "", p_expected_updated_at: insts[1].updated_at, p_idempotency_key: uuid() });
+    await rpc("record_obligation_payment", { p_obligation_id: insts[1].id, p_amount: 100, p_received_on: "2026-11-02", p_notes: "", p_expected_updated_at: insts[1].updated_at, p_idempotency_key: uuid() });
     const pk2 = await one("select updated_at from public.customer_packages where id = $1", [pk.id]);
     // New schedule: keep 1 (paid) and 2 (partly paid), drop the last two, add one bigger final payment.
     const items = insts.slice(0, 10).map((x) => ({ obligation_id: x.id, due_on: x.due_on, amount_before_vat: Number(x.amount_before_vat) }));
@@ -225,7 +235,14 @@ async function run() {
   check("rollback stops by itself once the new model is in use (nothing changed)", /already in use|Partial receipts/.test(rb || ""), rb);
 
   // ----- sheets v2 on top -----
-  const sheetsSql = (await file("supabase-sheets-v2.sql")).replace("'__REPLACE_WITH_THE_ACTIVE_SHEET__'", "'126'");
+  // Safety net first: keeping only 126 open would close 125 and 127, which had orders in the last 14 days.
+  const sheetsRaw = await file("supabase-sheets-v2.sql");
+  const sheetsColsBefore = Number((await one("select count(*) n from information_schema.columns where table_schema = 'public' and table_name = 'sheets'")).n);
+  const guard = await fails(() => db.exec(sheetsRaw.replace("'__REPLACE_WITH_THE_ACTIVE_SHEET__'", "'126'")));
+  const sheetsColsAfter = Number((await one("select count(*) n from information_schema.columns where table_schema = 'public' and table_name = 'sheets'")).n);
+  check("sheets v2 guard: an incomplete keep-open list is refused (125, 127 had recent orders) and nothing changes",
+    /125, 127/.test(guard || "") && /Nothing was changed/.test(guard || "") && sheetsColsBefore === sheetsColsAfter, guard || "no error");
+  const sheetsSql = sheetsRaw.replace("'__REPLACE_WITH_THE_ACTIVE_SHEET__'", "'125'), ('126'), ('127'");
   const sv = await fails(() => db.exec(sheetsSql));
   check("install: supabase-sheets-v2.sql (keep-open = the active sheet) runs on top of orders v3", sv === null, sv || "");
   if (sv === null) {
@@ -242,11 +259,24 @@ async function run() {
   const procs = await q("select p.proname, coalesce(p.proargnames, '{}') as args from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public'");
   const procMap = new Map(procs.map((p) => [p.proname, p.args]));
   const rpcProblems = [];
-  for (const m of js.matchAll(/rpc\("([a-z_]+)"(?:,\s*\{([\s\S]*?)\}\s*\))?/g)) {
+  // The argument object is read with balanced braces: a lazy regex would stop at the first "})" inside it
+  // (for example rows.map((row) => ({ ... }))) and report parameters as missing that the UI does send.
+  const argObject = (src, from) => {
+    const open = src.slice(from).match(/^,\s*\{/);
+    if (!open) return undefined;
+    let depth = 0;
+    for (let i = from + open[0].length - 1; i < src.length; i += 1) {
+      if (src[i] === "{") depth += 1;
+      else if (src[i] === "}" && (depth -= 1) === 0) return src.slice(from + open[0].length, i);
+    }
+    return undefined;
+  };
+  for (const m of js.matchAll(/rpc\("([a-z_]+)"/g)) {
     const args = procMap.get(m[1]);
     if (!args) { rpcProblems.push(`missing function ${m[1]}`); continue; }
-    for (const key of new Set([...(m[2] || "").matchAll(/\b(p_[a-z_]+)\s*:/g)].map((k) => k[1]))) if (!args.includes(key)) rpcProblems.push(`${m[1]}: no parameter ${key}`);
-    for (const a of args) if (m[2] !== undefined && !(m[2] || "").includes(a)) rpcProblems.push(`${m[1]}: UI does not send ${a}`);
+    const body = argObject(js, m.index + m[0].length);
+    for (const key of new Set([...(body || "").matchAll(/\b(p_[a-z_]+)\s*:/g)].map((k) => k[1]))) if (!args.includes(key)) rpcProblems.push(`${m[1]}: no parameter ${key}`);
+    for (const a of args) if (body !== undefined && !new RegExp(`\\b${a}\\s*:`).test(body)) rpcProblems.push(`${m[1]}: UI does not send ${a}`);
   }
   check("contract: every rpc() call in the UI matches a function and its exact parameter names", rpcProblems.length === 0, rpcProblems.join("; "));
   const cols = await q("select table_name, column_name from information_schema.columns where table_schema = 'public'");

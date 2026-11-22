@@ -486,7 +486,9 @@
       needV3("record_obligation_payment");
       const amount = Number(p.p_amount);
       if (!(amount > 0) || r2(amount) !== amount) throw "סכום התקבול חייב להיות חיובי, עם עד שתי ספרות אחרי הנקודה.";
-      if (!p.p_received_on) throw "תאריך התקבול אינו תקין.";
+      // Same rule as the SQL: p_received_on is null or p_received_on > current_date + 1 → refused.
+      const tomorrow = (() => { const d = new Date(`${today()}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10); })();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(p.p_received_on || "")) || p.p_received_on > tomorrow) throw "תאריך התקבול אינו תקין.";
       const ob = db.financial_obligations.find((f) => f.id === p.p_obligation_id);
       if (!ob) throw "החיוב לא נמצא.";
       if (ob.updated_at !== p.p_expected_updated_at) throw staleV3("החיוב");

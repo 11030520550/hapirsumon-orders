@@ -187,6 +187,24 @@ async function run() {
   const partialRow = $$("#payments-body tr").find((tr) => tr.textContent.includes(`הזמנה ${cash.order_number}`));
   check("O9 partial payment: 400 of 1,180 → 'שולם חלקית', received 400, balance 780 (orders table and payments screen)",
     partialMsg === "" && pc[9] === "שולם חלקית" && partialRow && partialRow.textContent.includes("780") && partialRow.textContent.includes("400"), `${pc[9]} | ${partialRow?.textContent.replace(/\s+/g, " ")}`);
+
+  // ----- 9c: a receipt cannot be dated in the future (the SQL refuses it; the form says so first) -----
+  await nav("orders");
+  const eventsBefore = db().business_payment_events.length;
+  const future = new Date(); future.setDate(future.getDate() + 3);
+  const futureIso = `${future.getFullYear()}-${String(future.getMonth() + 1).padStart(2, "0")}-${String(future.getDate()).padStart(2, "0")}`;
+  $(`#orders-body [data-biz-pay-open="${cashOb.id}"]`).click(); await sleep(150);
+  const payForm = $("#biz-pay-form");
+  const maxIsToday = payForm.elements.received_on.max === payForm.elements.received_on.value;
+  setVal(payForm.elements.amount, "10"); setVal(payForm.elements.received_on, futureIso);
+  payForm.requestSubmit(); await sleep(300);
+  const futureMsg = text("#biz-pay-message");
+  $("#biz-pay-modal").close();
+  const futureRpc = await w.ModaatApp.client().rpc("record_obligation_payment", { p_obligation_id: cashOb.id, p_amount: 10, p_received_on: futureIso, p_notes: "",
+    p_expected_updated_at: cashOb.updated_at, p_idempotency_key: w.crypto.randomUUID() });
+  check("O9c a future receipt date is blocked in the form (max = today) and refused by the function; nothing is recorded",
+    maxIsToday && futureMsg.includes("בעתיד") && !!futureRpc.error && db().business_payment_events.length === eventsBefore, `${futureMsg} | ${futureRpc.error?.message}`);
+
   await nav("orders");
   const over = await payUI(cashOb.id, 781);
   $("#biz-pay-modal").close();

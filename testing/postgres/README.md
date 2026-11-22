@@ -19,11 +19,21 @@ tar -xzf $env:TEMP\pglite.tgz -C testing\postgres
 ```
 
 ## הרצה
+
+**במחשב שיש בו Node (מומלץ):** משורש הפרויקט:
+```
+node testing/postgres/run-node.mjs
+```
+הפקודה מריצה את אותו קוד בדיקה של `pg-runner.html`, בלי דפדפן ובלי שרת. קוד יציאה 0 פירושו `RESULT OK`.
+
+**במחשב בלי Node:**
 ```powershell
 powershell -ExecutionPolicy Bypass -File testing\postgres\serve-pg.ps1 -Root . -TestDir testing\postgres -Port 8007
 ```
 
-אחר כך פותחים ב-Chrome את `http://127.0.0.1:8007/__test/pg-runner.html`.
+אחר כך פותחים את `http://127.0.0.1:8007/__test/pg-runner.html` **בחלון Chrome רגיל**.
+
+**⚠ לא להריץ ב-headless עם `--virtual-time-budget`.** במצב הזה השעון של Chrome קפוא, ולכן כל פקודה מקבלת אותו `now()`. בגלל זה בדיקות "גרסה ישנה" (`updated_at`) נכשלות, וזה לא קשור ל-SQL. זו הייתה סיבת התוצאה 16/17 במחשב העבודה (22/11). מעכשיו הבדיקה מזהה שעון קפוא ונעצרת עם הודעה ברורה.
 
 `serve-pg.ps1` הוא העתק של `testing/browser/serve.ps1`. ההבדל היחיד: הוא מגיש גם קבצים מסוג `.wasm`, `.data` ו-`.sql`.
 
