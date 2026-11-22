@@ -8,12 +8,12 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@500;700&family=Heebo:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20261119-5">
+  <link rel="stylesheet" href="styles.css?v=20261122-1">
   <!-- supabase-js pinned to 2.119.0 and served locally (vendor/); SHA-384 verified against jsDelivr's published hash. -->
   <script src="vendor/supabase-js-2.119.0.js" integrity="sha384-uteMfOloLDGt042uDz+xHGF3ym63/WQ6rFq7murQRG8Ih7QrXGEGNtWd8688sb4O"></script>
   <script src="supabase-config.js"></script>
-  <script src="app.js?v=20261118-1" defer></script>
-  <script src="business-app.js?v=20261119-5" defer></script>
+  <script src="app.js?v=20261122-1" defer></script>
+  <script src="business-app.js?v=20261122-1" defer></script>
 </head>
 <body>
   <svg class="svg-defs" width="0" height="0" aria-hidden="true">
@@ -155,14 +155,14 @@
 
           <section class="ledger-strip" aria-labelledby="ledger-title">
             <div class="ledger-strip-head">
-              <h2 id="ledger-title">סיכום לפי סטטוס ההזמנות</h2>
-              <p>נתון ביניים: מבוסס על סטטוס ההזמנות בלבד, אינו כולל תשלומי חבילות, ועשוי להיות שונה ממסך התשלומים ומהדוחות עד לתיקון החישוב.</p>
+              <h2 id="ledger-title">מצב כספי</h2>
+              <p id="ledger-source">הזמנות ותשלומי חבילות, לפי החיובים והתקבולים במסד: אותם מספרים כמו במסך התשלומים ובדוחות.</p>
             </div>
             <div class="ledger-figures">
-              <div><span>כל ההזמנות</span><strong id="stat-orders">0</strong></div>
-              <div><span>הזמנות שסומנו כשולמו</span><strong id="stat-paid">₪0</strong></div>
-              <div><span>הזמנות שטרם שולמו</span><strong id="stat-pending">0</strong></div>
-              <div><span>סכום הזמנות שטרם שולמו</span><strong id="stat-balance">₪0</strong></div>
+              <div><span id="stat-orders-label">הזמנות פעילות</span><strong id="stat-orders">0</strong></div>
+              <div><span>התקבל</span><strong id="stat-paid">₪0</strong></div>
+              <div><span>חיובים פתוחים</span><strong id="stat-pending">0</strong></div>
+              <div><span>יתרה לתשלום</span><strong id="stat-balance">₪0</strong></div>
             </div>
           </section>
           <footer class="page-footer">מודעת <span>·</span> מערכת הפרסומון</footer>
@@ -202,15 +202,16 @@
             </div>
             <div class="table-wrap">
               <table class="entry-table">
-                <thead><tr><th scope="col">#</th><th scope="col">גיליון *</th><th scope="col">מוצר *</th><th scope="col">מחיר לפני מע"מ</th><th scope="col">או קרדיטים</th><th scope="col">סטטוס</th><th scope="col">מועד פירעון</th><th scope="col">הערות</th><th scope="col"><span class="sr-only">פעולות</span></th></tr></thead>
+                <thead><tr><th scope="col">#</th><th scope="col">גיליון *</th><th scope="col" id="new-order-item-head">מוצר *</th><th scope="col">מחיר לפני מע"מ</th><th scope="col">או קרדיטים</th><th scope="col">סטטוס</th><th scope="col">מועד פירעון</th><th scope="col">הערות</th><th scope="col"><span class="sr-only">פעולות</span></th></tr></thead>
                 <tbody id="new-order-rows"></tbody>
               </table>
             </div>
             <div class="form-panel">
               <datalist id="sheet-options"></datalist>
               <p class="field-hint" id="new-order-sheet-warning" hidden></p>
-              <p class="field-hint">בכל שורה ממלאים מחיר <strong>או</strong> קרדיטים. הזמנה בקרדיטים נחשבת משולמת ומנכה מהיתרה.</p>
+              <p class="field-hint" id="new-order-rule">בכל שורה ממלאים מחיר לפני מע״מ <strong>או</strong> קרדיטים, לא שניהם. המחיר כולל מע״מ מחושב אוטומטית.</p>
               <div class="summary-box" id="new-order-summary" aria-live="polite"></div>
+              <div class="credit-alert" id="new-order-credit-alert" role="status" hidden></div>
               <p class="form-message" id="new-order-message" role="alert"></p>
               <div class="import-preview success" id="new-order-result" hidden></div>
               <div class="modal-actions">
@@ -224,26 +225,43 @@
         <!-- All orders -->
         <section class="page-view" data-page="orders" hidden>
           <div class="welcome-row">
-            <div><p class="eyebrow">הזמנות</p><h1>הזמנות</h1><p class="page-subtitle">כל ההזמנות: חיפוש לפי מספר הזמנה, לקוח או גיליון, ועדכון סטטוס תשלום.</p></div>
+            <div><p class="eyebrow">הזמנות</p><h1>הזמנות</h1><p class="page-subtitle" id="orders-subtitle">חיפוש וסינון של כל ההזמנות. לחיצה כפולה על תא פותחת עריכה.</p></div>
             <button class="button button-primary" type="button" data-go="new-order"><span class="button-plus">＋</span> הזמנה חדשה</button>
           </div>
-          <section class="orders-section" id="orders">
-            <div class="table-toolbar">
+          <section class="orders-section orders-workspace" id="orders">
+            <div class="table-toolbar orders-toolbar">
               <label class="search-box">
                 <span aria-hidden="true">⌕</span>
-                <input id="search-input" type="search" placeholder="חיפוש לפי מספר הזמנה, לקוח, גיליון או מוצר..." aria-label="חיפוש הזמנות">
+                <input id="search-input" type="search" placeholder="מספר הזמנה, לקוח או פירוט" aria-label="חיפוש הזמנות לפי מספר, לקוח או פירוט">
               </label>
-              <label class="filter-label">סטטוס תשלום
+              <label class="filter-label biz-only">גיליון
+                <select id="orders-sheet-filter" aria-label="סינון לפי גיליון"><option value="">כל הגיליונות</option></select>
+              </label>
+              <label class="filter-label">תשלום
                 <select id="payment-filter" aria-label="סינון לפי סטטוס תשלום">
-                  <option value="all">כל הסטטוסים</option>
+                  <option value="all">הכול</option>
+                  <option value="pending">לא שולם</option>
+                  <option value="partial">שולם חלקית</option>
                   <option value="paid">שולם</option>
-                  <option value="pending">ממתין לתשלום</option>
+                  <option value="credits">קרדיטים</option>
                 </select>
               </label>
+              <label class="filter-label orders-v3-only" hidden>קובץ
+                <select id="orders-file-filter" aria-label="סינון לפי סטטוס קובץ">
+                  <option value="">הכול</option><option value="unknown">לא ידוע</option><option value="not_received">לא התקבל</option><option value="received">התקבל</option><option value="approved">אושר</option>
+                </select>
+              </label>
+              <label class="filter-label orders-v3-only" hidden>שיבוץ
+                <select id="orders-placement-filter" aria-label="סינון לפי סטטוס שיבוץ">
+                  <option value="">הכול</option><option value="unknown">לא ידוע</option><option value="not_placed">לא שובץ</option><option value="placed">שובץ</option><option value="published">פורסם</option>
+                </select>
+              </label>
+              <label class="check-label orders-v3-only" hidden><input type="checkbox" id="orders-show-cancelled"> כולל מבוטלות</label>
             </div>
-            <div class="table-wrap">
-              <table>
-                <thead>
+            <p class="import-preview warning biz-only" id="orders-v2-note" hidden>פירוט חופשי, סטטוס קובץ, סטטוס שיבוץ, ביטול הזמנה ותשלומים חלקיים יופעלו לאחר התקנת עדכון המסד (supabase-orders-v3.sql). עד אז מוצגים הנתונים הקיימים.</p>
+            <div class="table-wrap orders-table-wrap">
+              <table class="orders-table" id="orders-table">
+                <thead id="orders-head">
                   <tr>
                     <th scope="col">מספר הזמנה</th>
                     <th scope="col">תאריך הזמנה</th>
@@ -267,18 +285,13 @@
           </section>
         </section>
 
-        <!-- Sheets: one banner (photo on the left, title on the right, a link to the current sheet), then one
-             continuous list of every sheet. Money and order details live only on each sheet's own page. -->
+        <!-- Sheets: a compact header (title + the current sheet), then one continuous table of every sheet.
+             Money and order details live on each sheet's own page. No photographs. -->
         <section class="page-view sheets-page" data-page="sheets" hidden>
-          <!-- Only "גיליון N" in the banner is clickable. The photo is shown only when the licensed file exists
-               (assets/sheets-banner.jpg, see design-references/README.md); never stretched, never an illustration. -->
-          <header class="sheets-banner" id="sheets-banner">
-            <div class="sheets-banner-text">
-              <h1 class="sheets-banner-title">הגיליונות שלנו</h1>
-              <p class="sheets-banner-sub">כל גיליונות הפרסומון, במקום אחד.</p>
-              <div class="sheets-banner-current" id="sheets-banner-current" hidden></div>
-            </div>
-            <div class="sheets-banner-photo" aria-hidden="true"></div>
+          <header class="sheets-head" id="sheets-banner">
+            <h1 class="sheets-head-title">גיליונות</h1>
+            <!-- Only "גיליון N" is clickable. Shown only with dated sheets (model v2). -->
+            <div class="sheets-banner-current" id="sheets-banner-current" hidden></div>
           </header>
           <div class="biz-required" hidden><p>מספרי גיליון נשמרים בהזמנות לאחר התקנת הסכימה העסקית ב-Supabase.</p></div>
           <p class="import-preview warning biz-only" id="sheets-status-note" hidden>סגירת גיליון תהיה זמינה לאחר הפעלת הקובץ supabase-sheets-and-order-numbers.sql. עד אז כל הגיליונות מוצגים כפתוחים.</p>
@@ -439,7 +452,7 @@
           <section class="orders-section tab-panel" data-tab-panel="payments" hidden>
             <div class="table-wrap">
               <table>
-                <thead><tr><th scope="col">חיוב</th><th scope="col">מועד פירעון</th><th scope="col">סכום כולל מע"מ</th><th scope="col">סטטוס</th><th scope="col"><span class="sr-only">פעולות</span></th></tr></thead>
+                <thead><tr><th scope="col">חיוב</th><th scope="col">מועד פירעון</th><th scope="col">סכום כולל מע"מ</th><th scope="col">התקבל</th><th scope="col">יתרה</th><th scope="col">סטטוס</th><th scope="col"><span class="sr-only">פעולות</span></th></tr></thead>
                 <tbody id="client-payments-body"></tbody>
               </table>
               <div class="empty-state" id="client-payments-empty" hidden><strong>אין חיובים ללקוח זה</strong></div>
@@ -486,14 +499,14 @@
         <!-- Payments and debts -->
         <section class="page-view" data-page="payments" hidden>
           <div class="welcome-row">
-            <div><p class="eyebrow">כספים</p><h1>תשלומים וחובות</h1><p class="page-subtitle">כל החיובים: הזמנות ותשלומי חבילות. סימון תשלום נשמר מיד במסד הנתונים.</p></div>
+            <div><p class="eyebrow">כספים</p><h1>תשלומים וחובות</h1><p class="page-subtitle">כל החיובים: הזמנות ותשלומי חבילות. כל תקבול נרשם בנפרד, גם תשלום חלקי.</p></div>
           </div>
           <div class="biz-required" hidden><p>המסך זמין לאחר התקנת הסכימה העסקית ב-Supabase.</p></div>
           <section class="stats-grid biz-only" aria-label="סיכום חובות">
             <article class="stat-card"><div class="stat-top"><span class="stat-icon icon-orange">◷</span><span class="stat-caption">באיחור</span></div><div class="stat-value" id="payments-overdue">₪0</div><div class="stat-foot">מועד הפירעון עבר</div></article>
             <article class="stat-card"><div class="stat-top"><span class="stat-icon icon-purple">₪</span><span class="stat-caption">ללא מועד פירעון</span></div><div class="stat-value" id="payments-undated">₪0</div><div class="stat-foot">פתוח, לא נחשב פיגור</div></article>
             <article class="stat-card"><div class="stat-top"><span class="stat-icon icon-blue">▤</span><span class="stat-caption">תשלומים עתידיים</span></div><div class="stat-value" id="payments-future">₪0</div><div class="stat-foot">טרם הגיע מועדם</div></article>
-            <article class="stat-card"><div class="stat-top"><span class="stat-icon icon-green">✓</span><span class="stat-caption">שולמו</span></div><div class="stat-value" id="payments-paid">₪0</div><div class="stat-foot">חיובים שסומנו כשולמו</div></article>
+            <article class="stat-card"><div class="stat-top"><span class="stat-icon icon-green">✓</span><span class="stat-caption">התקבל</span></div><div class="stat-value" id="payments-paid">₪0</div><div class="stat-foot">סך התקבולים שנרשמו</div></article>
           </section>
           <section class="orders-section biz-only">
             <div class="table-toolbar">
@@ -504,14 +517,16 @@
                   <option value="overdue">באיחור</option>
                   <option value="undated">ללא מועד פירעון</option>
                   <option value="future">עתידיים</option>
+                  <option value="partial">שולמו חלקית</option>
                   <option value="paid">שולמו</option>
+                  <option value="cancelled">בוטלו</option>
                   <option value="all">הכול</option>
                 </select>
               </label>
             </div>
             <div class="table-wrap">
               <table>
-                <thead><tr><th scope="col">לקוח</th><th scope="col">חיוב</th><th scope="col">מועד פירעון</th><th scope="col">סכום כולל מע"מ</th><th scope="col">סטטוס</th><th scope="col"><span class="sr-only">פעולות</span></th></tr></thead>
+                <thead><tr><th scope="col">לקוח</th><th scope="col">חיוב</th><th scope="col">מועד פירעון</th><th scope="col">סכום כולל מע"מ</th><th scope="col">התקבל</th><th scope="col">יתרה</th><th scope="col">סטטוס</th><th scope="col"><span class="sr-only">פעולות</span></th></tr></thead>
                 <tbody id="payments-body"></tbody>
               </table>
               <div class="empty-state" id="payments-empty" hidden><strong>אין חיובים להצגה</strong></div>
@@ -523,19 +538,19 @@
         <!-- Reports -->
         <section class="page-view" data-page="reports" hidden>
           <div class="welcome-row">
-            <div><p class="eyebrow">דוחות</p><h1>דוחות</h1><p class="page-subtitle">סיכום כספי ופילוח חודשי של ההזמנות.</p></div>
+            <div><p class="eyebrow">דוחות</p><h1>דוחות</h1><p class="page-subtitle">כל הסכומים מחושבים מהחיובים והתקבולים במסד, כמו במסכים האחרים. הזמנות מבוטלות אינן חוב פתוח.</p></div>
           </div>
           <section class="stats-grid biz-only" aria-label="סיכום כספי">
             <article class="stat-card"><div class="stat-top"><span class="stat-icon icon-blue">₪</span><span class="stat-caption">סך חיובים</span></div><div class="stat-value" id="report-billed">₪0</div><div class="stat-foot">הזמנות ותשלומי חבילות</div></article>
-            <article class="stat-card"><div class="stat-top"><span class="stat-icon icon-green">₪</span><span class="stat-caption">התקבל</span></div><div class="stat-value" id="report-received">₪0</div><div class="stat-foot">לפי סימוני תשלום</div></article>
+            <article class="stat-card"><div class="stat-top"><span class="stat-icon icon-green">₪</span><span class="stat-caption">התקבל</span></div><div class="stat-value" id="report-received">₪0</div><div class="stat-foot">לפי התקבולים שנרשמו</div></article>
             <article class="stat-card"><div class="stat-top"><span class="stat-icon icon-purple">₪</span><span class="stat-caption">יתרה פתוחה</span></div><div class="stat-value" id="report-outstanding">₪0</div><div class="stat-foot">כולל עתידי</div></article>
             <article class="stat-card"><div class="stat-top"><span class="stat-icon icon-orange">◷</span><span class="stat-caption">באיחור</span></div><div class="stat-value" id="report-overdue">₪0</div><div class="stat-foot">מועד הפירעון עבר</div></article>
           </section>
           <section class="orders-section">
-            <div class="section-heading"><div><h2>פילוח חודשי</h2><p>לפי חודש הזמנה</p></div></div>
+            <div class="section-heading"><div><h2>פילוח חודשי של הזמנות</h2><p>לפי חודש הזמנה, בלי תשלומי חבילות ובלי הזמנות מבוטלות</p></div></div>
             <div class="table-wrap">
               <table>
-                <thead><tr><th scope="col">חודש</th><th scope="col">הזמנות</th><th scope="col">סכום כספי</th><th scope="col">שולם</th><th scope="col">ממתין</th><th scope="col">קרדיטים שנוצלו</th></tr></thead>
+                <thead><tr><th scope="col">חודש</th><th scope="col">הזמנות</th><th scope="col">חויב כולל מע"מ</th><th scope="col">התקבל</th><th scope="col">יתרה</th><th scope="col">קרדיטים שנוצלו</th></tr></thead>
                 <tbody id="report-monthly-body"></tbody>
               </table>
             </div>
@@ -886,8 +901,14 @@
         <label class="field-label">מספר תשלומים <span>*</span><input name="installment_count" type="number" min="1" max="60" step="1" required></label>
       </div>
       <div class="preview-vat-note" id="biz-package-details"></div>
+      <div class="schedule-box">
+        <div class="schedule-head">
+          <p class="schedule-summary" id="biz-package-summary" aria-live="polite">לוח התשלומים יוצג כאן לפני השמירה.</p>
+          <button class="link-button" type="button" id="biz-package-schedule-toggle" aria-expanded="false" aria-controls="biz-package-schedule">עריכת מועדים וסכומים</button>
+        </div>
+        <div class="schedule-editor" id="biz-package-schedule" hidden></div>
+      </div>
       <label class="field-label">הערות<textarea name="notes" rows="2" maxlength="300" placeholder="הערות פנימיות לרכישה"></textarea></label>
-      <div class="import-preview" id="biz-package-summary" aria-live="polite">לוח התשלומים יוצג כאן לפני השמירה.</div>
       <p class="form-message" id="biz-package-message" role="alert"></p>
       <div class="modal-actions">
         <button class="button button-outline" type="button" data-close-modal>ביטול</button>
@@ -1007,6 +1028,47 @@
           <button class="button button-primary" type="submit" id="sheets-add-submit">יצירת הגיליונות</button>
           <span class="sheets-add-summary" id="sheets-add-summary" aria-live="polite"></span>
         </div>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- One charge (order or package installment): receipts, partial payments and documented reversal. -->
+  <dialog class="modal" id="biz-pay-modal" aria-labelledby="biz-pay-title">
+    <form class="modal-card" id="biz-pay-form" novalidate>
+      <div class="modal-heading">
+        <div><span class="modal-kicker">תשלום</span><h2 id="biz-pay-title">רישום תקבול</h2></div>
+        <button class="close-button" type="button" data-close-modal aria-label="סגירה">×</button>
+      </div>
+      <p class="preview-inline-note" id="biz-pay-label"></p>
+      <dl class="pay-figures" id="biz-pay-figures"></dl>
+      <div class="form-grid" id="biz-pay-fields">
+        <label class="field-label">סכום שהתקבל (₪) <span>*</span><input name="amount" type="number" min="0.01" step="0.01" required inputmode="decimal"></label>
+        <label class="field-label">תאריך התקבול <span>*</span><input name="received_on" type="date" required></label>
+      </div>
+      <label class="field-label" id="biz-pay-notes-wrap">הערה<input name="notes" maxlength="500" placeholder="לדוגמה: העברה בנקאית, אסמכתה 1234"></label>
+      <div class="pay-receipts" id="biz-pay-receipts"></div>
+      <p class="form-message" id="biz-pay-message" role="alert"></p>
+      <div class="modal-actions">
+        <button class="button button-outline" type="button" data-close-modal>סגירה</button>
+        <button class="button button-primary" type="submit" id="biz-pay-submit">רישום התקבול</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Payment schedule of a purchased package: unpaid installments can change; received money stays history. -->
+  <dialog class="modal preview-order-modal" id="biz-schedule-modal" aria-labelledby="biz-schedule-title">
+    <form class="modal-card" id="biz-schedule-form" novalidate>
+      <div class="modal-heading">
+        <div><span class="modal-kicker">לוח תשלומים</span><h2 id="biz-schedule-title">עריכת לוח התשלומים</h2></div>
+        <button class="close-button" type="button" data-close-modal aria-label="סגירה">×</button>
+      </div>
+      <p class="preview-inline-note" id="biz-schedule-label"></p>
+      <div class="schedule-editor" id="biz-schedule-editor"></div>
+      <label class="field-label">סיבת השינוי <span>*</span><input name="reason" maxlength="500" required placeholder="לדוגמה: הלקוח ביקש לדחות תשלום"></label>
+      <p class="form-message" id="biz-schedule-message" role="alert"></p>
+      <div class="modal-actions">
+        <button class="button button-outline" type="button" data-close-modal>ביטול</button>
+        <button class="button button-primary" type="submit" id="biz-schedule-submit">שמירת לוח התשלומים</button>
       </div>
     </form>
   </dialog>

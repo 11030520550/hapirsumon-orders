@@ -14,7 +14,11 @@
   const money = new Intl.NumberFormat("he-IL", { style: "currency", currency: "ILS" });
   const number = new Intl.NumberFormat("he-IL", { maximumFractionDigits: 2 });
   const MAX_ROWS = 250;
-  const LEDGER_TYPES = { package_grant: "הקצאת חבילה", order_consumption: "ניצול בהזמנה", correction: "התאמה ידנית", conversion_reversal: "החזרה בהמרה" };
+  const LEDGER_TYPES = { package_grant: "הקצאת חבילה", order_consumption: "ניצול בהזמנה", correction: "התאמה ידנית", conversion_reversal: "החזרה בהמרה",
+    order_cancellation: "החזרה בביטול הזמנה", order_adjustment: "עדכון קרדיטים בהזמנה" };
+  // Workflow statuses of an order (model v3). "unknown" = an order from before the model; never inferred.
+  const FILE_STATUS = { unknown: "לא ידוע", not_received: "לא התקבל", received: "התקבל", approved: "אושר" };
+  const PLACEMENT_STATUS = { unknown: "לא ידוע", not_placed: "לא שובץ", placed: "שובץ", published: "פורסם" };
 
   const BUSINESS_SYNC_ERROR = "שגיאת סנכרון — חלק מהנתונים לא עודכנו";
   const state = {
@@ -23,8 +27,12 @@
     loadToken: 0, clientToken: 0, modalClientId: null, keys: {}, editingProductId: null,
     sheetStatus: new Map(), sheetsInstalled: false, presetSheet: "",
     // Sheets model: "v2" (public.sheet_overview: dates, deadlines), "v1" (public.sheets: open/closed only) or null.
-    sheetModel: null, serverOffset: 0
+    sheetModel: null, serverOffset: 0,
+    // Money: one row per charge from the view business_financial_summary (item_id = order id / installment id).
+    summary: new Map(), events: [],
+    orderSort: { key: "date", dir: "desc" }, editing: null, payObligationId: null, scheduleRows: [], scheduleContext: null
   };
+  const v3 = () => Boolean(app().isOrdersV3 && app().isOrdersV3());
 
   // ---------- helpers ----------
   function localDateValue(date = new Date()) {
@@ -92,15 +100,20 @@
     const token = ++state.loadToken;
     // Every list is read page by page (fetchAllRows) so nothing is silently cut at the API row limit.
     const all = (build) => q(app().fetchAllRows(build));
-    const [packages, installments, obligations, balances] = await Promise.all([
-      all(() => sb().from("customer_packages").select("id,client_id,package_name_snapshot,credits_granted,term_months,price_before_vat,gross_total,starts_on,ends_on,installment_count,benefits_snapshot,status").order("starts_on", { ascending: false }).order("id")),
-      all(() => sb().from("package_installments").select("id,customer_package_id,installment_number,due_on,amount_due").order("due_on").order("id")),
-      all(() => sb().from("financial_obligations").select("id,order_id,package_installment_id,amount_due,due_on,status,updated_at").order("id")),
-      all(() => sb().from("business_client_credit_balances").select("client_id,credit_balance").order("client_id"))
+    const modelV3 = v3();
+    const [packages, installments, obligations, balances, summary, events] = await Promise.all([
+      all(() => sb().from("customer_packages").select("id,client_id,package_name_snapshot,credits_granted,term_months,price_before_vat,vat_rate_snapshot,gross_total,starts_on,ends_on,installment_count,benefits_snapshot,status,updated_at").order("starts_on", { ascending: false }).order("id")),
+      all(() => sb().from("package_installments").select("id,customer_package_id,installment_number,due_on,amount_before_vat,amount_due").order("due_on").order("id")),
+      all(() => sb().from("financial_obligations").select(`id,order_id,package_installment_id,amount_due,due_on,status,updated_at${modelV3 ? ",amount_before_vat,cancelled_at,cancel_reason" : ""}`).order("id")),
+      all(() => sb().from("business_client_credit_balances").select("client_id,credit_balance").order("client_id")),
+      // The single source of every money figure (same columns before and after supabase-orders-v3.sql).
+      all(() => sb().from("business_financial_summary").select("item_type,item_id,client_id,cash_due,cash_received,cash_outstanding,due_on,payment_status").order("item_id")),
+      all(() => sb().from("business_payment_events").select(`id,obligation_id,event_type,amount,event_at,notes${modelV3 ? ",received_on,reverses_event_id" : ""}`).order("event_at").order("id"))
     ]);
     const sheets = await loadSheetStatus();
     if (token !== state.loadToken) return false;
-    Object.assign(state, { packages, installments, obligations, loaded: true, loadFailed: false });
+    Object.assign(state, { packages, installments, obligations, events, loaded: true, loadFailed: false });
+    state.summary = new Map(summary.map((row) => [row.item_id, row]));
     state.sheetModel = sheets.model;
     state.sheetsInstalled = sheets.model !== null;
     state.sheetStatus = new Map(sheets.rows.map((row) => [row.sheet_number, row]));
@@ -146,17 +159,40 @@
   }
 
   // Groups the loaded orders by sheet number (only orders that have one).
+  // Money of one order from the financial view: due (incl. VAT), received and still open. A cancelled order owes
+  // nothing; credits orders have no money. Falls back to the order row only while the view has not loaded.
+  function orderMoney(order) {
+    const row = state.summary.get(order.id);
+    if (order.billingMode === "credits") return { due: 0, received: 0, outstanding: 0, cancelled: Boolean(order.cancelledAt) };
+    if (row) return { due: Number(row.cash_due), received: Number(row.cash_received), outstanding: Number(row.cash_outstanding), cancelled: row.payment_status === "cancelled" || Boolean(order.cancelledAt) };
+    const paid = order.paymentStatus === "paid";
+    return { due: Number(order.amount), received: paid ? Number(order.amount) : 0, outstanding: paid ? 0 : Number(order.amount), cancelled: Boolean(order.cancelledAt) };
+  }
+  // Payment state of an order: credits / cancelled / paid / partial / pending (no money owed: "none").
+  function orderPayState(order) {
+    if (order.cancelledAt) return "cancelled";
+    if (order.billingMode === "credits") return "credits";
+    const m = orderMoney(order);
+    if (m.due <= 0) return "none";
+    if (m.outstanding <= 0) return "paid";
+    return m.received > 0 ? "partial" : "pending";
+  }
+  const PAY_TEXT = { credits: "קרדיטים", cancelled: "בוטלה", paid: "שולם", partial: "שולם חלקית", pending: "לא שולם", none: "" };
+  const PAY_TONE = { credits: "neutral", cancelled: "neutral", paid: "paid", partial: "pending", pending: "pending", none: "neutral" };
+
   function sheetGroups() {
     const groups = new Map();
     for (const order of app().orders()) {
-      if (!order.sheetNumber) continue;
+      if (!order.sheetNumber || order.cancelledAt) continue;
       const group = groups.get(order.sheetNumber) || { sheet: order.sheetNumber, orders: [], clients: new Set(), billed: 0, paid: 0, pending: 0, credits: 0 };
       group.orders.push(order);
       group.clients.add(order.clientId);
       if (order.billingMode === "credits") group.credits += Number(order.creditsUsed || 0);
       else {
-        group.billed += Number(order.amount);
-        group[order.paymentStatus === "paid" ? "paid" : "pending"] += Number(order.amount);
+        const m = orderMoney(order);
+        group.billed = roundMoney(group.billed + m.due);
+        group.paid = roundMoney(group.paid + m.received);
+        group.pending = roundMoney(group.pending + m.outstanding);
       }
       groups.set(order.sheetNumber, group);
     }
@@ -175,35 +211,65 @@
     const installments = new Map(state.installments.map((item) => [item.id, item]));
     const packages = new Map(state.packages.map((item) => [item.id, item]));
     const rows = [];
+    // Installment numbers follow the current schedule (due-date order of the active installments of each package).
+    const position = new Map();
+    for (const pkg of state.packages) {
+      const active = state.obligations.filter((ob) => ob.package_installment_id && ob.status !== "cancelled"
+        && installments.get(ob.package_installment_id)?.customer_package_id === pkg.id)
+        .sort((a, b) => String(a.due_on).localeCompare(String(b.due_on)) || installments.get(a.package_installment_id).installment_number - installments.get(b.package_installment_id).installment_number);
+      active.forEach((ob, index) => position.set(ob.id, `${index + 1}/${active.length}`));
+    }
     for (const obligation of state.obligations) {
       let row = null;
       if (obligation.order_id) {
         const order = orders.get(obligation.order_id);
         if (!order) continue;
-        row = { clientId: order.clientId, label: `הזמנה ${order.orderNumber ?? ""}${order.sheetNumber ? ` · גיליון ${order.sheetNumber}` : ""}`, expected: order.updatedAt, sort: order.orderDate };
+        row = { clientId: order.clientId, orderId: order.id, label: `הזמנה ${order.orderNumber ?? ""}${order.sheetNumber ? ` · גיליון ${order.sheetNumber}` : ""}`,
+          // set_obligation_paid (model v2) checks the order version; the v3 receipt functions check the charge itself.
+          expected: v3() ? obligation.updated_at : order.updatedAt, sort: order.orderDate };
       } else {
         const installment = installments.get(obligation.package_installment_id);
         const pkg = installment && packages.get(installment.customer_package_id);
         if (!pkg) continue;
-        row = { clientId: pkg.client_id, label: `${pkg.package_name_snapshot} · תשלום ${installment.installment_number}/${pkg.installment_count}`, expected: obligation.updated_at, sort: installment.due_on };
+        const place = position.get(obligation.id);
+        row = { clientId: pkg.client_id, packageId: pkg.id, label: `${pkg.package_name_snapshot} · ${place ? `תשלום ${place}` : "תשלום שבוטל"}`, expected: obligation.updated_at, sort: installment.due_on };
       }
-      const paid = obligation.status === "paid";
-      const kind = paid ? "paid" : !obligation.due_on ? "undated" : obligation.due_on < today ? "overdue" : "future";
-      rows.push({ ...row, id: obligation.id, dueOn: obligation.due_on, amount: Number(obligation.amount_due), paid, kind });
+      const view = state.summary.get(obligation.order_id || obligation.package_installment_id);
+      const cancelled = obligation.status === "cancelled" || view?.payment_status === "cancelled";
+      const amount = view ? Number(view.cash_due) : Number(obligation.amount_due);
+      const received = view ? Number(view.cash_received) : (obligation.status === "paid" ? amount : 0);
+      const outstanding = view ? Number(view.cash_outstanding) : Math.max(roundMoney(amount - received), 0);
+      const paid = !cancelled && outstanding <= 0;
+      const kind = cancelled ? "cancelled" : paid ? "paid" : !obligation.due_on ? "undated" : obligation.due_on < today ? "overdue" : "future";
+      rows.push({ ...row, id: obligation.id, dueOn: obligation.due_on, amount, received, outstanding, paid, cancelled,
+        partial: !cancelled && received > 0 && outstanding > 0, kind });
     }
     return rows.sort((left, right) => String(left.dueOn || left.sort).localeCompare(String(right.dueOn || right.sort)));
   }
-  const KIND_TEXT = { paid: "שולם", overdue: "באיחור", undated: "ממתין · ללא מועד", future: "עתידי" };
+  const KIND_TEXT = { paid: "שולם", overdue: "באיחור", undated: "ממתין · ללא מועד", future: "עתידי", cancelled: "בוטל" };
+  function chargeStatusText(row) {
+    if (row.partial) return row.kind === "overdue" ? "שולם חלקית · באיחור" : "שולם חלקית";
+    return KIND_TEXT[row.kind];
+  }
   function payButton(row) {
+    // Model v3: every receipt is recorded on its own (also partial); model v2: the charge is marked paid / reopened.
+    if (v3()) {
+      if (row.cancelled && row.received <= 0) return "";
+      const label = row.cancelled || row.paid ? "תקבולים" : "רישום תקבול";
+      return `<button class="button button-outline client-action" type="button" data-biz-pay-open="${escapeHtml(row.id)}">${label}</button>`;
+    }
     return `<button class="button button-outline client-action" type="button" data-biz-pay="${escapeHtml(row.id)}" data-biz-paid="${row.paid ? "0" : "1"}" data-expected="${escapeHtml(row.expected)}">${row.paid ? "ביטול תשלום" : "סימון כשולם"}</button>`;
   }
+  const blankMoney = (value) => (value > 0 ? escapeHtml(money.format(value)) : "");
   function obligationTableRows(rows, withClient) {
-    return rows.map((row) => `<tr>
+    return rows.map((row) => `<tr class="${row.cancelled ? "is-cancelled" : ""}">
       ${withClient ? `<td class="client-name"><button class="link-button" type="button" data-client-view="${escapeHtml(row.clientId)}">${escapeHtml(clientName(row.clientId))}</button></td>` : ""}
       <td>${escapeHtml(row.label)}</td>
       <td>${escapeHtml(row.dueOn ? displayDate(row.dueOn) : "ללא מועד")}</td>
-      <td class="amount-cell">${escapeHtml(money.format(row.amount))}</td>
-      <td>${pill(row.paid ? "paid" : "pending", KIND_TEXT[row.kind])}</td>
+      <td class="amount-cell">${row.cancelled ? "" : escapeHtml(money.format(row.amount))}</td>
+      <td class="amount-cell">${blankMoney(row.received)}</td>
+      <td class="amount-cell">${blankMoney(row.outstanding)}</td>
+      <td>${pill(row.cancelled ? "neutral" : row.paid ? "paid" : "pending", chargeStatusText(row))}</td>
       <td>${payButton(row)}</td>
     </tr>`).join("");
   }
@@ -226,13 +292,23 @@
     return `data-desk-go="${escapeHtml(view)}" data-desk-select="${escapeHtml(select)}" data-desk-value="${escapeHtml(value)}"`;
   }
 
+  // The money strip of the dashboard: the same rows and sums as the payments screen and the reports.
+  function renderMoneyStrip(rows) {
+    const active = app().orders().filter((order) => !order.cancelledAt).length;
+    const open = rows.filter((row) => !row.cancelled && row.outstanding > 0);
+    $("#stat-orders").textContent = number.format(active);
+    $("#stat-paid").textContent = money.format(roundMoney(rows.reduce((total, row) => total + row.received, 0)));
+    $("#stat-pending").textContent = number.format(open.length);
+    $("#stat-balance").textContent = money.format(roundMoney(open.reduce((total, row) => total + row.outstanding, 0)));
+  }
+
   function renderDashboard() {
     const attention = $("#desk-attention");
     const sheetsList = $("#desk-sheets");
     if (!attention || !sheetsList) return;
     const attentionNote = $("#desk-attention-note");
     const sheetsNote = $("#desk-sheets-note");
-    const sum = (rows) => money.format(rows.reduce((total, row) => total + row.amount, 0));
+    const sum = (rows) => money.format(roundMoney(rows.reduce((total, row) => total + row.outstanding, 0)));
 
     if (!state.ready) {
       // Without the business schema only the order status is known.
@@ -268,6 +344,7 @@
       deskItem({ count: negative.length, title: "לקוחות ביתרת קרדיטים שלילית", hint: "ניצלו יותר קרדיטים ממה שהוקצה להם", meta: "לבדיקה", attrs: deskLink("packages") })
     ].join("");
     attentionNote.hidden = true;
+    renderMoneyStrip(rows);
 
     const open = sheetGroups().filter((group) => !sheetClosed(group.sheet));
     // Masthead "edition": the newest open sheet that actually has orders (no invented issue data).
@@ -294,6 +371,7 @@
     if (route.name === "dashboard") renderDashboard();
     if (route.name === "reports") renderReports();
     if (!state.ready) return;
+    if (route.name === "orders") renderOrdersPage();
     if (route.name === "client") renderClientPage(route.param);
     if (route.name === "new-order") prepareNewOrder(route.param);
     if (route.name === "packages") renderPackagesPage();
@@ -308,27 +386,32 @@
     const pkg = state.loaded ? activePackage(clientId) : null;
     $("#client-page-premium").hidden = !pkg;
     $("#client-kpi-package").textContent = !state.loaded ? "…" : pkg ? pkg.package_name_snapshot : "אין חבילה פעילה";
-    $("#client-kpi-package-foot").textContent = pkg ? `בתוקף עד ${displayDate(pkg.ends_on)}` : "";
+    $("#client-kpi-package-foot").textContent = pkg ? `תקופת ההטבות עד ${displayDate(pkg.ends_on)}` : "";
     const balance = state.balances.get(clientId) ?? 0;
     $("#client-kpi-credits").textContent = state.loaded ? number.format(balance) : "…";
-    $("#client-kpi-credits-foot").textContent = balance < 0 ? "יתרה שלילית" : "קרדיטים זמינים";
+    // Credits never expire. A negative balance is allowed; it only suggests a new package.
+    $("#client-kpi-credits-foot").innerHTML = balance < 0
+      ? `יתרה שלילית · <button class="link-button" type="button" data-biz-package="${escapeHtml(clientId)}">רכישת חבילה</button>`
+      : "קרדיטים זמינים, ללא תאריך תפוגה";
     $("#client-kpi-credits").classList.toggle("negative", balance < 0);
     const rows = obligationRows().filter((row) => row.clientId === clientId);
     const overdue = rows.filter((row) => row.kind === "overdue");
-    $("#client-kpi-overdue").textContent = money.format(overdue.reduce((sum, row) => sum + row.amount, 0));
+    $("#client-kpi-overdue").textContent = money.format(roundMoney(overdue.reduce((sum, row) => sum + row.outstanding, 0)));
     $("#client-kpi-overdue-foot").textContent = overdue.length ? `${overdue.length} חיובים באיחור` : "אין חוב בפיגור";
-    $("#client-payments-body").innerHTML = state.loaded ? obligationTableRows(rows, false) : loadingRow(5);
+    $("#client-payments-body").innerHTML = state.loaded ? obligationTableRows(rows, false) : loadingRow(7);
     $("#client-payments-empty").hidden = !state.loaded || rows.length !== 0;
     const packages = state.packages.filter((item) => item.client_id === clientId);
     $("#client-packages").innerHTML = packages.length ? packages.map((item) => {
       const benefits = Array.isArray(item.benefits_snapshot) ? item.benefits_snapshot : [];
       const active = item === pkg;
+      const editSchedule = v3() && item.status !== "cancelled"
+        ? `<button class="button button-outline client-action" type="button" data-biz-schedule="${escapeHtml(item.id)}">עריכת לוח התשלומים</button>` : "";
       return `<section class="orders-section package-card">
         <div class="section-heading"><div><h2>${escapeHtml(item.package_name_snapshot)} ${active ? '<span class="premium-badge">פעילה</span>' : ""}</h2>
-        <p>${escapeHtml(displayDate(item.starts_on))} – ${escapeHtml(displayDate(item.ends_on))}</p></div></div>
+        <p>נרכשה ב-${escapeHtml(displayDate(item.starts_on))} · תקופת ההטבות עד ${escapeHtml(displayDate(item.ends_on))} · הקרדיטים אינם פוקעים</p></div>${editSchedule}</div>
         <div class="kv-grid">
           <span>קרדיטים שהוקצו</span><strong>${escapeHtml(number.format(item.credits_granted))}</strong>
-          <span>תקופה</span><strong>${escapeHtml(number.format(item.term_months))} חודשים</strong>
+          <span>תקופת הטבות</span><strong>${escapeHtml(number.format(item.term_months))} חודשים</strong>
           <span>מחיר לפני מע"מ</span><strong>${escapeHtml(money.format(item.price_before_vat))}</strong>
           <span>מחיר כולל מע"מ</span><strong>${escapeHtml(money.format(item.gross_total))}</strong>
           <span>מספר תשלומים</span><strong>${escapeHtml(number.format(item.installment_count))}</strong>
@@ -392,18 +475,19 @@
 
   function renderPaymentsPage() {
     const all = obligationRows();
-    const sum = (kind) => all.filter((row) => row.kind === kind).reduce((total, row) => total + row.amount, 0);
-    $("#payments-overdue").textContent = money.format(sum("overdue"));
-    $("#payments-undated").textContent = money.format(sum("undated"));
-    $("#payments-future").textContent = money.format(sum("future"));
-    $("#payments-paid").textContent = money.format(sum("paid"));
+    const open = (kind) => roundMoney(all.filter((row) => row.kind === kind).reduce((total, row) => total + row.outstanding, 0));
+    $("#payments-overdue").textContent = money.format(open("overdue"));
+    $("#payments-undated").textContent = money.format(open("undated"));
+    $("#payments-future").textContent = money.format(open("future"));
+    $("#payments-paid").textContent = money.format(roundMoney(all.reduce((total, row) => total + row.received, 0)));
     const filter = $("#payments-filter").value;
     const query = $("#payments-search").value.trim().toLocaleLowerCase("he");
-    const rows = all.filter((row) => (filter === "all" || (filter === "open" ? ["overdue", "undated"].includes(row.kind) : row.kind === filter))
-      && `${clientName(row.clientId)} ${row.label}`.toLocaleLowerCase("he").includes(query));
-    $("#payments-body").innerHTML = state.loaded ? obligationTableRows(rows, true) : loadingRow(6);
+    const matchesFilter = (row) => filter === "all" || (filter === "open" ? ["overdue", "undated"].includes(row.kind)
+      : filter === "partial" ? row.partial : row.kind === filter);
+    const rows = all.filter((row) => matchesFilter(row) && `${clientName(row.clientId)} ${row.label}`.toLocaleLowerCase("he").includes(query));
+    $("#payments-body").innerHTML = state.loaded ? obligationTableRows(rows, true) : loadingRow(8);
     $("#payments-empty").hidden = !state.loaded || rows.length !== 0;
-    $("#payments-count").textContent = `${number.format(rows.length)} חיובים · ${money.format(rows.reduce((total, row) => total + row.amount, 0))}`;
+    $("#payments-count").textContent = `${number.format(rows.length)} חיובים · יתרה לתשלום ${money.format(roundMoney(rows.reduce((total, row) => total + row.outstanding, 0)))}`;
   }
 
   // ---------- sheets board ----------
@@ -973,13 +1057,16 @@
   async function renderReports() {
     const months = new Map();
     for (const order of app().orders()) {
+      if (order.cancelledAt) continue;
       const key = String(order.orderDate).slice(0, 7);
       const row = months.get(key) || { count: 0, cash: 0, paid: 0, pending: 0, credits: 0 };
       row.count += 1;
       if (order.billingMode === "credits") row.credits += Number(order.creditsUsed || 0);
       else {
-        row.cash += Number(order.amount);
-        row[order.paymentStatus === "paid" ? "paid" : "pending"] += Number(order.amount);
+        const m = orderMoney(order);
+        row.cash = roundMoney(row.cash + m.due);
+        row.paid = roundMoney(row.paid + m.received);
+        row.pending = roundMoney(row.pending + m.outstanding);
       }
       months.set(key, row);
     }
@@ -991,16 +1078,14 @@
         <td class="amount-cell">${escapeHtml(money.format(row.paid))}</td><td class="amount-cell">${escapeHtml(money.format(row.pending))}</td>
         <td>${escapeHtml(number.format(row.credits))}</td></tr>`;
     }).join("") || '<tr><td colspan="6" class="empty-cell">אין הזמנות.</td></tr>';
-    if (!state.ready) return;
-    try {
-      const totals = (await q(sb().from("business_financial_totals").select("total_cash_billed,total_cash_received,total_cash_outstanding,total_overdue")))[0] || {};
-      $("#report-billed").textContent = money.format(Number(totals.total_cash_billed || 0));
-      $("#report-received").textContent = money.format(Number(totals.total_cash_received || 0));
-      $("#report-outstanding").textContent = money.format(Number(totals.total_cash_outstanding || 0));
-      $("#report-overdue").textContent = money.format(Number(totals.total_overdue || 0));
-    } catch (error) {
-      app().toast(`טעינת הסיכום הכספי נכשלה: ${errorText(error)}`, true);
-    }
+    if (!state.ready || !state.loaded) return;
+    // Totals from the same rows as the payments screen and the dashboard (orders + package installments).
+    const rows = obligationRows();
+    const total = (pick) => money.format(roundMoney(rows.reduce((sum, row) => sum + pick(row), 0)));
+    $("#report-billed").textContent = total((row) => (row.cancelled ? row.received : row.amount));
+    $("#report-received").textContent = total((row) => row.received);
+    $("#report-outstanding").textContent = total((row) => row.outstanding);
+    $("#report-overdue").textContent = total((row) => (row.kind === "overdue" ? row.outstanding : 0));
   }
 
   function renderSettings() {
@@ -1106,15 +1191,23 @@
       ? `${template.name}: ${number.format(template.credits)} קרדיטים · ${number.format(template.term_months)} חודשים · ${money.format(template.total_price_before_vat)} לפני מע"מ`
       : custom ? "חבילה מותאמת אישית: הזינו קרדיטים, תקופה ומחיר לפני מע\"מ." : "בחרו חבילה.";
     const values = packageFormValues();
+    $("#biz-package-schedule-toggle").hidden = !values.valid;
     if (!values.valid) { $("#biz-package-summary").textContent = "לוח התשלומים יוצג כאן לאחר מילוי פרטי החבילה."; return; }
-    const installments = buildInstallments(values.pkg.price, values.count, values.startsOn);
-    const total = installments.reduce((sum, item) => sum + gross(item.amount_before_vat), 0);
-    $("#biz-package-summary").textContent = [
-      `${values.pkg.name} · ${number.format(values.pkg.credits)} קרדיטים יוקצו מיד`,
-      `תוקף: ${displayDate(values.startsOn)} – ${displayDate(packageEndDate(values.startsOn, values.pkg.term))}`,
-      `מחיר: ${money.format(values.pkg.price)} לפני מע"מ · ${money.format(total)} כולל מע"מ`,
-      ...installments.map((item, index) => `  ${index + 1}. ${displayDate(item.due_on)} — ${money.format(gross(item.amount_before_vat))}`)
-    ].join("\n");
+    // A change of package, price, count or start date rebuilds the automatic schedule (manual edits start over).
+    const shape = JSON.stringify([values.pkg.price, values.count, values.startsOn]);
+    if (purchaseSchedule.shape !== shape) { purchaseSchedule.shape = shape; purchaseSchedule.touched = false; }
+    refreshPurchaseSchedule(values);
+    renderPurchaseSummary(values);
+  }
+  // Compact by default: package, credits, price and one line about the payments.
+  function renderPurchaseSummary(values) {
+    const rows = purchaseSchedule.rows;
+    const total = roundMoney(rows.reduce((sum, row) => sum + (Number(row.net) > 0 ? gross(row.net) : 0), 0));
+    const first = rows[0]; const last = rows[rows.length - 1];
+    const equal = rows.length > 1 && rows.slice(0, -1).every((row) => row.net === rows[0].net);
+    const payments = rows.length === 1 ? `תשלום אחד ב-${displayDate(first.due)}`
+      : `${number.format(rows.length)} תשלומים${equal ? ` של ${money.format(gross(rows[0].net))}` : ""} · ${displayDate(first.due)} עד ${displayDate(last.due)}`;
+    $("#biz-package-summary").textContent = `${number.format(values.pkg.credits)} קרדיטים יתווספו מיד ואינם פוקעים · ${money.format(values.pkg.price)} לפני מע״מ · ${money.format(total)} כולל מע״מ · ${payments}${purchaseSchedule.touched ? " · לוח מותאם" : ""}`;
   }
 
   function openPackage(clientId) {
@@ -1129,6 +1222,10 @@
     $("#biz-package-client").textContent = `לקוח: ${client.name}`;
     $("#biz-package-message").textContent = "";
     newKey("package");
+    Object.assign(purchaseSchedule, { rows: [], touched: false, shape: "" });
+    $("#biz-package-schedule").hidden = true;
+    $("#biz-package-schedule-toggle").setAttribute("aria-expanded", "false");
+    $("#biz-package-schedule-toggle").textContent = "עריכת מועדים וסכומים";
     updatePackageSummary(true);
     $("#biz-package-modal").showModal();
   }
@@ -1140,6 +1237,13 @@
     if (!form.reportValidity()) return;
     const values = packageFormValues();
     if (!values.valid) { message.textContent = "פרטי החבילה אינם תקינים. בדקו קרדיטים, תקופה, מחיר ומספר תשלומים (1–60)."; return; }
+    const problems = scheduleProblems(purchaseSchedule);
+    if (problems.length) {
+      message.textContent = `לוח התשלומים אינו תקין: ${problems.join(" ")}`;
+      $("#biz-package-schedule").hidden = false;
+      renderScheduleEditor($("#biz-package-schedule"), purchaseSchedule);
+      return;
+    }
     const button = $("#biz-package-submit");
     setBusy(button, true, "שמירת רכישה");
     message.textContent = "";
@@ -1153,7 +1257,7 @@
         p_price_before_vat: values.custom ? values.pkg.price : null,
         p_starts_on: values.startsOn,
         p_ends_on: packageEndDate(values.startsOn, values.pkg.term),
-        p_installments: buildInstallments(values.pkg.price, values.count, values.startsOn),
+        p_installments: purchaseSchedule.rows.map((row) => ({ due_on: row.due, amount_before_vat: row.net })),
         p_benefits: values.custom ? [] : null,
         p_notes: form.elements.notes.value.trim(),
         p_idempotency_key: state.keys.package
@@ -1219,7 +1323,9 @@
     return `<tr data-order-row>
       <td class="row-number"></td>
       <td class="cell-sheet" data-label="גיליון *"><input name="sheet_number" maxlength="80" list="sheet-options" inputmode="numeric" value="${escapeHtml(values.sheet_number || "")}" aria-label="מספר גיליון"></td>
-      <td class="cell-product" data-label="מוצר *"><select name="product_id" aria-label="מוצר">${productOptions(values.product_id)}</select></td>
+      ${v3()
+        ? `<td class="cell-product" data-label="פירוט הזמנה *"><input name="ad_description" maxlength="500" value="${escapeHtml(values.ad_description || "")}" aria-label="פירוט הזמנה" placeholder="מה מפרסמים, גודל, מיקום"></td>`
+        : `<td class="cell-product" data-label="מוצר *"><select name="product_id" aria-label="מוצר">${productOptions(values.product_id)}</select></td>`}
       <td class="cell-price" data-label="מחיר לפני מע״מ"><input name="cash_amount_before_vat" type="number" min="0.01" step="0.01" value="${escapeHtml(values.cash_amount_before_vat || "")}" aria-label="מחיר לפני מע״מ"></td>
       <td class="cell-credits" data-label="או קרדיטים"><input name="credits_used" type="number" min="0.01" step="0.01" value="${escapeHtml(values.credits_used || "")}" aria-label="קרדיטים"></td>
       <td class="cell-status" data-label="סטטוס תשלום"><select name="payment_status" aria-label="סטטוס תשלום"><option value="pending">עדיין לא</option><option value="paid" ${values.payment_status === "paid" ? "selected" : ""}>שולם</option></select></td>
@@ -1262,8 +1368,9 @@
 
   function prepareNewOrder(clientId) {
     const body = $("#new-order-rows");
-    $("#sheet-options").innerHTML = sheetGroups().filter((group) => !sheetClosed(group.sheet))
-      .map((group) => `<option value="${escapeHtml(group.sheet)}"></option>`).join("");
+    // Every sheet that is open for orders, also an empty planned sheet (sheets model v2).
+    $("#sheet-options").innerHTML = (state.loaded ? sheetBoard().filter((sheet) => !sheet.closed).map((sheet) => sheet.number).sort(compareSheets).reverse() : [])
+      .map((sheet) => `<option value="${escapeHtml(sheet)}"></option>`).join("");
     if (state.presetSheet) {
       const sheet = state.presetSheet;
       state.presetSheet = "";
@@ -1274,8 +1381,8 @@
       $("#new-order-result").hidden = true;
       resetNewOrder(clientId);
     } else {
-      // keep the rows being typed; refresh product lists in case the catalog changed
-      for (const select of body.querySelectorAll('[name="product_id"]')) {
+      // keep the rows being typed; refresh product lists in case the catalog changed (model v2)
+      for (const select of body.querySelectorAll('select[name="product_id"]')) {
         const value = select.value; select.innerHTML = productOptions(value);
       }
       populateClientSelect($("#new-order-client").value);
@@ -1313,9 +1420,19 @@
       <div><span>כולל מע"מ (${escapeHtml(number.format(state.vatRate * 100))}%)</span><strong>${escapeHtml(money.format(cashGross))}</strong></div>
       <div><span>קרדיטים</span><strong>${escapeHtml(number.format(credits))}</strong></div>
       <div><span>יתרה אחרי השמירה</span><strong class="${balance - credits < 0 ? "negative" : ""}" dir="ltr">${escapeHtml(number.format(roundMoney(balance - credits)))}</strong></div>`;
+    // A negative balance is allowed (credits never expire); it only gets a gentle note and a way to a new package.
+    const after = roundMoney(balance - credits);
+    const alert = $("#new-order-credit-alert");
+    alert.hidden = !(clientId && credits > 0 && after < 0);
+    if (!alert.hidden) {
+      alert.innerHTML = `לאחר השמירה יתרת הקרדיטים תהיה <strong dir="ltr">${escapeHtml(number.format(after))}</strong>. אפשר לשמור גם ביתרה שלילית. <button class="link-button" type="button" data-biz-package="${escapeHtml(clientId)}">רכישת חבילה ללקוח</button>`;
+    }
+    $("#new-order-item-head").textContent = v3() ? "פירוט הזמנה *" : "מוצר *";
+    // Model v2 needs an active product per row; model v3 has a free description instead.
+    const needsProducts = !v3();
     const noProducts = "אין מוצרים פעילים בקטלוג. הוסיפו מוצר במסך \"הגדרות ומוצרים\".";
-    $("#new-order-submit").disabled = state.products.length === 0;
-    if (!state.products.length) $("#new-order-message").textContent = noProducts;
+    $("#new-order-submit").disabled = needsProducts && state.products.length === 0;
+    if (needsProducts && !state.products.length) $("#new-order-message").textContent = noProducts;
     else if ($("#new-order-message").textContent === noProducts) $("#new-order-message").textContent = "";
   }
 
@@ -1337,7 +1454,10 @@
       const row = rowValues(rows[index]);
       const line = `בשורה ${index + 1}: `;
       if (!row.sheet_number) { message.textContent = `${line}חסר מספר גיליון.`; return; }
-      if (!row.product_id) { message.textContent = `${line}יש לבחור מוצר.`; return; }
+      if (v3()) {
+        if (!row.ad_description) { message.textContent = `${line}חסר פירוט הזמנה.`; return; }
+        if (app().hasEncodingDamage(row.ad_description)) { message.textContent = `${line}הפירוט נראה משובש (בעיית קידוד עברית). הקלידי אותו מחדש.`; return; }
+      } else if (!row.product_id) { message.textContent = `${line}יש לבחור מוצר.`; return; }
       if (app().hasEncodingDamage(row.notes)) { message.textContent = `${line}ההערה נראית משובשת (בעיית קידוד עברית). הקלידי אותה מחדש.`; return; }
       const cash = row.cash_amount_before_vat; const credits = row.credits_used;
       if (Boolean(cash) === Boolean(credits)) { message.textContent = `${line}יש למלא מחיר או קרדיטים — בדיוק אחד מהם.`; return; }
@@ -1345,7 +1465,8 @@
       if (!(amount > 0) || roundMoney(amount) !== amount) { message.textContent = `${line}הסכום חייב להיות חיובי ועד שתי ספרות אחרי הנקודה.`; return; }
       orders.push({
         // No publication dates at the newspaper: the RPC still requires the legacy column, so the order date is sent.
-        sheet_number: row.sheet_number, product_id: row.product_id, publication_date: localDateValue(),
+        sheet_number: row.sheet_number, publication_date: localDateValue(),
+        ...(v3() ? { ad_description: row.ad_description } : { product_id: row.product_id }),
         cash_amount_before_vat: cash ? Number(cash) : null, credits_used: credits ? Number(credits) : null,
         payment_status: credits ? "paid" : row.payment_status, due_on: credits ? null : (row.due_on || null), notes: row.notes
       });
@@ -1369,7 +1490,7 @@
       message.textContent = `${errorText(error)} שום הזמנה לא נשמרה; אפשר לתקן ולנסות שוב.`;
     } finally {
       setBusy(button, false, "שמירת ההזמנות");
-      $("#new-order-submit").disabled = state.products.length === 0;
+      $("#new-order-submit").disabled = !v3() && state.products.length === 0;
     }
   }
 
@@ -1443,6 +1564,499 @@
     }
   }
 
+  // ---------- orders table: 13 columns, filters, sorting, double-click editing, cancellation ----------
+  // Text cells sort with Hebrew collation, numbers numerically. Editing (model v3 only) goes through the RPCs:
+  // update_order_details (description, sheet, statuses, notes) and update_order_charge (price / credits).
+  const ORDER_COLUMNS = [
+    { key: "number", head: "מס׳ הזמנה", sort: (o) => Number(o.orderNumber) || 0 },
+    { key: "date", head: "תאריך הזמנה", sort: (o) => `${o.orderDate}|${String(o.orderNumber ?? "").padStart(12, "0")}` },
+    { key: "enteredBy", head: "מכניס הזמנה", sort: (o) => o.enteredBy, text: true },
+    { key: "client", head: "לקוח", sort: (o) => clientName(o.clientId), text: true },
+    { key: "description", head: "פירוט הזמנה", edit: "details" },
+    { key: "sheet", head: "גיליון", sort: (o) => Number(o.sheetNumber) || 0, edit: "details" },
+    { key: "credits", head: "קרדיטים", sort: (o) => Number(o.creditsUsed) || 0, edit: "charge" },
+    { key: "net", head: "מחיר לפני מע״מ", sort: (o) => Number(o.cashBeforeVat) || 0, edit: "charge" },
+    { key: "gross", head: "מחיר כולל מע״מ", sort: (o) => (o.billingMode === "credits" ? 0 : Number(o.amount)) },
+    { key: "pay", head: "סטטוס תשלום", sort: (o) => orderPayState(o), text: true },
+    { key: "file", head: "סטטוס קובץ", sort: (o) => o.fileStatus, text: true, edit: "details" },
+    { key: "placement", head: "סטטוס שיבוץ", sort: (o) => o.placementStatus, text: true, edit: "details" },
+    { key: "notes", head: "הערות", edit: "details" }
+  ];
+  const orderById = (orderId) => app().orders().find((order) => order.id === orderId) || null;
+  // May this cell be edited? Credits only on a credits order, price only on a cash order; never on legacy charges.
+  function canEdit(order, key) {
+    if (!v3() || !state.loaded || !order || order.cancelledAt) return false;
+    const column = ORDER_COLUMNS.find((item) => item.key === key);
+    if (!column || !column.edit) return false;
+    if (key === "credits") return order.billingMode === "credits";
+    if (key === "net") return order.billingMode === "cash";
+    return true;
+  }
+
+  function orderCell(order, key) {
+    const editable = canEdit(order, key);
+    const attrs = editable ? ` data-edit="${key}" tabindex="0" title="לחיצה כפולה או Enter לעריכה"` : "";
+    const cell = (html, cls = "") => `<td class="${cls}${editable ? " is-editable" : ""}"${attrs}>${html}</td>`;
+    const legacy = order.billingMode === "legacy";
+    switch (key) {
+      case "number": return cell(`${escapeHtml(order.orderNumber ?? "")}${legacy ? ' <span class="tag-legacy" title="הזמנה מלפני המערכת העסקית. הסכום מוצג כפי שנשמר; לא ידוע אם הוא כולל מע״מ.">ישנה</span>' : ""}`, "order-number");
+      case "date": return cell(escapeHtml(app().formatOrderDate(order.orderDate)), "cell-date");
+      case "enteredBy": return cell(escapeHtml(order.enteredBy), "cell-muted");
+      case "client": return cell(`<button class="link-button" type="button" data-client-view="${escapeHtml(order.clientId)}">${escapeHtml(clientName(order.clientId))}</button>`, "client-name");
+      case "description": {
+        if (order.description) return cell(escapeHtml(order.description), "cell-description");
+        // Older orders: the product / section that was saved, shown as earlier information, not as a description.
+        const earlier = order.product ? `<span class="earlier-info" title="מידע שנשמר לפני שדה הפירוט (מוצר או מדור). אינו פירוט שהוזן.">${escapeHtml(order.product)}${order.dimensions ? ` · ${escapeHtml(order.dimensions)}` : ""}</span>` : "";
+        return cell(earlier, "cell-description");
+      }
+      case "sheet": return cell(order.sheetNumber && !editable
+        ? `<button class="link-button" type="button" data-sheet-view="${escapeHtml(order.sheetNumber)}">${escapeHtml(order.sheetNumber)}</button>` : escapeHtml(order.sheetNumber), "cell-sheet");
+      case "credits": return cell(order.billingMode === "credits" ? escapeHtml(number.format(order.creditsUsed)) : "", "amount-cell");
+      case "net": return cell(order.billingMode === "cash" && order.cashBeforeVat != null ? escapeHtml(money.format(order.cashBeforeVat)) : "", "amount-cell");
+      case "gross": {
+        if (order.billingMode === "credits") return cell("", "amount-cell");
+        if (legacy && !(Number(order.amount) > 0)) return cell("", "amount-cell");
+        return cell(escapeHtml(money.format(order.amount)), `amount-cell${legacy ? " is-legacy" : ""}`);
+      }
+      case "pay": {
+        const payState = orderPayState(order);
+        // Model v2 (live today): the charge is marked paid / pending here, as before.
+        if (!v3() && (payState === "paid" || payState === "pending")) {
+          const paid = payState === "paid";
+          return cell(`<select class="payment-select ${paid ? "paid" : "pending"}" data-order-id="${escapeHtml(order.id)}" aria-label="סטטוס תשלום להזמנה ${escapeHtml(order.orderNumber ?? "")}">
+            <option value="paid" ${paid ? "selected" : ""}>שולם</option><option value="pending" ${!paid ? "selected" : ""}>לא שולם</option></select>`);
+        }
+        if (!PAY_TEXT[payState]) return cell("");
+        const obligation = state.obligations.find((item) => item.order_id === order.id);
+        const opens = v3() && obligation && !(payState === "cancelled" && orderMoney(order).received <= 0);
+        const label = escapeHtml(PAY_TEXT[payState]);
+        return cell(opens
+          ? `<button class="pay-state ${PAY_TONE[payState]}" type="button" data-biz-pay-open="${escapeHtml(obligation.id)}" title="תקבולים ורישום תשלום">${label}</button>`
+          : pill(PAY_TONE[payState], PAY_TEXT[payState]));
+      }
+      case "file": return cell(v3() && order.fileStatus ? `<span class="wf wf-${escapeHtml(order.fileStatus)}">${escapeHtml(FILE_STATUS[order.fileStatus] || "")}</span>` : "");
+      case "placement": return cell(v3() && order.placementStatus ? `<span class="wf wf-${escapeHtml(order.placementStatus)}">${escapeHtml(PLACEMENT_STATUS[order.placementStatus] || "")}</span>` : "");
+      case "notes": return cell(escapeHtml(order.notes), "cell-notes");
+      default: return "<td></td>";
+    }
+  }
+
+  function filteredOrders() {
+    const query = $("#search-input").value.trim().toLocaleLowerCase("he");
+    const sheet = $("#orders-sheet-filter").value;
+    const pay = $("#payment-filter").value;
+    const file = v3() ? $("#orders-file-filter").value : "";
+    const placement = v3() ? $("#orders-placement-filter").value : "";
+    const withCancelled = v3() && $("#orders-show-cancelled").checked;
+    return app().orders().filter((order) => {
+      if (order.cancelledAt && !withCancelled) return false;
+      if (sheet && order.sheetNumber !== sheet) return false;
+      if (pay !== "all" && orderPayState(order) !== pay) return false;
+      if (file && order.fileStatus !== file) return false;
+      if (placement && order.placementStatus !== placement) return false;
+      if (!query) return true;
+      // An order number is matched from its start (22105 ← "221"), text anywhere.
+      if (String(order.orderNumber ?? "").startsWith(query)) return true;
+      return `${clientName(order.clientId)} ${order.description} ${order.product}`.toLocaleLowerCase("he").includes(query);
+    });
+  }
+
+  function sortOrders(list) {
+    const { key, dir } = state.orderSort;
+    const column = ORDER_COLUMNS.find((item) => item.key === key) || ORDER_COLUMNS[1];
+    const sign = dir === "asc" ? 1 : -1;
+    return [...list].sort((left, right) => {
+      const a = column.sort(left); const b = column.sort(right);
+      const result = column.text ? String(a || "").localeCompare(String(b || ""), "he", { numeric: true })
+        : (a > b ? 1 : a < b ? -1 : 0);
+      return sign * result || (Number(right.orderNumber) || 0) - (Number(left.orderNumber) || 0);
+    });
+  }
+
+  function populateSheetFilter() {
+    const select = $("#orders-sheet-filter");
+    const current = select.value;
+    const sheets = [...new Set([...app().orders().map((order) => order.sheetNumber).filter(Boolean), ...state.sheetStatus.keys()])]
+      .sort((left, right) => compareSheets(left, right));
+    const html = `<option value="">כל הגיליונות</option>${sheets.map((sheet) => `<option value="${escapeHtml(sheet)}">גיליון ${escapeHtml(sheet)}</option>`).join("")}`;
+    if (select.dataset.options !== html) { select.innerHTML = html; select.dataset.options = html; }
+    select.value = sheets.includes(current) ? current : "";
+  }
+
+  function renderOrdersPage() {
+    if (state.editing) return; // a cell is being edited: do not replace it under the user's hands
+    const modelV3 = v3();
+    $$(".orders-v3-only").forEach((element) => { element.hidden = !modelV3; });
+    $("#orders-v2-note").hidden = modelV3 || !state.ready;
+    populateSheetFilter();
+    $("#orders-head").innerHTML = `<tr>${ORDER_COLUMNS.map((column) => {
+      const active = state.orderSort.key === column.key;
+      const sortAttr = active ? ` aria-sort="${state.orderSort.dir === "asc" ? "ascending" : "descending"}"` : "";
+      return column.sort ? `<th scope="col"${sortAttr}><button class="sort-button${active ? " is-active" : ""}" type="button" data-order-sort="${column.key}">${escapeHtml(column.head)}<span class="sort-mark" aria-hidden="true">${active ? (state.orderSort.dir === "asc" ? "▲" : "▼") : ""}</span></button></th>`
+        : `<th scope="col">${escapeHtml(column.head)}</th>`;
+    }).join("")}<th scope="col"><span class="sr-only">פעולות</span></th></tr>`;
+    const body = $("#orders-body");
+    if (state.ready && !state.loaded) {
+      body.innerHTML = loadingRow(ORDER_COLUMNS.length + 1);
+      $("#empty-state").hidden = true;
+      $("#orders-count").textContent = "";
+      return;
+    }
+    const orders = sortOrders(filteredOrders());
+    body.innerHTML = orders.map((order) => `<tr class="${order.cancelledAt ? "is-cancelled" : ""}" data-order-row-id="${escapeHtml(order.id)}">
+      ${ORDER_COLUMNS.map((column) => orderCell(order, column.key)).join("")}
+      <td class="row-actions">${modelV3 && !order.cancelledAt
+        ? `<button class="link-button order-cancel" type="button" data-order-cancel="${escapeHtml(order.id)}" aria-label="ביטול הזמנה ${escapeHtml(order.orderNumber ?? "")}">ביטול</button>`
+        : order.cancelledAt ? `<span class="cell-muted" title="${escapeHtml(order.cancelReason)}">בוטלה</span>` : ""}</td>
+    </tr>`).join("");
+    $("#empty-state").hidden = orders.length !== 0;
+    const hidden = modelV3 && !$("#orders-show-cancelled").checked ? app().orders().filter((order) => order.cancelledAt).length : 0;
+    $("#orders-count").textContent = `${number.format(orders.length)} ${orders.length === 1 ? "הזמנה" : "הזמנות"}${hidden ? ` · ${number.format(hidden)} מבוטלות מוסתרות` : ""}`;
+  }
+
+  // ----- double-click editing -----
+  function editorMarkup(order, key) {
+    const input = (value, extra = "") => `<input class="cell-input" data-edit-input value="${escapeHtml(value ?? "")}" ${extra}>`;
+    const options = (map, selected) => Object.entries(map)
+      .filter(([value]) => value !== "unknown" || selected === "unknown") // "unknown" cannot be chosen again
+      .map(([value, label]) => `<option value="${value}" ${value === selected ? "selected" : ""}>${escapeHtml(label)}</option>`).join("");
+    let field;
+    if (key === "description") field = input(order.description, 'maxlength="500" aria-label="פירוט הזמנה"');
+    else if (key === "sheet") field = input(order.sheetNumber, 'maxlength="80" inputmode="numeric" list="sheet-options" aria-label="מספר גיליון"');
+    else if (key === "notes") field = input(order.notes, 'maxlength="5000" aria-label="הערות"');
+    else if (key === "credits") field = input(order.creditsUsed, 'type="number" min="0.01" step="0.01" aria-label="קרדיטים"');
+    else if (key === "net") field = input(order.cashBeforeVat, 'type="number" min="0.01" step="0.01" aria-label="מחיר לפני מע״מ"');
+    else if (key === "file") field = `<select class="cell-input" data-edit-input aria-label="סטטוס קובץ">${options(FILE_STATUS, order.fileStatus)}</select>`;
+    else field = `<select class="cell-input" data-edit-input aria-label="סטטוס שיבוץ">${options(PLACEMENT_STATUS, order.placementStatus)}</select>`;
+    const hint = key === "net" ? `<span class="cell-hint" data-edit-hint></span>` : "";
+    return `<div class="cell-editor">${field}<span class="cell-editor-actions"><button class="cell-save" type="button" data-edit-save title="שמירה (Enter)">שמירה</button><button class="cell-cancel" type="button" data-edit-cancel title="ביטול (Esc)">ביטול</button></span>${hint}<span class="cell-error" data-edit-error role="alert"></span></div>`;
+  }
+  function startEdit(td) {
+    const row = td.closest("[data-order-row-id]");
+    const order = orderById(row?.dataset.orderRowId);
+    const key = td.dataset.edit;
+    if (!canEdit(order, key) || state.editing) return;
+    state.editing = { orderId: order.id, key };
+    td.classList.add("is-editing");
+    td.innerHTML = editorMarkup(order, key);
+    const field = $("[data-edit-input]", td);
+    field.focus();
+    if (field.select && field.tagName === "INPUT") field.select();
+    if (key === "net") updateNetHint(td, order);
+  }
+  function updateNetHint(td, order) {
+    const value = Number($("[data-edit-input]", td).value);
+    const hint = $("[data-edit-hint]", td);
+    if (hint) hint.textContent = value > 0 ? `כולל מע״מ: ${money.format(roundMoney(value * (1 + Number(order.vatRate ?? state.vatRate))))}` : "";
+  }
+  // Leaving the editor after a conflict reloads the data (as the message promises), so the next edit uses the
+  // current version instead of failing again.
+  function endEdit() {
+    const stale = Boolean(state.editing?.stale);
+    state.editing = null;
+    renderOrdersPage();
+    if (stale) {
+      app().refresh().then(() => loadBusinessData()).then(() => renderCurrent()).catch((error) => {
+        console.error("רענון אחרי התנגשות נכשל:", error);
+        app().toast(`רענון הנתונים נכשל: ${errorText(error)}`, true);
+      });
+    }
+  }
+  async function saveEdit(td) {
+    const editing = state.editing;
+    const order = editing && orderById(editing.orderId);
+    if (!order) { endEdit(); return; }
+    const raw = $("[data-edit-input]", td).value;
+    const value = typeof raw === "string" ? raw.trim() : raw;
+    const errorBox = $("[data-edit-error]", td);
+    const fail = (message) => { errorBox.textContent = message; $("[data-edit-input]", td).focus(); };
+    const key = editing.key;
+    try {
+      if (key === "credits" || key === "net") {
+        const amount = Number(value);
+        if (!(amount > 0) || roundMoney(amount) !== amount) { fail("יש להזין מספר חיובי, עד שתי ספרות אחרי הנקודה."); return; }
+        if (amount === Number(key === "net" ? order.cashBeforeVat : order.creditsUsed)) { endEdit(); return; }
+        td.classList.add("is-saving");
+        await q(sb().rpc("update_order_charge", {
+          p_order_id: order.id, p_expected_updated_at: order.updatedAt,
+          p_cash_amount_before_vat: key === "net" ? amount : null, p_credits_used: key === "credits" ? amount : null,
+          p_idempotency_key: crypto.randomUUID()
+        }));
+      } else {
+        if (key === "description" && !value && order.description) { fail("פירוט ההזמנה הוא שדה חובה."); return; }
+        if (key === "description" && app().hasEncodingDamage(value)) { fail("הטקסט נראה משובש (בעיית קידוד עברית). הקלידי אותו מחדש."); return; }
+        if (key === "sheet" && !value && order.sheetNumber) { fail("אי אפשר להסיר גיליון; אפשר להעביר לגיליון אחר."); return; }
+        const next = {
+          description: order.description || null, notes: order.notes || "", sheet: order.sheetNumber || null,
+          file: order.fileStatus, placement: order.placementStatus
+        };
+        const before = JSON.stringify(next);
+        next[key] = key === "notes" ? value : (value || null);
+        if (JSON.stringify(next) === before) { endEdit(); return; }
+        td.classList.add("is-saving");
+        await q(sb().rpc("update_order_details", {
+          p_order_id: order.id, p_expected_updated_at: order.updatedAt,
+          p_ad_description: next.description, p_notes: next.notes, p_sheet_number: next.sheet,
+          p_file_status: next.file, p_placement_status: next.placement, p_idempotency_key: crypto.randomUUID()
+        }));
+      }
+      state.editing = null;
+      await afterSave(`הזמנה ${order.orderNumber} עודכנה.`);
+    } catch (error) {
+      td.classList.remove("is-saving");
+      console.error("עדכון הזמנה נכשל:", error);
+      const stale = String(error.code || "") === "40001";
+      if (stale && state.editing) state.editing.stale = true;
+      fail(stale ? "ההזמנה עודכנה בינתיים במקום אחר. ביטול העריכה יטען את הנתונים העדכניים." : errorText(error));
+    }
+  }
+
+  // ----- documented cancellation (instead of deletion) -----
+  async function cancelOrder(orderId) {
+    const order = orderById(orderId);
+    if (!order || order.cancelledAt || !v3()) return;
+    let consequence;
+    if (order.billingMode === "credits") consequence = `${number.format(order.creditsUsed)} קרדיטים יוחזרו ליתרת הלקוח, פעם אחת בלבד.`;
+    else {
+      const m = orderMoney(order);
+      consequence = m.received > 0
+        ? `כבר התקבלו ${money.format(m.received)}. הסכום נשאר רשום; החזר כספי, אם יינתן, נרשם בנפרד ב"תקבולים".`
+        : m.due > 0 ? `החיוב הפתוח (${money.format(m.due)}) יבוטל ולא ייחשב חוב.` : "";
+    }
+    const answer = await app().ask({ kicker: "ביטול הזמנה", title: `לבטל את הזמנה ${order.orderNumber}?`,
+      message: `ההזמנה לא תימחק: היא תישאר בהיסטוריה ותסומן כמבוטלת. ${consequence}`, confirmText: "אישור הביטול", danger: true,
+      reason: { label: "סיבת הביטול", min: 3, placeholder: "לדוגמה: הלקוח ביטל את הפרסום" } });
+    if (!answer) return;
+    try {
+      const result = await q(sb().rpc("cancel_business_order", {
+        p_order_id: order.id, p_expected_updated_at: order.updatedAt, p_reason: answer.reason, p_idempotency_key: crypto.randomUUID()
+      }));
+      const returned = Number(result?.credits_returned || 0);
+      await afterSave(result?.already_cancelled ? `הזמנה ${order.orderNumber} כבר בוטלה קודם; לא בוצע שינוי.`
+        : `הזמנה ${order.orderNumber} בוטלה.${returned > 0 ? ` הוחזרו ${number.format(returned)} קרדיטים.` : ""}`);
+    } catch (error) {
+      console.error("ביטול הזמנה נכשל:", error);
+      app().toast(errorText(error), true);
+    }
+  }
+
+  // ----- receipts of one charge (model v3): full or partial, each one separate; documented reversal -----
+  function openPayDialog(obligationId) {
+    const row = obligationRows().find((item) => item.id === obligationId);
+    if (!row) { app().toast("החיוב לא נמצא. רענני את הדף.", true); return; }
+    state.payObligationId = obligationId;
+    newKey("pay");
+    const form = $("#biz-pay-form");
+    form.reset();
+    $("#biz-pay-label").textContent = `${clientName(row.clientId)} · ${row.label}${row.dueOn ? ` · מועד ${displayDate(row.dueOn)}` : ""}`;
+    $("#biz-pay-figures").innerHTML = [
+      ["סכום החיוב", row.cancelled ? "בוטל" : money.format(row.amount)], ["התקבל", money.format(row.received)], ["יתרה לתשלום", money.format(row.outstanding)]
+    ].map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("");
+    const open = !row.cancelled && row.outstanding > 0;
+    $("#biz-pay-fields").hidden = !open;
+    $("#biz-pay-notes-wrap").hidden = !open;
+    $("#biz-pay-submit").hidden = !open;
+    form.elements.amount.value = open ? String(row.outstanding) : "";
+    form.elements.amount.max = open ? String(row.outstanding) : "";
+    form.elements.received_on.value = localDateValue();
+    const reversed = new Set(state.events.filter((event) => event.reverses_event_id).map((event) => event.reverses_event_id));
+    const events = state.events.filter((event) => event.obligation_id === obligationId);
+    const lines = events.map((event) => {
+      const date = displayDate(event.received_on || String(event.event_at).slice(0, 10));
+      const amount = money.format(Number(event.amount));
+      if (event.event_type === "payment") {
+        const undo = reversed.has(event.id) ? '<span class="cell-muted">בוטל</span>'
+          : `<button class="link-button" type="button" data-receipt-reverse="${escapeHtml(event.id)}">ביטול תקבול</button>`;
+        return `<li><span>${escapeHtml(date)}</span><strong>${escapeHtml(amount)}</strong><span class="cell-muted">${escapeHtml(event.notes || "")}</span>${undo}</li>`;
+      }
+      const kind = event.event_type === "reversal" ? "ביטול / החזר" : "תיקון סטטוס";
+      return `<li class="is-reversal"><span>${escapeHtml(date)}</span><strong>${escapeHtml(amount)}</strong><span class="cell-muted">${escapeHtml(`${kind}${event.notes ? `: ${event.notes}` : ""}`)}</span><span></span></li>`;
+    });
+    if (!events.length && row.received > 0) lines.push('<li><span>—</span><strong></strong><span class="cell-muted">סומן כשולם לפני המערכת העסקית, ללא רישום תקבול נפרד.</span><span></span></li>');
+    $("#biz-pay-receipts").innerHTML = lines.length ? `<h3>תקבולים</h3><ul class="receipt-list">${lines.join("")}</ul>` : '<p class="cell-muted">עדיין לא נרשמו תקבולים לחיוב הזה.</p>';
+    $("#biz-pay-message").textContent = "";
+    $("#biz-pay-modal").showModal();
+    if (open) form.elements.amount.focus();
+  }
+  async function submitPay(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const row = obligationRows().find((item) => item.id === state.payObligationId);
+    const obligation = state.obligations.find((item) => item.id === state.payObligationId);
+    const message = $("#biz-pay-message");
+    if (!row || !obligation) { message.textContent = "החיוב לא נמצא. רענני את הדף."; return; }
+    const amount = Number(form.elements.amount.value);
+    const receivedOn = form.elements.received_on.value;
+    if (!(amount > 0) || roundMoney(amount) !== amount) { message.textContent = "יש להזין סכום חיובי, עד שתי ספרות אחרי הנקודה."; return; }
+    if (amount > row.outstanding) { message.textContent = `הסכום גבוה מהיתרה לתשלום (${money.format(row.outstanding)}).`; return; }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(receivedOn)) { message.textContent = "יש לבחור תאריך תקבול."; return; }
+    const button = $("#biz-pay-submit");
+    setBusy(button, true, "רישום התקבול");
+    message.textContent = "";
+    try {
+      const result = await q(sb().rpc("record_obligation_payment", {
+        p_obligation_id: obligation.id, p_amount: amount, p_received_on: receivedOn, p_notes: form.elements.notes.value.trim(),
+        p_expected_updated_at: obligation.updated_at, p_idempotency_key: state.keys.pay
+      }));
+      $("#biz-pay-modal").close();
+      const left = Number(result?.outstanding ?? 0);
+      await afterSave(left > 0 ? `התקבול נרשם. נותרה יתרה של ${money.format(left)}.` : "התקבול נרשם. החיוב שולם במלואו.");
+    } catch (error) {
+      console.error("רישום תקבול נכשל:", error);
+      message.textContent = String(error.code || "") === "40001" ? "החיוב עודכן בינתיים במקום אחר. סגרי את החלון ופתחי אותו מחדש." : errorText(error);
+    } finally {
+      setBusy(button, false, "רישום התקבול");
+    }
+  }
+  async function reverseReceipt(eventId) {
+    const receipt = state.events.find((event) => event.id === eventId);
+    if (!receipt) return;
+    $("#biz-pay-modal").close();
+    const answer = await app().ask({ kicker: "ביטול תקבול", title: `לבטל תקבול של ${money.format(Number(receipt.amount))}?`,
+      message: "התקבול המקורי נשאר בהיסטוריה, ונרשמת לצידו תנועת ביטול. משמש גם לתיעוד החזר כספי.",
+      confirmText: "ביטול התקבול", danger: true, reason: { label: "סיבה", min: 3, placeholder: "לדוגמה: הצ׳ק חזר / הוחזר ללקוח" } });
+    if (!answer) return;
+    try {
+      await q(sb().rpc("reverse_obligation_payment", { p_event_id: eventId, p_reason: answer.reason, p_idempotency_key: crypto.randomUUID() }));
+      await afterSave("התקבול בוטל ונרשם בהיסטוריה.");
+    } catch (error) {
+      console.error("ביטול תקבול נכשל:", error);
+      app().toast(errorText(error), true);
+    }
+  }
+
+  // ----- payment schedule editor (purchase and later changes) -----
+  // rows: { obligationId, due, net, received (incl. VAT), paid }. A fully paid row is locked; a partly paid row
+  // cannot go below what was received. The rows before VAT must add up to the package price.
+  function scheduleProblems(ctx) {
+    const problems = [];
+    if (!ctx.rows.length) problems.push("נדרש לפחות תשלום אחד.");
+    if (ctx.rows.length > 60) problems.push("עד 60 תשלומים.");
+    ctx.rows.forEach((row, index) => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(row.due)) problems.push(`תשלום ${index + 1}: חסר מועד.`);
+      if (!(row.net > 0) || roundMoney(row.net) !== row.net) problems.push(`תשלום ${index + 1}: סכום לא תקין.`);
+      else if (row.received > 0 && roundMoney(row.net * (1 + ctx.vat)) < row.received) problems.push(`תשלום ${index + 1}: נמוך מהסכום שכבר התקבל (${money.format(row.received)}).`);
+    });
+    const sum = roundMoney(ctx.rows.reduce((total, row) => total + (Number(row.net) || 0), 0));
+    if (sum !== ctx.price) problems.push(`סך התשלומים לפני מע״מ ${money.format(sum)}; מחיר החבילה ${money.format(ctx.price)} (${sum > ctx.price ? "עודף" : "חסר"} ${money.format(Math.abs(roundMoney(ctx.price - sum)))}).`);
+    return problems;
+  }
+  function renderScheduleEditor(container, ctx) {
+    const rows = ctx.rows.map((row, index) => `<tr${row.paid ? ' class="is-locked"' : ""}>
+      <td class="row-number">${index + 1}</td>
+      <td><input type="date" value="${escapeHtml(row.due)}" data-sched="due" data-index="${index}" aria-label="מועד תשלום ${index + 1}" ${row.paid ? "disabled" : ""}></td>
+      <td><input type="number" min="0.01" step="0.01" value="${escapeHtml(row.net)}" data-sched="net" data-index="${index}" aria-label="סכום לפני מע״מ, תשלום ${index + 1}" ${row.paid ? "disabled" : ""}></td>
+      <td class="amount-cell">${Number(row.net) > 0 ? escapeHtml(money.format(roundMoney(row.net * (1 + ctx.vat)))) : ""}</td>
+      <td class="amount-cell">${row.received > 0 ? escapeHtml(money.format(row.received)) : ""}</td>
+      <td>${row.paid ? '<span class="cell-muted">שולם</span>' : row.received > 0 ? "" : `<button class="delete-order" type="button" data-sched-remove="${index}" aria-label="הסרת תשלום ${index + 1}">×</button>`}</td>
+    </tr>`).join("");
+    const problems = scheduleProblems(ctx);
+    container.innerHTML = `<table class="schedule-table"><thead><tr><th>#</th><th>מועד</th><th>לפני מע״מ</th><th>כולל מע״מ</th><th>התקבל</th><th><span class="sr-only">הסרה</span></th></tr></thead><tbody>${rows}</tbody></table>
+      <div class="schedule-actions"><button class="button button-outline client-action" type="button" data-sched-add>הוספת תשלום</button>
+      <button class="button button-outline client-action" type="button" data-sched-split>חלוקה שווה של היתרה</button></div>
+      <p class="schedule-check ${problems.length ? "is-error" : "is-ok"}" role="status">${escapeHtml(problems.length ? problems.join(" ") : `סך הכול ${money.format(ctx.price)} לפני מע״מ · ${ctx.rows.length} תשלומים`)}</p>`;
+  }
+  function scheduleInput(container, ctx, event) {
+    const field = event.target.closest("[data-sched]");
+    if (!field) return;
+    const row = ctx.rows[Number(field.dataset.index)];
+    if (field.dataset.sched === "due") row.due = field.value;
+    else row.net = field.value === "" ? NaN : Number(field.value);
+    ctx.touched = true;
+    // Re-render only the derived parts, keeping the focused input.
+    const tr = field.closest("tr");
+    tr.children[3].textContent = Number(row.net) > 0 ? money.format(roundMoney(row.net * (1 + ctx.vat))) : "";
+    const problems = scheduleProblems(ctx);
+    const check = $(".schedule-check", container);
+    check.className = `schedule-check ${problems.length ? "is-error" : "is-ok"}`;
+    check.textContent = problems.length ? problems.join(" ") : `סך הכול ${money.format(ctx.price)} לפני מע״מ · ${ctx.rows.length} תשלומים`;
+    ctx.onChange?.();
+  }
+  function scheduleClick(container, ctx, event) {
+    const remove = event.target.closest("[data-sched-remove]");
+    if (remove) { ctx.rows.splice(Number(remove.dataset.schedRemove), 1); }
+    else if (event.target.closest("[data-sched-add]")) {
+      const last = ctx.rows[ctx.rows.length - 1];
+      ctx.rows.push({ obligationId: null, due: last?.due ? addMonths(last.due, 1) : localDateValue(), net: NaN, received: 0, paid: false });
+    } else if (event.target.closest("[data-sched-split]")) {
+      // Spread what is left after the locked (paid) rows equally over the open rows; the last absorbs rounding.
+      const open = ctx.rows.filter((row) => !row.paid);
+      const fixed = roundMoney(ctx.rows.filter((row) => row.paid).reduce((total, row) => total + row.net, 0));
+      if (open.length) {
+        const rest = roundMoney(ctx.price - fixed);
+        const base = Math.floor((rest / open.length) * 100) / 100;
+        open.forEach((row, index) => { row.net = index === open.length - 1 ? roundMoney(rest - base * (open.length - 1)) : base; });
+      }
+    } else return;
+    ctx.touched = true;
+    renderScheduleEditor(container, ctx);
+    ctx.onChange?.();
+  }
+
+  // Purchase: the editor starts from the automatic schedule and is shown only on request.
+  const purchaseSchedule = { rows: [], price: 0, vat: 0, touched: false, onChange: null };
+  function refreshPurchaseSchedule(values) {
+    purchaseSchedule.price = values.pkg.price;
+    purchaseSchedule.vat = state.vatRate;
+    if (!purchaseSchedule.touched) {
+      purchaseSchedule.rows = buildInstallments(values.pkg.price, values.count, values.startsOn)
+        .map((item) => ({ obligationId: null, due: item.due_on, net: item.amount_before_vat, received: 0, paid: false }));
+    }
+    if (!$("#biz-package-schedule").hidden) renderScheduleEditor($("#biz-package-schedule"), purchaseSchedule);
+  }
+
+  // After the purchase (model v3): edit the unpaid installments of one package.
+  const editSchedule = { rows: [], price: 0, vat: 0, packageId: null, expected: null, touched: false };
+  function openSchedule(packageId) {
+    const pkg = state.packages.find((item) => item.id === packageId);
+    if (!pkg || !v3()) return;
+    const installments = new Map(state.installments.map((item) => [item.id, item]));
+    const rows = state.obligations
+      .filter((ob) => ob.status !== "cancelled" && installments.get(ob.package_installment_id)?.customer_package_id === packageId)
+      .map((ob) => {
+        const view = state.summary.get(ob.package_installment_id);
+        const received = view ? Number(view.cash_received) : 0;
+        const outstanding = view ? Number(view.cash_outstanding) : Number(ob.amount_due);
+        return { obligationId: ob.id, due: ob.due_on, net: Number(ob.amount_before_vat ?? installments.get(ob.package_installment_id).amount_before_vat),
+          received, paid: outstanding <= 0 };
+      })
+      .sort((a, b) => String(a.due).localeCompare(String(b.due)));
+    Object.assign(editSchedule, { rows, price: Number(pkg.price_before_vat), vat: Number(pkg.vat_rate_snapshot ?? state.vatRate),
+      packageId, expected: pkg.updated_at, touched: false });
+    newKey("schedule");
+    $("#biz-schedule-form").reset();
+    $("#biz-schedule-label").textContent = `${clientName(pkg.client_id)} · ${pkg.package_name_snapshot} · מחיר ${money.format(editSchedule.price)} לפני מע״מ. תשלום ששולם במלואו נעול; תקבולים לא נמחקים.`;
+    $("#biz-schedule-message").textContent = "";
+    renderScheduleEditor($("#biz-schedule-editor"), editSchedule);
+    $("#biz-schedule-modal").showModal();
+  }
+  async function submitSchedule(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const message = $("#biz-schedule-message");
+    const problems = scheduleProblems(editSchedule);
+    const reason = form.elements.reason.value.trim();
+    if (problems.length) { message.textContent = problems.join(" "); return; }
+    if (reason.length < 3) { message.textContent = "נדרשת סיבה לשינוי (3 תווים לפחות)."; form.elements.reason.focus(); return; }
+    const button = $("#biz-schedule-submit");
+    setBusy(button, true, "שמירת לוח התשלומים");
+    message.textContent = "";
+    try {
+      await q(sb().rpc("update_installment_schedule", {
+        p_customer_package_id: editSchedule.packageId, p_expected_updated_at: editSchedule.expected,
+        p_items: editSchedule.rows.map((row) => ({ obligation_id: row.obligationId, due_on: row.due, amount_before_vat: row.net })),
+        p_reason: reason, p_idempotency_key: state.keys.schedule
+      }));
+      $("#biz-schedule-modal").close();
+      await afterSave("לוח התשלומים עודכן.");
+    } catch (error) {
+      console.error("עדכון לוח תשלומים נכשל:", error);
+      message.textContent = String(error.code || "") === "40001" ? "החבילה עודכנה בינתיים במקום אחר. סגרי ופתחי מחדש." : errorText(error);
+    } finally {
+      setBusy(button, false, "שמירת לוח התשלומים");
+    }
+  }
+
   // ---------- wiring ----------
   let refreshTimer = null;
   document.addEventListener("modaat:session-ready", async (event) => {
@@ -1498,7 +2112,7 @@
   });
   document.addEventListener("modaat:signed-out", () => {
     Object.assign(state, { ready: false, loaded: false, packages: [], installments: [], obligations: [], balances: new Map(), modalClientId: null,
-      sheetStatus: new Map(), sheetsInstalled: false, sheetModel: null, serverOffset: 0 });
+      sheetStatus: new Map(), sheetsInstalled: false, sheetModel: null, serverOffset: 0, summary: new Map(), events: [], editing: null });
     $("#new-order-rows").innerHTML = "";
     $("#new-order-result").hidden = true;
   });
@@ -1506,6 +2120,8 @@
   $("#biz-package-form").addEventListener("submit", submitPackage);
   $("#biz-package-select").addEventListener("change", () => updatePackageSummary(true));
   $("#biz-package-form").addEventListener("input", (event) => {
+    // Typing in the schedule editor is handled by the editor itself (it must keep the focused field).
+    if (event.target.closest("#biz-package-schedule")) return;
     if (event.target.id !== "biz-package-select") updatePackageSummary(false);
   });
   $("#biz-credit-form").addEventListener("submit", submitCredits);
@@ -1576,8 +2192,77 @@
     }
   });
 
+  // ----- orders table -----
+  for (const id of ["#orders-sheet-filter", "#orders-file-filter", "#orders-placement-filter", "#orders-show-cancelled"]) {
+    $(id).addEventListener("change", renderOrdersPage);
+  }
+  $("#orders-head").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-order-sort]");
+    if (!button) return;
+    const key = button.dataset.orderSort;
+    state.orderSort = { key, dir: state.orderSort.key === key && state.orderSort.dir === "desc" ? "asc" : "desc" };
+    renderOrdersPage();
+  });
+  const ordersBody = $("#orders-body");
+  ordersBody.addEventListener("dblclick", (event) => {
+    if (event.target.closest(".cell-editor, button, select")) return;
+    const td = event.target.closest("td[data-edit]");
+    if (td) startEdit(td);
+  });
+  ordersBody.addEventListener("keydown", (event) => {
+    const editor = event.target.closest(".cell-editor");
+    if (editor) {
+      const td = editor.closest("td");
+      if (event.key === "Escape") { event.preventDefault(); endEdit(); }
+      if (event.key === "Enter" && event.target.matches("[data-edit-input]")) { event.preventDefault(); saveEdit(td); }
+      return;
+    }
+    if (event.key === "Enter" && event.target.matches("td[data-edit]")) { event.preventDefault(); startEdit(event.target); }
+  });
+  ordersBody.addEventListener("input", (event) => {
+    const td = event.target.closest("td.is-editing");
+    if (td && state.editing?.key === "net") updateNetHint(td, orderById(state.editing.orderId));
+  });
+  ordersBody.addEventListener("click", (event) => {
+    const td = event.target.closest("td.is-editing");
+    if (td && event.target.closest("[data-edit-save]")) saveEdit(td);
+    if (td && event.target.closest("[data-edit-cancel]")) endEdit();
+    const cancel = event.target.closest("[data-order-cancel]");
+    if (cancel) cancelOrder(cancel.dataset.orderCancel);
+  });
+  document.addEventListener("modaat:view", (event) => {
+    if (event.detail?.name === "orders") return;
+    state.editing = null;
+    for (const id of ["#orders-sheet-filter", "#orders-file-filter", "#orders-placement-filter"]) $(id).value = "";
+    $("#orders-show-cancelled").checked = false;
+  });
+
+  // ----- receipts and payment schedules -----
+  $("#biz-pay-form").addEventListener("submit", submitPay);
+  $("#biz-schedule-form").addEventListener("submit", submitSchedule);
+  $("#biz-schedule-editor").addEventListener("input", (event) => scheduleInput($("#biz-schedule-editor"), editSchedule, event));
+  $("#biz-schedule-editor").addEventListener("click", (event) => scheduleClick($("#biz-schedule-editor"), editSchedule, event));
+  purchaseSchedule.onChange = () => { const values = packageFormValues(); if (values.valid) renderPurchaseSummary(values); };
+  $("#biz-package-schedule").addEventListener("input", (event) => scheduleInput($("#biz-package-schedule"), purchaseSchedule, event));
+  $("#biz-package-schedule").addEventListener("click", (event) => scheduleClick($("#biz-package-schedule"), purchaseSchedule, event));
+  $("#biz-package-schedule-toggle").addEventListener("click", () => {
+    const box = $("#biz-package-schedule");
+    box.hidden = !box.hidden;
+    $("#biz-package-schedule-toggle").setAttribute("aria-expanded", String(!box.hidden));
+    $("#biz-package-schedule-toggle").textContent = box.hidden ? "עריכת מועדים וסכומים" : "הסתרת פירוט התשלומים";
+    if (!box.hidden) renderScheduleEditor(box, purchaseSchedule);
+  });
+  document.addEventListener("click", (event) => {
+    const payOpen = event.target.closest("[data-biz-pay-open]");
+    if (payOpen) openPayDialog(payOpen.dataset.bizPayOpen);
+    const reverse = event.target.closest("[data-receipt-reverse]");
+    if (reverse) reverseReceipt(reverse.dataset.receiptReverse);
+    const schedule = event.target.closest("[data-biz-schedule]");
+    if (schedule) openSchedule(schedule.dataset.bizSchedule);
+  });
+
   window.ModaatBusiness = Object.freeze({
     isPremium: (clientId) => state.ready && Boolean(activePackage(clientId)),
-    setOrderPaid, deleteOrder
+    setOrderPaid, deleteOrder, renderOrdersPage
   });
 })();

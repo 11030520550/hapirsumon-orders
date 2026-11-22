@@ -171,7 +171,7 @@ async function run() {
   check("R1 menu: no 'new order' item, has 'הזמנות' + 'גיליונות'", !$('.main-nav [data-view="new-order"]') && text('.main-nav [data-view="orders"]') .includes("הזמנות") && !!$('.main-nav [data-view="sheets"]'));
   await nav("orders");
   check("R2 orders page has primary 'הזמנה חדשה'", text('[data-page="orders"] .welcome-row .button-primary').includes("הזמנה חדשה"));
-  const nums = $$("#orders-body .order-number").map((td) => td.textContent.trim());
+  const nums = $$("#orders-body .order-number").map((td) => td.firstChild.textContent.trim()); // number only (a legacy order also has a small "ישנה" tag)
   check("R3 order numbers are 5+ digits, no technical IDs", nums.length === 30 && nums.every((n) => /^\d{5,}$/.test(n)) && !text("#orders-body").includes("o-test"), nums.slice(0, 3).join(","));
   const firstDate = $("#orders-body tr").children[1].textContent.trim();
   check("R4 order date DD/MM/YYYY", /^\d{2}\/\d{2}\/\d{4}$/.test(firstDate), firstDate);
@@ -236,15 +236,11 @@ async function run() {
   await w.ModaatApp.refresh(); await sleep(500);
   check("I5 the error clears after a successful refresh", !$(".storage-note").classList.contains("is-error") && !text("#sync-status").includes("שגיאת"), text("#sync-status"));
   await nav("orders");
-  const victim = db().orders.find((o) => o.payment_status === "pending" && $(`[data-delete-order="${o.id}"]`));
-  const ordersBefore = db().orders.length;
-  $(`[data-delete-order="${victim.id}"]`).click();
-  const deleteAsked = await answerDialog({ cancel: true }); await sleep(300);
-  check("I6 delete asks in the system dialog; cancel keeps the order", deleteAsked && db().orders.length === ordersBefore);
-  $(`[data-delete-order="${victim.id}"]`).click();
-  check("I7 delete dialog is styled as destructive", $("#app-confirm-modal").open && $("#app-confirm-submit").classList.contains("button-danger"));
-  await answerDialog(); await sleep(700);
-  check("I8 confirmed delete removes the order", db().orders.length === ordersBefore - 1 && !db().orders.some((o) => o.id === victim.id));
+  // Business orders are never deleted (delete_business_order refuses them). In the model that is live today (v2) the table offers
+  // neither delete nor cancel; documented cancellation arrives with supabase-orders-v3.sql (tested in the O-block).
+  check("I6 business orders table has no delete button (model v2)", !$("#orders-body [data-delete-order]") && !$("#orders-body [data-order-cancel]"));
+  check("I7 model v2 shows the database-update note on the orders screen", !$("#orders-v2-note").hidden);
+  check("I8 13 columns + actions, in the agreed order", $$("#orders-head th").map((th) => th.textContent.replace(/[▲▼]/g, "").trim()).slice(0, 13).join("|") === "מס׳ הזמנה|תאריך הזמנה|מכניס הזמנה|לקוח|פירוט הזמנה|גיליון|קרדיטים|מחיר לפני מע״מ|מחיר כולל מע״מ|סטטוס תשלום|סטטוס קובץ|סטטוס שיבוץ|הערות", $$("#orders-head th").map((th) => th.textContent.trim()).join("|"));
 
   await nav("clients");
   check("R17 garbled name flagged in client list", $$("#clients-body .payment-select.pending").some((el) => el.textContent.includes("קידוד")));
@@ -401,12 +397,12 @@ async function run() {
     sunday.join() === "125,הגיליון הנוכחי,מתפרסם היום" && currentNo() === "126" && listRows().join() === "126,127,128,125,124" && placeOf("125") === "פורסם" && sheetRow("125").textContent.includes(dmy(pub125))
     && placeOf("126") === "הגיליון הנוכחי" && placeOf("127") === "הגיליון הבא" && placeOf("124") === "היסטורי" && sheetRow("124").textContent.includes("תאריך לא תועד"),
     JSON.stringify({ sunday, cur: currentNo(), places: listRows().map(placeOf) }));
-  // Only "גיליון N" in the banner is a link: the title, the photo area and the background do nothing.
-  $(".sheets-banner-title").click(); $(".sheets-banner").click(); $(".sheets-banner-photo").click(); await sleep(150);
+  // Only "גיליון N" in the header is a link: the title and the background do nothing.
+  $(".sheets-head-title").click(); $(".sheets-head").click(); await sleep(150);
   const stayed = page() === "sheets";
   const interactive = $$("#sheets-banner button, #sheets-banner a, #sheets-banner [data-sheet-view], #sheets-banner [tabindex]");
   bannerLink().click(); await sleep(250);
-  check("G4 banner: the only interactive element is the 'גיליון 126' link; clicking the title, photo or background does nothing; the link opens the sheet page",
+  check("G4 header: the only interactive element is the 'גיליון 126' link; clicking the title or background does nothing; the link opens the sheet page",
     stayed && interactive.length === 1 && interactive[0].textContent === "גיליון 126" && page() === "sheet" && w.location.hash === "#/sheet/126", `${stayed} ${interactive.length} ${w.location.hash}`);
   await nav("sheets");
   const search = async (q) => { setVal($("#sheets-search"), q); await sleep(60); return listRows().join(); };
@@ -520,7 +516,7 @@ async function run() {
   await waitFor(() => $$('[data-page="sheets"] [data-sheet]').length > 0);
   const inside = (el) => { const r = el.getBoundingClientRect(); return r.left >= -1 && r.right <= w.innerWidth + 1; };
   const phoneRows = $$("#sheets-body .sheet-row");
-  const mobileList = d.documentElement.scrollWidth <= d.documentElement.clientWidth + 1 && $(".sheets-banner").scrollWidth <= $(".sheets-banner").clientWidth + 1
+  const mobileList = d.documentElement.scrollWidth <= d.documentElement.clientWidth + 1 && $(".sheets-head").scrollWidth <= $(".sheets-head").clientWidth + 1
     && inside(bannerLink()) && phoneRows.every((row) => inside(row) && w.getComputedStyle(row).display === "grid"
       && [...row.children].filter((cell) => cell.offsetParent !== null).every(inside))
     && phoneRows.every((row) => row.querySelector(".sheet-intake")?.offsetParent !== null);
@@ -558,7 +554,7 @@ async function run() {
   const widths = {};
   for (const width of [1440, 1366, 1280, 1024, 768]) {
     frame.style.width = width + "px"; await nav("sheets"); await sleep(150);
-    const list = fits($(".sheets-table-wrap")) && fits($(".sheets-banner")) && d.documentElement.scrollWidth <= d.documentElement.clientWidth + 1;
+    const list = fits($(".sheets-table-wrap")) && fits($(".sheets-head")) && d.documentElement.scrollWidth <= d.documentElement.clientWidth + 1;
     sheetRow("125").click(); await sleep(200);
     const sheet = fits($(".sheet-hero")) && fits($(".sheet-summary")) && d.documentElement.scrollWidth <= d.documentElement.clientWidth + 1
       && $$(".sheet-summary .sheet-sum").filter((cell) => !cell.hidden).every((cell) => cell.querySelector("dd").scrollWidth <= cell.clientWidth);
@@ -568,17 +564,13 @@ async function run() {
   check("G14 desktop 1440, laptops 1366/1280, tablet 1024/768 (Saturday, large amounts and long notes): the banner and the list fit; the sheet's summary banner fits with every figure whole",
     made.every((r) => !r.error) && intakeOf("125") === "סגור להזמנות" && Object.values(widths).every((ok) => ok === true),
     JSON.stringify({ widths, err: made.map((r) => r.error?.message).filter(Boolean) }));
-  // The banner: title, subtitle and the current-sheet line; the photo slot is the licensed file only (no illustration, no frame).
-  const photo = w.getComputedStyle($(".sheets-banner-photo"));
-  const bannerHeight = $(".sheets-banner").getBoundingClientRect().height;
-  const bannerOk = text(".sheets-banner-title") === "הגיליונות שלנו" && text(".sheets-banner-sub") === "כל גיליונות הפרסומון, במקום אחד." && bannerHeight >= 220 && bannerHeight <= 250
-    && !$(".sheets-banner img") && /sheets-banner\.jpg/.test(photo.backgroundImage) && photo.borderTopWidth === "0px" && photo.backgroundSize === "cover"
-    && $(".sheets-banner-photo").getBoundingClientRect().left <= $(".sheets-banner").getBoundingClientRect().left + 1
-    && $(".sheets-banner-text").getBoundingClientRect().right >= $(".sheets-banner").getBoundingClientRect().right - 2;
-  check("G16 banner composition: title 'הגיליונות שלנו' and the subtitle on the right; the photo area on the left uses only the licensed photo file (cover, never stretched out of proportion), with no illustration and no frame",
-    bannerOk, JSON.stringify({ bg: photo.backgroundImage.slice(-40), size: photo.backgroundSize, bannerHeight }));
+  // Compact header (owner decision 22/11): the title "גיליונות" and the current sheet on one line; no photograph, no hero.
+  const headHeight = $(".sheets-head").getBoundingClientRect().height;
+  const noImages = !$$('[data-page="sheets"] img').length && $$('[data-page="sheets"] *').every((el) => w.getComputedStyle(el).backgroundImage === "none" || /^url\("data:/.test(w.getComputedStyle(el).backgroundImage));
+  check("G16 compact header: title 'גיליונות', under 90px high, no photographs or background images on the sheets screen",
+    text(".sheets-head-title") === "גיליונות" && headHeight < 90 && noImages, JSON.stringify({ headHeight, noImages }));
   // Editorial language: square corners on both sheets screens (banner, list frame, search, buttons, sheet summary, order table).
-  const squares = [".sheets-banner", ".sheets-list", ".sheets-search", "#sheets-add", ".sheets-banner-link", ".sheet-hero", ".sheet-orders", "#sheet-new-order", "#sheet-toggle-status", "#sheet-page-status .payment-select"]
+  const squares = [".sheets-list", ".sheets-search", "#sheets-add", ".sheets-banner-link", ".sheet-hero", ".sheet-orders", "#sheet-new-order", "#sheet-toggle-status", "#sheet-page-status .payment-select"]
     .map((sel) => [sel, $(sel) ? w.getComputedStyle($(sel)).borderTopLeftRadius : "missing"]).filter(([, radius]) => radius !== "0px");
   check("G23 square corners on the sheets screens: banner, list, search, buttons, the sheet's summary banner and table; statuses are words, not pills",
     squares.length === 0, JSON.stringify(squares));

@@ -440,25 +440,17 @@ button.desk-item:hover { background: #F7F2EA; }
    to the current sheet) and one continuous list of every sheet. Square corners and hairlines on both sheets screens
    (scoped to .sheets-page / .sheet-page; the rest of the app and the login screen are unchanged).
    ===================================================================== */
-.sheets-banner { position: relative; display: flex; align-items: center; min-height: 232px; overflow: hidden;
-  border: 1px solid var(--line); border-radius: 0; background: #F7F2EA; }
-/* The licensed photograph (design-references/README.md). Until the file exists this area is simply empty:
-   no stretched screenshot, no illustration. A long, soft fade lets it settle into the cream background. */
-.sheets-banner-photo { position: absolute; top: 0; bottom: 0; left: 0; width: 62%; pointer-events: none;
-  background: url("assets/sheets-banner.jpg") left center / cover no-repeat;
-  -webkit-mask-image: linear-gradient(to right, #000 38%, rgba(0, 0, 0, .55) 68%, transparent 100%); mask-image: linear-gradient(to right, #000 38%, rgba(0, 0, 0, .55) 68%, transparent 100%); }
-.sheets-banner-text { position: relative; z-index: 1; max-width: 520px; padding: 26px 52px 24px 24px; }
-.sheets-banner-title { margin: 0; color: var(--forest); font-family: var(--font-serif); font-size: 40px; font-weight: 700; line-height: 1.1; letter-spacing: 0; }
-.sheets-banner-sub { margin: 8px 0 0; color: var(--ink-2); font-size: 16.5px; line-height: 1.5; }
-.sheets-banner-current { display: grid; justify-items: start; gap: 1px; width: max-content; max-width: 100%; margin: 16px 0 0; padding-top: 14px; border-top: 1px solid rgba(163, 140, 119, .45); }
+.sheets-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 28px; margin: 0 0 16px; padding: 0 0 14px; border-bottom: 1px solid var(--line); }
+.sheets-head-title { margin: 0; color: var(--forest); font-family: var(--font-serif); font-size: 32px; font-weight: 700; line-height: 1.15; }
+.sheets-banner-current { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
 .sheets-banner-current[hidden] { display: none; }
 .sheets-banner-kicker { color: var(--wood-text); font-size: 12.5px; font-weight: 600; letter-spacing: .6px; }
 /* the only clickable words in the banner */
-.sheets-banner-link { padding: 0; border: 0; border-radius: 0; color: var(--forest); background: none; font-family: var(--font-serif); font-size: 27px; font-weight: 700; line-height: 1.25;
+.sheets-banner-link { padding: 0; border: 0; border-radius: 0; color: var(--forest); background: none; font-family: var(--font-serif); font-size: 20px; font-weight: 700; line-height: 1.25;
   text-decoration: underline; text-decoration-color: rgba(52, 74, 70, .3); text-decoration-thickness: 1px; text-underline-offset: 7px; cursor: pointer; transition: text-decoration-color .15s, color .15s; }
 .sheets-banner-link:hover { color: var(--forest-hover); text-decoration-color: currentColor; }
 .sheets-banner-link:focus-visible { outline: 1px solid var(--focus); outline-offset: 4px; }
-.sheets-banner-date { margin-top: 4px; color: var(--ink-2); font-size: 14.5px; font-variant-numeric: tabular-nums; }
+.sheets-banner-date { color: var(--ink-2); font-size: 14.5px; font-variant-numeric: tabular-nums; }
 .sheets-banner-none { margin-top: 2px; color: var(--ink-3); font-size: 15px; }
 /* square corners, hairlines, no lift on the two sheets screens */
 .sheets-page .orders-section, .sheets-page .import-preview, .sheet-page .orders-section, .sheets-page .search-box, .sheets-page .button, .sheet-page .button,
@@ -705,10 +697,6 @@ button.desk-item:hover { background: #F7F2EA; }
   .sheet-sum:not(:nth-child(3n+1)) { border-right: 1px solid var(--line-soft); }
 }
 @media (max-width: 900px) {
-  .sheets-banner { min-height: 190px; }
-  .sheets-banner-photo { width: 50%; }
-  .sheets-banner-text { max-width: 62%; padding: 30px 32px 28px 16px; }
-  .sheets-banner-title { font-size: 38px; }
   .sheets-table { min-width: 0; white-space: normal; }
   .sheet-row-link { white-space: nowrap; }
   .sheet-row-desc { max-width: 160px; }
@@ -720,13 +708,7 @@ button.desk-item:hover { background: #F7F2EA; }
   .sheet-sum dd { font-size: 22px; }
 }
 @media (max-width: 760px) {
-  .sheets-banner { min-height: 0; }
-  .sheets-banner-photo { display: none; }
-  .sheets-banner-text { max-width: none; padding: 24px 22px 22px; }
-  .sheets-banner-title { font-size: 32px; }
-  .sheets-banner-sub { font-size: 15.5px; }
-  .sheets-banner-current { margin-top: 18px; font-size: 14.5px; }
-  .sheets-banner-link { font-size: 21px; }
+  .sheets-head-title { font-size: 28px; }
   .sheets-list .sheets-toolbar { padding: 12px 14px; }
   .sheets-search { width: 100%; }
   .sheets-add-button { width: 100%; margin: 0; }
@@ -774,4 +756,97 @@ button.desk-item:hover { background: #F7F2EA; }
   .sheets-add-summary { flex-basis: 100%; order: -1; margin: 0; }
   .sheets-add-actions .button { flex: 1 1 auto; }
   .sheets-add-footer { margin: 0 -20px; padding: 12px 20px 16px; box-shadow: 0 -6px 14px rgba(38, 44, 48, .06); }
+}
+
+/* =====================================================================
+   Orders workspace (13 columns, double-click editing), receipts and payment schedules.
+   Quiet office look: hairlines, square corners, compact statuses; the data leads.
+   ===================================================================== */
+.orders-workspace { border-radius: 0; box-shadow: none; }
+.orders-toolbar { flex-wrap: wrap; gap: 10px 16px; }
+.orders-toolbar .search-box { flex: 1 1 260px; max-width: 360px; border-radius: 0; }
+.orders-toolbar select { border-radius: 0; }
+.orders-table-wrap { overflow-x: auto; }
+.orders-table { min-width: 1480px; font-size: 13.5px; }
+.orders-table th, .orders-table td { padding: 8px 10px; vertical-align: top; }
+.orders-table thead th { position: sticky; top: 0; z-index: 1; background: var(--surface); white-space: nowrap; }
+.orders-table td { border-top: 1px solid var(--line-soft); }
+.orders-table .cell-description { min-width: 220px; max-width: 320px; white-space: normal; line-height: 1.45; }
+.orders-table .cell-notes { min-width: 160px; max-width: 260px; white-space: normal; color: var(--ink-2); line-height: 1.45; }
+.orders-table .cell-date, .orders-table .order-number, .orders-table .amount-cell { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.orders-table .cell-muted, .cell-muted { color: var(--ink-3); }
+.orders-table tr.is-cancelled td { color: var(--ink-3); background: rgba(236, 229, 219, .35); }
+.orders-table tr.is-cancelled .cell-description { text-decoration: line-through; text-decoration-color: rgba(107, 100, 92, .5); }
+.orders-table td.is-editable { cursor: text; }
+.orders-table td.is-editable:hover { background: rgba(226, 232, 227, .45); }
+.orders-table td.is-editable:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.orders-table td.is-editing { padding: 4px 6px; background: var(--forest-tint); }
+.orders-table td.is-saving { opacity: .6; }
+.sort-button { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; color: inherit; background: none; font: inherit; font-weight: 600; cursor: pointer; }
+.sort-button:hover, .sort-button.is-active { color: var(--forest); }
+.sort-button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.sort-mark { min-width: 9px; font-size: 9px; }
+.tag-legacy { display: inline-block; margin-inline-start: 4px; padding: 0 5px; border: 1px solid var(--line); color: var(--ink-3); font-size: 11px; font-weight: 500; line-height: 1.5; vertical-align: 1px; }
+.earlier-info { color: var(--ink-3); font-style: italic; }
+.amount-cell.is-legacy { color: var(--ink-2); }
+.wf { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 13px; }
+.wf::before { content: ""; width: 6px; height: 6px; background: var(--line); }
+.wf-unknown { color: var(--ink-3); }
+.wf-not_received::before, .wf-not_placed::before { background: var(--warn-fg); }
+.wf-received::before, .wf-placed::before { background: var(--info-fg); }
+.wf-approved::before, .wf-published::before { background: var(--ok-fg); }
+.pay-state { padding: 2px 8px; border: 1px solid transparent; border-radius: 0; font: inherit; font-size: 13px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.pay-state.paid { color: var(--ok-fg); background: var(--ok-bg); }
+.pay-state.pending { color: var(--warn-fg); background: var(--warn-bg); }
+.pay-state.neutral { color: var(--neutral-fg); background: var(--neutral-bg); }
+.pay-state:hover { border-color: currentColor; }
+.pay-state:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.orders-table .payment-select { border-radius: 0; }
+.row-actions { white-space: nowrap; }
+.order-cancel { color: var(--bad-fg); font-size: 13px; }
+.cell-editor { display: grid; gap: 4px; min-width: 150px; }
+.cell-input { width: 100%; min-width: 0; padding: 5px 7px; border: 1px solid var(--forest); border-radius: 0; background: #fff; font: inherit; font-size: 13.5px; }
+.cell-editor-actions { display: flex; gap: 6px; }
+.cell-save, .cell-cancel { padding: 2px 10px; border: 1px solid var(--forest); border-radius: 0; font: inherit; font-size: 12.5px; cursor: pointer; }
+.cell-save { color: #fff; background: var(--forest); }
+.cell-cancel { color: var(--forest); background: transparent; }
+.cell-hint { color: var(--ink-3); font-size: 12px; }
+.cell-error { color: var(--bad-fg); font-size: 12px; line-height: 1.4; white-space: normal; }
+.cell-error:empty { display: none; }
+
+/* Gentle note: a negative credit balance is allowed */
+.credit-alert { margin: 10px 0 0; padding: 10px 14px; border-inline-start: 3px solid var(--warn-fg); color: var(--ink); background: var(--warn-bg); font-size: 14px; }
+
+/* Receipts dialog */
+.pay-figures { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 4px 0 14px; border: 1px solid var(--line); }
+.pay-figures div { padding: 10px 12px; }
+.pay-figures div + div { border-inline-start: 1px solid var(--line); }
+.pay-figures dt { color: var(--ink-3); font-size: 12.5px; }
+.pay-figures dd { margin: 2px 0 0; font-family: var(--font-serif); font-size: 19px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.pay-receipts h3 { margin: 14px 0 6px; font-size: 14px; }
+.receipt-list { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--line-soft); }
+.receipt-list li { display: grid; grid-template-columns: 96px 110px minmax(0, 1fr) auto; gap: 10px; align-items: baseline; padding: 7px 0; border-bottom: 1px solid var(--line-soft); font-size: 13.5px; }
+.receipt-list li.is-reversal strong { color: var(--bad-fg); }
+
+/* Payment schedule editor (purchase + later changes) */
+.schedule-box { margin: 10px 0; padding: 10px 12px; border: 1px solid var(--line); background: var(--surface); }
+.schedule-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 16px; }
+.schedule-summary { margin: 0; color: var(--ink-2); font-size: 14px; line-height: 1.55; }
+.schedule-editor { margin-top: 10px; }
+.schedule-table { width: 100%; min-width: 0; font-size: 13.5px; }
+.schedule-table th, .schedule-table td { padding: 5px 6px; }
+.schedule-table input { width: 100%; min-width: 0; padding: 4px 6px; border: 1px solid var(--line); border-radius: 0; font: inherit; }
+.schedule-table tr.is-locked td { color: var(--ink-3); }
+.schedule-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.schedule-check { margin: 8px 0 0; font-size: 13.5px; }
+.schedule-check.is-error { color: var(--bad-fg); }
+.schedule-check.is-ok { color: var(--ok-fg); }
+.payments-page tr.is-cancelled td, #payments-body tr.is-cancelled td, #client-payments-body tr.is-cancelled td { color: var(--ink-3); }
+
+@media (max-width: 760px) {
+  .orders-toolbar .search-box { max-width: none; }
+  .orders-table { min-width: 1280px; }
+  .pay-figures { grid-template-columns: 1fr; }
+  .pay-figures div + div { border-inline-start: 0; border-top: 1px solid var(--line); }
+  .receipt-list li { grid-template-columns: 1fr 1fr; }
 }

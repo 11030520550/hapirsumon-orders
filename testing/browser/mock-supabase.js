@@ -30,14 +30,73 @@
     product_catalog: params.get("noproducts") === "1" ? [] : [
       { id: "44444444-4444-4444-8444-444444444444", name: "מוצר הדגמה — לא מחירון", dimensions: "הדגמה", base_price_before_vat: "500.00", credit_cost: "2.50", is_active: true }
     ],
-    customer_packages: [], package_installments: [], financial_obligations: [], credit_ledger: [], sheets: [], ops: new Map()
+    customer_packages: [], package_installments: [], financial_obligations: [], credit_ledger: [], sheets: [],
+    business_payment_events: [], payments: [], ops: new Map()
   };
+  // ?orders=3: the orders model of supabase-orders-v3.sql (free description, workflow statuses, cancellation,
+  // partial receipts, schedule edits). Without it the mock is the model that is live today (v2).
+  const ordersV3 = business && params.get("orders") === "3";
+  if (ordersV3) for (const o of db.orders) Object.assign(o, { ad_description: null, file_status: "unknown", placement_status: "unknown", cancelled_at: null, cancel_reason: null, entered_by_name: null });
   // Legacy cash orders get a legacy obligation, as the migration backfill does.
   db.financial_obligations = db.orders.map((o) => ({
-    id: uuid(), order_id: o.id, package_installment_id: null, amount_due: o.amount, due_on: null,
-    status: o.payment_status, updated_at: now()
+    id: uuid(), order_id: o.id, package_installment_id: null, amount_due: String(o.amount), due_on: null,
+    status: o.payment_status, legacy_snapshot: true, amount_before_vat: null, cancelled_at: null, cancel_reason: null,
+    received_at_cancel: null, updated_at: now()
   }));
   let orderCounter = 22030;
+  const V3_ORDER_COLUMNS = ["ad_description", "file_status", "placement_status", "cancelled_at", "cancel_reason"];
+
+  // ----- money, as the financial views compute it -----
+  function obligationReceived(ob) {
+    const events = db.business_payment_events.filter((e) => e.obligation_id === ob.id);
+    const legacyPayments = ob.order_id ? db.payments.filter((p) => p.order_id === ob.order_id) : [];
+    if (!events.length && !legacyPayments.length && ob.legacy_snapshot) {
+      if (ob.status === "paid") return Number(ob.amount_due);
+      if (ob.status === "cancelled") return Number(ob.received_at_cancel || 0);
+    }
+    return r2([...events, ...legacyPayments].reduce((s, e) => s + Number(e.amount), 0));
+  }
+  function refreshObligation(ob) {
+    if (ob.status === "cancelled") return "cancelled";
+    const status = obligationReceived(ob) >= Number(ob.amount_due) ? "paid" : "pending";
+    ob.status = status; ob.updated_at = now();
+    const order = ob.order_id && db.orders.find((o) => o.id === ob.order_id);
+    if (order && order.payment_status !== status) { order.payment_status = status; order.updated_at = now(); }
+    return status;
+  }
+  function summaryRows() {
+    const t = today();
+    const money = (due, received, dueOn) => {
+      const outstanding = Math.max(r2(due - received), 0);
+      return { cash_due: String(due), cash_received: String(received), cash_outstanding: String(outstanding), due_on: dueOn,
+        overdue_amount: String(outstanding > 0 && dueOn && dueOn < t ? outstanding : 0), future_amount: String(outstanding > 0 && dueOn && dueOn > t ? outstanding : 0),
+        no_due_date_amount: String(outstanding > 0 && !dueOn ? outstanding : 0) };
+    };
+    const rows = db.orders.map((o) => {
+      const ob = db.financial_obligations.find((f) => f.order_id === o.id);
+      const cancelled = Boolean(o.cancelled_at) || ob?.status === "cancelled";
+      const received = o.billing_mode === "credits" || !ob ? 0 : obligationReceived(ob);
+      const full = o.billing_mode === "credits" ? 0 : Number(ob ? ob.amount_due : o.amount);
+      return { item_type: "order", item_id: o.id, client_id: o.client_id, order_number: o.order_number, sheet_number: o.sheet_number, description: o.section,
+        billing_mode: o.billing_mode, ...money(o.billing_mode === "credits" ? 0 : cancelled ? received : full, received, ob?.due_on ?? null),
+        payment_status: cancelled ? "cancelled" : (ob?.status ?? o.payment_status), legacy_snapshot: Boolean(ob?.legacy_snapshot),
+        ...(ordersV3 ? { obligation_id: ob?.id ?? null, is_cancelled: cancelled } : {}) };
+    });
+    for (const inst of db.package_installments) {
+      const pkg = db.customer_packages.find((p) => p.id === inst.customer_package_id);
+      const ob = db.financial_obligations.find((f) => f.package_installment_id === inst.id);
+      if (!pkg || !ob) continue;
+      const received = obligationReceived(ob);
+      const cancelled = ob.status === "cancelled";
+      rows.push({ item_type: "package_installment", item_id: inst.id, client_id: pkg.client_id, order_number: null, sheet_number: null,
+        description: `${pkg.package_name_snapshot} - תשלום ${inst.installment_number}`, billing_mode: "package",
+        ...money(cancelled ? received : Number(ob.amount_due), received, ob.due_on), payment_status: ob.status, legacy_snapshot: false,
+        ...(ordersV3 ? { obligation_id: ob.id, is_cancelled: cancelled } : {}) });
+    }
+    return rows;
+  }
+  const staleV3 = (what) => { const e = new Error(`${what} עודכן אצל משתמש אחר. רענני את הנתונים ונסי שוב.`); e.code = "40001"; return e; };
+  const needV3 = (name) => { if (!ordersV3) throw `Could not find the function public.${name}`; };
 
   // ===== Sheets model v2 (?sheets=2; mirrors supabase-sheets-v2.sql). ?enforce=1 adds stage B (closed-sheet guard).
   const sheetsV2 = params.get("sheets") === "2";
@@ -131,12 +190,12 @@
 
   function tableRows(table) {
     if (table === "business_financial_totals") {
-      const t = today();
-      const open = db.financial_obligations.filter((o) => o.status !== "paid");
-      const sum = (rows) => r2(rows.reduce((s, o) => s + Number(o.amount_due), 0));
-      return [{ total_cash_billed: sum(db.financial_obligations), total_cash_received: sum(db.financial_obligations.filter((o) => o.status === "paid")),
-        total_cash_outstanding: sum(open), total_overdue: sum(open.filter((o) => o.due_on && o.due_on < t)) }];
+      const rows = summaryRows();
+      const sum = (col) => String(r2(rows.reduce((s, r) => s + Number(r[col]), 0)));
+      return [{ total_cash_billed: sum("cash_due"), total_cash_received: sum("cash_received"),
+        total_cash_outstanding: sum("cash_outstanding"), total_overdue: sum("overdue_amount") }];
     }
+    if (table === "business_financial_summary") return summaryRows();
     if (table === "sheet_overview") return overviewRows();
     if (table === "business_client_credit_balances") {
       return db.clients.map((c) => ({ client_id: c.id, credit_balance: String(r2(db.credit_ledger.filter((l) => l.client_id === c.id).reduce((s, l) => s + Number(l.delta), 0))) }));
@@ -148,8 +207,16 @@
     const businessTable = !["clients", "orders"].includes(table);
     const filters = [];
     const orderBy = []; let limit = null; let range = null; let patch = null; let single = false;
+    let missingColumn = null;
     const chain = {
-      select() { return chain; },
+      // Like PostgREST: asking for a column that the installed model does not have is an error (42703).
+      select(columns = "") {
+        const asked = String(columns).split(",").map((c) => c.trim());
+        if (table === "orders" && !ordersV3) missingColumn = asked.find((c) => V3_ORDER_COLUMNS.includes(c)) || null;
+        if (table === "business_payment_events" && !ordersV3) missingColumn = asked.find((c) => ["received_on", "reverses_event_id"].includes(c)) || null;
+        if (table === "financial_obligations" && !ordersV3) missingColumn = asked.find((c) => ["amount_before_vat", "cancelled_at", "cancel_reason"].includes(c)) || null;
+        return chain;
+      },
       eq(col, val) { filters.push((r) => String(r[col]) === String(val)); return chain; },
       lte(col, val) { filters.push((r) => r[col] <= val); return chain; },
       gte(col, val) { filters.push((r) => r[col] >= val); return chain; },
@@ -162,6 +229,7 @@
       then(resolve, reject) {
         if ((businessTable && !business) || (table === "sheets" && !["1", "2"].includes(params.get("sheets")))
           || (table === "sheet_overview" && !sheetsV2)) return Promise.resolve({ data: null, error: { code: "PGRST205", message: `Could not find the table 'public.${table}' in the schema cache` } }).then(resolve, reject);
+        if (missingColumn) return Promise.resolve({ data: null, error: { code: "42703", message: `column ${table}.${missingColumn} does not exist` } }).then(resolve, reject);
         if (state.failTables[table] > 0) { state.failTables[table] -= 1; return Promise.resolve({ data: null, error: { message: "Failed to fetch" } }).then(resolve, reject); }
         // ?bizdelay=ms: business data tables answer late (to test loading states). business_settings is exempt:
         // app.js reads it to detect the business schema before showing the app.
@@ -268,14 +336,16 @@
       if (!name || !(credits > 0) || !(price > 0) || !(term > 0)) throw "פרטי החבילה או ההסכם האישי אינם תקינים.";
       const sum = r2(p.p_installments.reduce((s, i) => s + Number(i.amount_before_vat), 0));
       if (Math.abs(sum - price) > 0.01) throw 'סכום התשלומים לפני מע"מ חייב להיות שווה למחיר החבילה.';
+      if (p.p_installments.length < 1 || p.p_installments.length > 60) throw "יש להגדיר בין תשלום אחד ל-60 תשלומים.";
       const pkgId = uuid();
-      const installments = p.p_installments.map((i, idx) => ({ id: uuid(), customer_package_id: pkgId, installment_number: idx + 1, due_on: i.due_on, amount_due: String(r2(Number(i.amount_before_vat) * (1 + vatRate()))) }));
+      const installments = p.p_installments.map((i, idx) => ({ id: uuid(), customer_package_id: pkgId, installment_number: idx + 1, due_on: i.due_on,
+        amount_before_vat: String(i.amount_before_vat), vat_rate_snapshot: String(vatRate()), amount_due: String(r2(Number(i.amount_before_vat) * (1 + vatRate()))) }));
       db.customer_packages.push({ id: pkgId, client_id: p.p_client_id, package_name_snapshot: name, credits_granted: String(credits), term_months: term, price_before_vat: String(price),
-        gross_total: String(r2(installments.reduce((s, i) => s + Number(i.amount_due), 0))), starts_on: p.p_starts_on, ends_on: p.p_ends_on, installment_count: installments.length,
-        benefits_snapshot: p.p_benefits ?? (tpl ? tpl.benefits : []), status: "active" });
+        vat_rate_snapshot: String(vatRate()), gross_total: String(r2(installments.reduce((s, i) => s + Number(i.amount_due), 0))), starts_on: p.p_starts_on, ends_on: p.p_ends_on,
+        installment_count: installments.length, benefits_snapshot: p.p_benefits ?? (tpl ? tpl.benefits : []), status: "active", updated_at: now() });
       db.package_installments.push(...installments);
-      for (const i of installments) db.financial_obligations.push({ id: uuid(), order_id: null, package_installment_id: i.id, amount_due: i.amount_due, due_on: i.due_on, status: "pending", updated_at: now() });
-      db.credit_ledger.push({ client_id: p.p_client_id, delta: String(credits), entry_type: "package_grant", reason: "הקצאת חבילה", created_at: now() });
+      for (const i of installments) db.financial_obligations.push({ id: uuid(), order_id: null, package_installment_id: i.id, amount_due: i.amount_due, amount_before_vat: null, due_on: i.due_on, status: "pending", legacy_snapshot: false, updated_at: now() });
+      db.credit_ledger.push({ client_id: p.p_client_id, delta: String(credits), entry_type: "package_grant", customer_package_id: pkgId, reason: "הקצאת חבילה", created_at: now() });
       return { customer_package_id: pkgId, credit_balance: balance(p.p_client_id) };
     },
     adjust_client_credits(p) {
@@ -285,22 +355,34 @@
     },
     create_orders_batch(p) {
       for (const row of p.p_orders) enforceOpenSheet(row.sheet_number); // whole batch rejected, nothing written
-      return p.p_orders.map((row) => {
-        const product = db.product_catalog.find((x) => x.id === row.product_id && x.is_active);
-        if (!product) throw "המוצר בשורה 1 אינו קיים או אינו פעיל.";
+      // Validate the whole batch first: one bad row = nothing is written (as in the database transaction).
+      const lines = p.p_orders.map((row, index) => {
+        const product = row.product_id ? db.product_catalog.find((x) => x.id === row.product_id && x.is_active) : null;
+        if (row.product_id && !product) throw `המוצר בשורה ${index + 1} אינו קיים או אינו פעיל.`;
+        if (!ordersV3 && !product) throw `המוצר בשורה ${index + 1} אינו קיים או אינו פעיל.`;
+        const description = ordersV3 ? (String(row.ad_description || "").trim() || product?.name || "") : product.name;
+        if (!description || description.length > 500) throw `יש להזין פירוט הזמנה בשורה ${index + 1} (עד 500 תווים).`;
         if ((row.cash_amount_before_vat == null) === (row.credits_used == null)) throw 'בכל שורה יש למלא בדיוק ערך חיובי אחד: מחיר לפני מע"מ או קרדיטים.';
+        if (!String(row.sheet_number || "").trim()) throw `יש להזין מספר גיליון תקין בשורה ${index + 1}.`;
+        return { row, product, description };
+      });
+      return lines.map(({ row, product, description }) => {
         const credits = row.credits_used != null;
         const amount = credits ? 0 : r2(Number(row.cash_amount_before_vat) * (1 + vatRate()));
-        const order = { id: `o-${uuid()}`, client_id: p.p_client_id, publication_date: row.publication_date, section: product.name, created_at: new Date().toISOString(), entered_at: today(), product_name_snapshot: product.name, product_dimensions_snapshot: product.dimensions, amount, payment_status: credits ? "paid" : row.payment_status,
+        const order = { id: `o-${uuid()}`, client_id: p.p_client_id, publication_date: row.publication_date || today(), section: description.slice(0, 120), created_at: new Date().toISOString(), entered_at: today(),
+          product_name_snapshot: product?.name ?? null, product_dimensions_snapshot: product?.dimensions ?? null, amount, payment_status: credits ? "paid" : row.payment_status,
           notes: row.notes || "", updated_at: now(), order_number: ++orderCounter, billing_mode: credits ? "credits" : "cash", credits_used: credits ? String(row.credits_used) : null,
-          cash_amount_before_vat: credits ? null : String(row.cash_amount_before_vat), sheet_number: row.sheet_number };
+          cash_amount_before_vat: credits ? null : String(row.cash_amount_before_vat), sheet_number: row.sheet_number, entered_by_name: "בודקת מערכת",
+          ...(ordersV3 ? { ad_description: description, file_status: "not_received", placement_status: "not_placed", cancelled_at: null, cancel_reason: null } : {}) };
         db.orders.push(order);
         if (credits) {
-          db.credit_ledger.push({ client_id: p.p_client_id, delta: String(-row.credits_used), entry_type: "order_consumption", reason: `ניצול קרדיטים בהזמנה ${order.order_number}`, created_at: now() });
+          db.credit_ledger.push({ client_id: p.p_client_id, delta: String(-row.credits_used), entry_type: "order_consumption", order_id: order.id, reason: `ניצול קרדיטים בהזמנה ${order.order_number}`, created_at: now() });
           return { id: order.id, order_number: order.order_number, billing_mode: "credits", credit_balance_after: balance(p.p_client_id) };
         }
-        const ob = { id: uuid(), order_id: order.id, package_installment_id: null, amount_due: String(amount), due_on: row.due_on, status: order.payment_status, updated_at: now() };
+        const ob = { id: uuid(), order_id: order.id, package_installment_id: null, amount_due: String(amount), amount_before_vat: String(row.cash_amount_before_vat), due_on: row.due_on || null,
+          status: order.payment_status, legacy_snapshot: false, cancelled_at: null, cancel_reason: null, received_at_cancel: null, updated_at: now() };
         db.financial_obligations.push(ob);
+        if (ob.status === "paid") db.business_payment_events.push({ id: uuid(), obligation_id: ob.id, event_type: "payment", amount: String(amount), event_at: now(), received_on: today(), notes: "סומן כשולם בעת יצירת ההזמנה", reverses_event_id: null });
         return { id: order.id, order_number: order.order_number, billing_mode: "cash", gross_amount: amount, obligation_id: ob.id };
       });
     },
@@ -311,6 +393,14 @@
       const expected = order ? order.updated_at : ob.updated_at;
       if (expected !== p.p_expected_updated_at) { const e = new Error("החיוב השתנה אצל משתמש אחר. רענני את הנתונים ונסי שוב."); e.code = "40001"; throw e; }
       if (!p.p_is_paid && !(p.p_reason || "").trim()) throw "נדרש הסבר קצר לפתיחה מחדש של תשלום שסומן כשולם.";
+      if (ob.status === "cancelled") throw "החיוב בוטל.";
+      // As in the database: marking paid records the open balance as one receipt; reopening reverses the receipts.
+      const received = obligationReceived(ob);
+      if (p.p_is_paid && received < Number(ob.amount_due)) db.business_payment_events.push({ id: uuid(), obligation_id: ob.id, event_type: "payment", amount: String(r2(Number(ob.amount_due) - received)), event_at: now(), received_on: today(), notes: "סומן כשולם", reverses_event_id: null });
+      if (!p.p_is_paid && received > 0) {
+        if (ob.legacy_snapshot && !db.business_payment_events.some((e) => e.obligation_id === ob.id)) ob.legacy_snapshot = false;
+        else db.business_payment_events.push({ id: uuid(), obligation_id: ob.id, event_type: "reversal", amount: String(-received), event_at: now(), received_on: today(), notes: p.p_reason, reverses_event_id: null });
+      }
       ob.status = p.p_is_paid ? "paid" : "pending"; ob.updated_at = now();
       if (order) { order.payment_status = ob.status; order.updated_at = now(); }
       return { obligation_id: ob.id, status: ob.status, updated_at: order ? order.updated_at : ob.updated_at };
@@ -323,6 +413,144 @@
       db.financial_obligations = db.financial_obligations.filter((o) => o.order_id !== p.p_order_id);
       db.orders.splice(idx, 1);
       return { deleted: true };
+    },
+
+    // ===== orders v3 (mirrors supabase-orders-v3.sql) =====
+    update_order_details(p) {
+      needV3("update_order_details");
+      const order = db.orders.find((o) => o.id === p.p_order_id);
+      if (!order) throw "ההזמנה לא נמצאה.";
+      if (order.updated_at !== p.p_expected_updated_at) throw staleV3("ההזמנה");
+      if (order.cancelled_at) throw "ההזמנה בוטלה ואינה ניתנת לעריכה.";
+      const description = String(p.p_ad_description ?? "").trim() || null;
+      const sheet = String(p.p_sheet_number ?? "").trim() || null;
+      if (!description && order.ad_description) throw "פירוט ההזמנה הוא שדה חובה.";
+      if (description && description.length > 500) throw "פירוט ההזמנה ארוך מ-500 תווים.";
+      if (p.p_notes == null || p.p_notes.length > 5000) throw "ההערה אינה תקינה.";
+      if (!sheet && order.sheet_number) throw "אי אפשר להסיר את הגיליון מהזמנה; אפשר להעביר אותה לגיליון אחר.";
+      if (!["unknown", "not_received", "received", "approved"].includes(p.p_file_status) || !["unknown", "not_placed", "placed", "published"].includes(p.p_placement_status)) throw "הסטטוס שנבחר אינו תקין.";
+      if ((p.p_file_status === "unknown" && order.file_status !== "unknown") || (p.p_placement_status === "unknown" && order.placement_status !== "unknown")) throw 'אי אפשר להחזיר סטטוס ל"לא ידוע".';
+      enforceOpenSheet(sheet !== order.sheet_number ? sheet : null);
+      Object.assign(order, { ad_description: description, notes: p.p_notes, sheet_number: sheet, file_status: p.p_file_status, placement_status: p.p_placement_status, updated_at: now() });
+      return { id: order.id, order_number: order.order_number, updated_at: order.updated_at };
+    },
+    update_order_charge(p) {
+      needV3("update_order_charge");
+      const order = db.orders.find((o) => o.id === p.p_order_id);
+      if (!order) throw "ההזמנה לא נמצאה.";
+      if (order.updated_at !== p.p_expected_updated_at) throw staleV3("ההזמנה");
+      if (order.cancelled_at) throw "ההזמנה בוטלה ואינה ניתנת לעריכה.";
+      const valid = (v) => v != null && Number(v) > 0 && r2(Number(v)) === Number(v);
+      if (order.billing_mode === "cash") {
+        if (p.p_credits_used != null) throw "הזמנה כספית אינה יכולה לקבל קרדיטים. הזמנה היא כספית או בקרדיטים, לא שניהם.";
+        if (!valid(p.p_cash_amount_before_vat)) throw 'המחיר לפני מע"מ חייב להיות חיובי, עם עד שתי ספרות אחרי הנקודה.';
+        const ob = db.financial_obligations.find((f) => f.order_id === order.id);
+        const amount = r2(Number(p.p_cash_amount_before_vat) * (1 + Number(order.vat_rate_snapshot ?? vatRate())));
+        const received = obligationReceived(ob);
+        if (amount < received) throw `הסכום החדש כולל מע"מ (${amount}) נמוך מהסכום שכבר התקבל (${received}). יש לבטל תקבול לפני הורדת המחיר.`;
+        Object.assign(order, { cash_amount_before_vat: String(p.p_cash_amount_before_vat), amount, updated_at: now() });
+        Object.assign(ob, { amount_due: String(amount), amount_before_vat: String(p.p_cash_amount_before_vat) });
+        refreshObligation(ob);
+      } else if (order.billing_mode === "credits") {
+        if (p.p_cash_amount_before_vat != null) throw "הזמנת קרדיטים אינה יכולה לקבל מחיר. הזמנה היא כספית או בקרדיטים, לא שניהם.";
+        if (!valid(p.p_credits_used)) throw "כמות הקרדיטים חייבת להיות חיובית, עם עד שתי ספרות אחרי הנקודה.";
+        const delta = r2(Number(order.credits_used) - Number(p.p_credits_used));
+        if (delta) {
+          db.credit_ledger.push({ client_id: order.client_id, delta: String(delta), entry_type: "order_adjustment", order_id: order.id, reason: `עדכון קרדיטים בהזמנה ${order.order_number}`, created_at: now() });
+          Object.assign(order, { credits_used: String(p.p_credits_used), updated_at: now() });
+        }
+      } else throw 'בהזמנה ישנה לא ידוע אם הסכום כולל מע"מ, ולכן אי אפשר לשנות את החיוב שלה כאן.';
+      return { id: order.id, order_number: order.order_number, amount: order.amount, credits_used: order.credits_used, updated_at: order.updated_at };
+    },
+    cancel_business_order(p) {
+      needV3("cancel_business_order");
+      const reason = String(p.p_reason || "").trim();
+      if (reason.length < 3 || reason.length > 500) throw "נדרשת סיבת ביטול (3 עד 500 תווים).";
+      const order = db.orders.find((o) => o.id === p.p_order_id);
+      if (!order) throw "ההזמנה לא נמצאה.";
+      if (order.cancelled_at) return { id: order.id, order_number: order.order_number, already_cancelled: true, credits_returned: 0, cash_received_kept: 0, updated_at: order.updated_at };
+      if (order.updated_at !== p.p_expected_updated_at) throw staleV3("ההזמנה");
+      let returned = 0; let kept = 0;
+      if (order.billing_mode === "credits") {
+        const consumed = -r2(db.credit_ledger.filter((l) => l.order_id === order.id && ["order_consumption", "order_adjustment", "order_cancellation"].includes(l.entry_type)).reduce((s, l) => s + Number(l.delta), 0));
+        if (db.credit_ledger.some((l) => l.order_id === order.id && l.entry_type === "order_cancellation")) { const e = new Error("duplicate key value violates unique constraint \"credit_ledger_one_cancellation_per_order_uidx\""); e.code = "23505"; throw e; }
+        if (consumed > 0) { db.credit_ledger.push({ client_id: order.client_id, delta: String(consumed), entry_type: "order_cancellation", order_id: order.id, reason: `החזרת קרדיטים בביטול הזמנה ${order.order_number}: ${reason}`, created_at: now() }); returned = consumed; }
+      } else {
+        const ob = db.financial_obligations.find((f) => f.order_id === order.id);
+        if (ob && ob.status !== "cancelled") { kept = obligationReceived(ob); Object.assign(ob, { status: "cancelled", cancelled_at: now(), cancel_reason: reason, received_at_cancel: String(kept), updated_at: now() }); }
+      }
+      Object.assign(order, { cancelled_at: now(), cancel_reason: reason, updated_at: now() });
+      return { id: order.id, order_number: order.order_number, already_cancelled: false, credits_returned: returned, cash_received_kept: kept, updated_at: order.updated_at };
+    },
+    record_obligation_payment(p) {
+      needV3("record_obligation_payment");
+      const amount = Number(p.p_amount);
+      if (!(amount > 0) || r2(amount) !== amount) throw "סכום התקבול חייב להיות חיובי, עם עד שתי ספרות אחרי הנקודה.";
+      if (!p.p_received_on) throw "תאריך התקבול אינו תקין.";
+      const ob = db.financial_obligations.find((f) => f.id === p.p_obligation_id);
+      if (!ob) throw "החיוב לא נמצא.";
+      if (ob.updated_at !== p.p_expected_updated_at) throw staleV3("החיוב");
+      if (ob.status === "cancelled") throw "החיוב בוטל; אי אפשר לרשום עליו תקבול.";
+      const outstanding = r2(Number(ob.amount_due) - obligationReceived(ob));
+      if (outstanding <= 0) throw "החיוב כבר שולם במלואו.";
+      if (amount > outstanding) throw `הסכום גבוה מהיתרה לתשלום (${outstanding} ש"ח). גבייה מעבר לחיוב אינה נרשמת כאן.`;
+      db.business_payment_events.push({ id: uuid(), obligation_id: ob.id, event_type: "payment", amount: String(amount), event_at: now(), received_on: p.p_received_on, notes: String(p.p_notes || "").trim(), reverses_event_id: null });
+      const status = refreshObligation(ob);
+      const received = obligationReceived(ob);
+      return { obligation_id: ob.id, status, received, outstanding: Math.max(r2(Number(ob.amount_due) - received), 0), updated_at: ob.updated_at };
+    },
+    reverse_obligation_payment(p) {
+      needV3("reverse_obligation_payment");
+      const reason = String(p.p_reason || "").trim();
+      if (reason.length < 3) throw "נדרשת סיבה לביטול התקבול (3 עד 500 תווים).";
+      const event = db.business_payment_events.find((e) => e.id === p.p_event_id && e.event_type === "payment");
+      if (!event) throw "התקבול לא נמצא.";
+      if (db.business_payment_events.some((e) => e.reverses_event_id === event.id)) throw "התקבול הזה כבר בוטל.";
+      db.business_payment_events.push({ id: uuid(), obligation_id: event.obligation_id, event_type: "reversal", amount: String(-Number(event.amount)), event_at: now(), received_on: today(), notes: reason, reverses_event_id: event.id });
+      const ob = db.financial_obligations.find((f) => f.id === event.obligation_id);
+      const status = refreshObligation(ob); ob.updated_at = now();
+      return { obligation_id: ob.id, status, received: obligationReceived(ob), updated_at: ob.updated_at };
+    },
+    update_installment_schedule(p) {
+      needV3("update_installment_schedule");
+      const pkg = db.customer_packages.find((x) => x.id === p.p_customer_package_id);
+      if (!pkg) throw "החבילה לא נמצאה.";
+      if (pkg.updated_at !== p.p_expected_updated_at) throw staleV3("החבילה");
+      const reason = String(p.p_reason || "").trim();
+      if (reason.length < 3) throw "נדרשת סיבה לשינוי לוח התשלומים (3 עד 500 תווים).";
+      const items = Array.isArray(p.p_items) ? p.p_items : [];
+      if (items.length < 1 || items.length > 60) throw "לוח התשלומים צריך לכלול בין תשלום אחד ל-60 תשלומים.";
+      const vat = Number(pkg.vat_rate_snapshot ?? vatRate());
+      const installments = db.package_installments.filter((i) => i.customer_package_id === pkg.id);
+      const active = db.financial_obligations.filter((f) => installments.some((i) => i.id === f.package_installment_id) && f.status !== "cancelled");
+      const netOf = (ob) => Number(ob.amount_before_vat ?? installments.find((i) => i.id === ob.package_installment_id).amount_before_vat);
+      let sum = 0; const seen = new Set();
+      items.forEach((item, index) => {
+        const net = Number(item.amount_before_vat);
+        if (!item.due_on || !(net > 0) || r2(net) !== net) throw `תשלום ${index + 1} אינו תקין: נדרשים מועד וסכום חיובי לפני מע"מ.`;
+        if (item.obligation_id) { if (seen.has(item.obligation_id)) throw `תשלום ${index + 1} מופיע פעמיים.`; seen.add(item.obligation_id); if (!active.some((f) => f.id === item.obligation_id)) throw `תשלום ${index + 1} אינו שייך לחבילה הזו.`; }
+        sum = r2(sum + net);
+      });
+      if (sum !== Number(pkg.price_before_vat)) throw `סכום התשלומים לפני מע"מ (${sum}) חייב להיות שווה למחיר החבילה (${Number(pkg.price_before_vat)}).`;
+      for (const ob of active) {
+        const received = obligationReceived(ob);
+        const item = items.find((x) => x.obligation_id === ob.id);
+        if (!item) { if (received > 0) throw `אי אפשר להסיר תשלום שכבר התקבל עליו כסף (${received} ש"ח).`; Object.assign(ob, { status: "cancelled", cancelled_at: now(), cancel_reason: `שינוי לוח תשלומים: ${reason}`, received_at_cancel: "0", updated_at: now() }); continue; }
+        const net = Number(item.amount_before_vat); const grossAmount = r2(net * (1 + vat));
+        if (ob.status === "paid") { if (net !== netOf(ob) || item.due_on !== ob.due_on) throw "תשלום שהתקבל במלואו אינו ניתן לשינוי."; continue; }
+        if (grossAmount < received) throw `סכום התשלום כולל מע"מ (${grossAmount}) נמוך מהסכום שכבר התקבל עליו (${received}).`;
+        if (net !== netOf(ob) || item.due_on !== ob.due_on) { Object.assign(ob, { amount_due: String(grossAmount), amount_before_vat: String(net), due_on: item.due_on, updated_at: now() }); refreshObligation(ob); }
+      }
+      let next = Math.max(0, ...installments.map((i) => i.installment_number));
+      for (const item of items.filter((x) => !x.obligation_id)) {
+        const net = Number(item.amount_before_vat);
+        const inst = { id: uuid(), customer_package_id: pkg.id, installment_number: ++next, due_on: item.due_on, amount_before_vat: String(net), vat_rate_snapshot: String(vat), amount_due: String(r2(net * (1 + vat))) };
+        db.package_installments.push(inst);
+        db.financial_obligations.push({ id: uuid(), order_id: null, package_installment_id: inst.id, amount_due: inst.amount_due, amount_before_vat: String(net), due_on: item.due_on, status: "pending", legacy_snapshot: false, updated_at: now() });
+      }
+      const now_active = db.financial_obligations.filter((f) => db.package_installments.some((i) => i.customer_package_id === pkg.id && i.id === f.package_installment_id) && f.status !== "cancelled");
+      Object.assign(pkg, { installment_count: now_active.length, gross_total: String(r2(now_active.reduce((s, f) => s + Number(f.amount_due), 0))), updated_at: now() });
+      return { customer_package_id: pkg.id, installment_count: pkg.installment_count, gross_total: pkg.gross_total, updated_at: pkg.updated_at };
     }
   };
 

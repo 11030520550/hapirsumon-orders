@@ -45,8 +45,11 @@
   let pendingRoute = /^#\/[a-z-]+/.test(location.hash) ? location.hash : null;
   // True only when supabase-business-upgrade.sql is installed; otherwise the legacy flow is used unchanged.
   let businessSchema = false;
+  let ordersV3 = false;
   const BASE_ORDER_COLUMNS = "id,client_id,publication_date,section,amount,payment_status,notes,updated_at,created_at";
-  const BUSINESS_ORDER_COLUMNS = `${BASE_ORDER_COLUMNS},order_number,billing_mode,credits_used,cash_amount_before_vat,sheet_number,entered_at,product_name_snapshot,product_dimensions_snapshot`;
+  const BUSINESS_ORDER_COLUMNS = `${BASE_ORDER_COLUMNS},order_number,billing_mode,credits_used,cash_amount_before_vat,sheet_number,entered_at,entered_by_name,product_name_snapshot,product_dimensions_snapshot,vat_rate_snapshot`;
+  // Orders model v3 (supabase-orders-v3.sql): free description, workflow statuses, documented cancellation.
+  const ORDER_V3_COLUMNS = `${BUSINESS_ORDER_COLUMNS},ad_description,file_status,placement_status,cancelled_at,cancel_reason`;
   const BUSINESS_REALTIME_TABLES = ["financial_obligations", "credit_ledger", "customer_packages", "package_installments", "sheets",
     "business_payment_events", "product_catalog", "package_catalog", "business_settings"];
 
@@ -251,7 +254,15 @@
       orderDate: row.entered_at || (row.created_at ? toLocalDateValue(new Date(row.created_at)) : row.publication_date),
       // Product for business orders; legacy orders only have the old free-text field.
       product: row.product_name_snapshot || row.section || "",
-      dimensions: row.product_dimensions_snapshot || ""
+      dimensions: row.product_dimensions_snapshot || "",
+      // Model v3: the free-text order description. Empty for orders entered before it (never invented).
+      description: row.ad_description || "",
+      enteredBy: row.entered_by_name || "",
+      vatRate: row.vat_rate_snapshot == null ? null : Number(row.vat_rate_snapshot),
+      fileStatus: row.file_status || "",
+      placementStatus: row.placement_status || "",
+      cancelledAt: row.cancelled_at || null,
+      cancelReason: row.cancel_reason || ""
     };
   }
 
@@ -273,6 +284,15 @@
     const missing = ["PGRST205", "PGRST204", "42P01"].includes(String(error.code || ""))
       || /does not exist|schema cache|could not find/i.test(error.message || "");
     if (missing) return false;
+    throw error;
+  }
+
+  // Orders model v3 is installed when orders.ad_description exists. A missing column is not an error:
+  // the site then keeps working with the model that is live today (the database decides, not a switch).
+  async function detectOrdersV3() {
+    const { error } = await supabaseClient.from("orders").select("ad_description").limit(1);
+    if (!error) return true;
+    if (["42703", "PGRST204"].includes(String(error.code || "")) || /does not exist|could not find/i.test(error.message || "")) return false;
     throw error;
   }
 
@@ -310,7 +330,7 @@
     const [clientsResult, ordersResult] = await Promise.all([
       fetchAllRows(() => supabaseClient.from("clients").select("id,name,phone,email,updated_at").order("name").order("id")),
       fetchAllRows(() => supabaseClient.from("orders")
-        .select(businessSchema ? BUSINESS_ORDER_COLUMNS : BASE_ORDER_COLUMNS)
+        .select(!businessSchema ? BASE_ORDER_COLUMNS : ordersV3 ? ORDER_V3_COLUMNS : BUSINESS_ORDER_COLUMNS)
         .order("publication_date", { ascending: false }).order("id"))
     ]);
     if (requestId !== cloudFetchRequest) return false;
@@ -562,6 +582,7 @@
     try {
       await checkApproval();
       businessSchema = await detectBusinessSchema();
+      ordersV3 = businessSchema && await detectOrdersV3();
       updateBusinessNote();
       await fetchCloudData();
       activeUserId = session.user.id;
@@ -587,6 +608,8 @@
   }
 
   function renderStats() {
+    // With the business schema the figures come from the financial views (business-app.js renderDashboard).
+    if (businessSchema) return;
     const paidOrders = data.orders.filter((order) => order.paymentStatus === "paid");
     const pendingOrders = data.orders.filter((order) => order.paymentStatus !== "paid");
     $("#stat-orders").textContent = numberFormat.format(data.orders.length);
@@ -626,6 +649,8 @@
   }
 
   function renderOrders() {
+    // The business orders table (13 columns, double-click editing, cancellation) lives in business-app.js.
+    if (businessSchema && window.ModaatBusiness?.renderOrdersPage) { window.ModaatBusiness.renderOrdersPage(); return; }
     const query = $("#search-input").value.trim().toLocaleLowerCase("he");
     const filter = $("#payment-filter").value;
     const clientsById = new Map(data.clients.map((client) => [client.id, client]));
@@ -1074,7 +1099,10 @@
       else if (orderDataMatches(order, existing)) identicalOrders.push(order.id);
       else conflicts.push(`מזהה הזמנה ${order.id} קיים עם פרטים שונים`);
     }
-    importPlan = { newClients, newOrders, identicalClients, identicalOrders, conflicts };
+    // With the business schema an order must be created through create_orders_batch (number, charge, credits).
+    // A direct insert would create an order without a charge, so orders in the file are listed but not imported.
+    const blockedOrders = businessSchema ? newOrders.length : 0;
+    importPlan = { newClients, newOrders: businessSchema ? [] : newOrders, identicalClients, identicalOrders, conflicts, blockedOrders };
     return importPlan;
   }
 
@@ -1085,6 +1113,7 @@
       `לקוחות זהים שכבר קיימים (ידולגו): ${plan.identicalClients.length}`,
       `הזמנות זהות שכבר קיימות (ידולגו): ${plan.identicalOrders.length}`
     ];
+    if (plan.blockedOrders) lines.push(`הזמנות בקובץ שלא ייובאו: ${plan.blockedOrders} — במערכת העסקית הזמנה נוצרת רק דרך "הזמנה חדשה", כדי שייווצרו לה מספר, חיוב וקרדיטים. הקובץ עצמו לא משתנה.`);
     if (plan.conflicts.length) lines.push(`התנגשויות: ${plan.conflicts.length}`, ...plan.conflicts.slice(0, 5));
     else if (!plan.newClients.length && !plan.newOrders.length) lines.push("כל הרשומות כבר קיימות; אין מה לייבא.");
     else lines.push("לא נמצאו התנגשויות. הייבוא יוסיף בלבד ולא יעדכן רשומות קיימות.");
@@ -1584,6 +1613,7 @@
     clients: () => data.clients,
     orders: () => data.orders,
     isBusiness: () => businessSchema,
+    isOrdersV3: () => ordersV3,
     route: () => ({ ...currentView }),
     navigate,
     refresh: () => fetchCloudData(),
