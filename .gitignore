@@ -68,3 +68,6 @@ orders-netlify-ready/
 
 # Design inspiration (screenshots from stock-photo sites; not licensed for use) stays local only.
 design-references/inspiration/
+
+# PGlite package for testing/postgres (downloaded from npm, see testing/postgres/README.md).
+testing/postgres/package/

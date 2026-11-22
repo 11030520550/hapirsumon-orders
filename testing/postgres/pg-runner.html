@@ -1,0 +1,268 @@
+<!doctype html><html><head><meta charset="utf-8"><title>pg runner</title></head><body>
+<pre id="out">RUNNING</pre>
+<script type="module">
+// Real PostgreSQL (PGlite = Postgres compiled to WebAssembly) in the browser sandbox. Isolated, in memory, fake data.
+// Runs the project's SQL files exactly as written, in the production order, against a database shaped like the
+// production audit (8 orders numbered 1-8: 7 legacy + 1 credits, counter 21999, one package with 12 installments).
+import { PGlite } from "/__test/package/dist/index.js";
+const out = [];
+const log = (line) => { out.push(line); document.getElementById("out").textContent = `RUNNING (${out.length})\n${out.join("\n")}`; };
+const check = (name, cond, detail = "") => log(`${cond ? "PASS" : "FAIL"} ${name}${detail !== "" ? " — " + detail : ""}`);
+const file = async (name) => { const r = await fetch(`/${name}`, { cache: "no-store" }); if (!r.ok) throw new Error(`missing ${name}`); return r.text(); };
+const STAFF = "00000000-0000-4000-8000-0000000000a1";
+const OTHER = "00000000-0000-4000-8000-0000000000b2";
+const uuid = () => crypto.randomUUID();
+let db;
+const q = async (sql, params = []) => (await db.query(sql, params)).rows;
+const one = async (sql, params = []) => (await q(sql, params))[0];
+async function as(user, fn) {
+  await db.exec("set role authenticated");
+  await q("select set_config('request.jwt.claim.sub', $1, false), set_config('request.jwt.claims', $2, false)",
+    [user, JSON.stringify({ sub: user, email: "staff@example.invalid", user_metadata: { full_name: "בודקת" } })]);
+  try { return await fn(); } finally { await db.exec("reset role"); await q("select set_config('request.jwt.claim.sub', '', false)"); }
+}
+async function rpc(name, args) {
+  const keys = Object.keys(args);
+  const sql = `select public.${name}(${keys.map((k, i) => `${k} => $${i + 1}`).join(", ")}) as r`;
+  const values = keys.map((k) => (args[k] !== null && typeof args[k] === "object" ? JSON.stringify(args[k]) : args[k]));
+  return (await q(sql, values))[0].r;
+}
+async function fails(fn) { try { await fn(); return null; } catch (e) { return e.message || String(e); } }
+
+const realFetch = window.fetch.bind(window);
+window.fetch = async (input, init) => { try { return await realFetch(input, init); } catch (e) { log(`fetch failed: ${input && input.url || input}`); throw e; } };
+async function run() {
+  db = await PGlite.create();
+  log(`postgres: ${(await one("select version() as v")).v.split(" on ")[0]}`);
+
+  // ----- Supabase stand-ins: only what the project SQL uses -----
+  await db.exec(`
+    create role anon nologin; create role authenticated nologin; create role service_role nologin;
+    create schema auth;
+    create table auth.users (id uuid primary key, email text, raw_user_meta_data jsonb not null default '{}');
+    create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
+    create function auth.jwt() returns jsonb language sql stable as $$ select coalesce(nullif(current_setting('request.jwt.claims', true), ''), '{}')::jsonb $$;
+    grant usage on schema auth to anon, authenticated;
+    grant execute on function auth.uid(), auth.jwt() to anon, authenticated;
+    create publication supabase_realtime;
+    insert into auth.users (id, email) values ('${STAFF}', 'staff@example.invalid'), ('${OTHER}', 'other@example.invalid');`);
+
+  // ----- production history, in the documented order -----
+  await db.exec(await file("supabase-schema.sql"));
+  await db.exec(`insert into private.approved_users (user_id) values ('${STAFF}');`);
+  await db.exec(await file("supabase-reliability-migration.sql"));
+  // Fake clients and 7 legacy orders (as before the business upgrade).
+  await db.exec(`
+    insert into public.clients (id, name, phone, email) select 'c-' || g, 'לקוח בדיקה ' || g, null, null from generate_series(1, 4) g;
+    insert into public.orders (id, client_id, publication_date, section, amount, payment_status, notes, created_at)
+    select 'o-legacy-' || g, 'c-' || (1 + g % 3), date '2026-10-01' + g, 'מדור ' || g, 600 + g * 100,
+           case when g % 2 = 0 then 'paid' else 'pending' end, '', timestamptz '2026-10-01 09:00+00' + g * interval '1 day'
+    from generate_series(1, 7) g;`);
+  await db.exec(await file("supabase-business-upgrade.sql"));
+  check("install: supabase-business-upgrade.sql runs on real Postgres", true);
+  // Production numbered the existing orders 1..7 (an earlier version of the upgrade file).
+  await db.exec(`
+    update public.orders o set order_number = x.n from (select id, row_number() over (order by created_at) as n from public.orders) x where x.id = o.id;
+    update private.order_number_counters set last_number = 7 where counter_name = 'orders';
+    insert into public.product_catalog (name, dimensions, base_price_before_vat, credit_cost, is_active) values ('מוצר בדיקה', '', 500, 2.5, true);`);
+  const product = (await one("select id from public.product_catalog limit 1")).id;
+  const tpl = (await one("select id from public.package_catalog where package_code = 'minimum-maximum'")).id;
+  const pkg = await as(STAFF, async () => {
+    const installments = Array.from({ length: 12 }, (_, i) => ({ due_on: `2026-${String(11 + Math.floor(i / 12)).padStart(2, "0")}-01`, amount_before_vat: 179 }))
+      .map((x, i) => ({ ...x, due_on: new Date(Date.UTC(2026, 10 + i, 1)).toISOString().slice(0, 10) }));
+    const r = await rpc("purchase_customer_package", { p_client_id: "c-1", p_package_id: tpl, p_custom_name: null, p_credits: null, p_term_months: null,
+      p_price_before_vat: null, p_starts_on: "2026-11-01", p_ends_on: "2027-04-30", p_installments: installments, p_benefits: null, p_notes: "", p_idempotency_key: uuid() });
+    await rpc("create_orders_batch", { p_client_id: "c-2", p_orders: [{ sheet_number: "125", product_id: product, publication_date: "2026-11-15", credits_used: 2.5, payment_status: "paid" }], p_idempotency_key: uuid() });
+    return r;
+  });
+  await db.exec(await file("supabase-sheets-and-order-numbers.sql"));
+  const prod = await one(`select count(*) as n, min(order_number) as lo, max(order_number) as hi,
+      count(*) filter (where billing_mode='legacy') as legacy, count(*) filter (where billing_mode='credits') as credits,
+      (select last_number from private.order_number_counters where counter_name='orders') as counter,
+      (select count(*) from public.financial_obligations where package_installment_id is not null) as inst from public.orders`);
+  check("seed mirrors the production audit: 8 orders 1-8 (7 legacy, 1 credits), counter 21999, 12 installment charges",
+    Number(prod.n) === 8 && Number(prod.lo) === 1 && Number(prod.hi) === 8 && Number(prod.legacy) === 7 && Number(prod.credits) === 1 && Number(prod.counter) === 21999 && Number(prod.inst) === 12, JSON.stringify(prod));
+  const audit = await file("supabase-readonly-audit.sql");
+  check("supabase-readonly-audit.sql runs without error (read only)", (await fails(() => db.exec(audit))) === null);
+
+  // The numbering problem found in production, reproduced: the next order would be 22000 (already used in Google Sheets).
+  const nextNumber = await one("select last_number + 1 as n from private.order_number_counters where counter_name = 'orders'");
+  check("numbering: with the production counter the next order would get 22000 (collides with Google Sheets)", Number(nextNumber.n) === 22000, nextNumber.n);
+
+  const before = await one("select (select count(*) from public.orders) o, (select sum(amount) from public.orders) a, (select count(*) from public.financial_obligations) f, (select total_cash_billed from public.business_financial_totals) billed, (select total_cash_received from public.business_financial_totals) received, (select coalesce(sum(delta),0) from public.credit_ledger) credits");
+
+  // ----- install orders v3 -----
+  const v3 = await file("supabase-orders-v3.sql");
+  const e1 = await fails(() => db.exec(v3));
+  check("install: supabase-orders-v3.sql runs on real Postgres (one transaction)", e1 === null, e1 || "");
+  if (e1) return;
+  const after = await one("select (select count(*) from public.orders) o, (select sum(amount) from public.orders) a, (select count(*) from public.financial_obligations) f, (select total_cash_billed from public.business_financial_totals) billed, (select total_cash_received from public.business_financial_totals) received, (select coalesce(sum(delta),0) from public.credit_ledger) credits");
+  check("installation changes no existing amount, row, total or credit balance", JSON.stringify(before) === JSON.stringify(after), `${JSON.stringify(before)} → ${JSON.stringify(after)}`);
+  const legacyState = await one("select count(*) filter (where file_status='unknown' and placement_status='unknown' and ad_description is null) as unknown, count(*) as n from public.orders");
+  check("existing orders get 'unknown' statuses and no invented description", legacyState.unknown === legacyState.n, JSON.stringify(legacyState));
+  const verifyRows = (await db.exec(await file("supabase-orders-v3-verify.sql"))).flatMap((r) => r.rows || []);
+  const verifyFails = verifyRows.filter((r) => String(r.result).startsWith("FAIL"));
+  check("supabase-orders-v3-verify.sql: no FAIL", verifyRows.length > 0 && verifyFails.length === 0, verifyFails.map((r) => `${r.check_name}: ${r.result}`).join("; "));
+  const e2 = await fails(() => db.exec(v3));
+  check("install again: supabase-orders-v3.sql is safe to run twice", e2 === null, e2 || "");
+
+  // ----- business scenarios as an approved user -----
+  await as(STAFF, async () => {
+    // Backward compatibility: the site that is live today sends a product and no description.
+    const old = await rpc("create_orders_batch", { p_client_id: "c-3", p_orders: [{ sheet_number: "125", product_id: product, publication_date: "2026-11-22", cash_amount_before_vat: 100, payment_status: "pending" }], p_idempotency_key: uuid() });
+    const oldRow = await one("select ad_description, file_status, product_id is not null as has_product from public.orders where id = $1", [old[0].id]);
+    check("compat: the current live site can still create an order (product, no description)", oldRow.ad_description === "מוצר בדיקה" && oldRow.has_product, JSON.stringify(oldRow));
+
+    const cash = (await rpc("create_orders_batch", { p_client_id: "c-1", p_orders: [{ sheet_number: "126", ad_description: "חצי עמוד צבעוני", cash_amount_before_vat: 1000, payment_status: "pending" }], p_idempotency_key: uuid() }))[0];
+    const cashRow = await one("select o.amount, o.vat_rate_snapshot, o.file_status, o.placement_status, o.product_id, f.amount_due, f.amount_before_vat from public.orders o join public.financial_obligations f on f.order_id = o.id where o.id = $1", [cash.id]);
+    check("1-2 cash order with a free description, no product; VAT 18%: 1000 → 1180; file/placement defaults",
+      Number(cashRow.amount) === 1180 && Number(cashRow.amount_due) === 1180 && Number(cashRow.amount_before_vat) === 1000 && cashRow.product_id === null && cashRow.file_status === "not_received" && cashRow.placement_status === "not_placed", JSON.stringify(cashRow));
+    const credit = (await rpc("create_orders_batch", { p_client_id: "c-4", p_orders: [{ sheet_number: "126", ad_description: "רבע עמוד", credits_used: 3 }], p_idempotency_key: uuid() }))[0];
+    check("3,5 credits order without a package: allowed, balance goes negative (−3)", Number(credit.credit_balance_after) === -3, credit.credit_balance_after);
+    const both = await fails(() => rpc("create_orders_batch", { p_client_id: "c-1", p_orders: [{ sheet_number: "126", ad_description: "x", cash_amount_before_vat: 10, credits_used: 1 }], p_idempotency_key: uuid() }));
+    const noDesc = await fails(() => rpc("create_orders_batch", { p_client_id: "c-1", p_orders: [{ sheet_number: "126", cash_amount_before_vat: 10 }], p_idempotency_key: uuid() }));
+    check("4 money and credits together refused; no description refused", !!both && !!noDesc, `${both} | ${noDesc}`);
+    const key = uuid();
+    const first = await rpc("create_orders_batch", { p_client_id: "c-1", p_orders: [{ sheet_number: "126", ad_description: "חזרה", cash_amount_before_vat: 50 }], p_idempotency_key: key });
+    const again = await rpc("create_orders_batch", { p_client_id: "c-1", p_orders: [{ sheet_number: "126", ad_description: "חזרה", cash_amount_before_vat: 50 }], p_idempotency_key: key });
+    check("idempotency: the same request twice creates one order", JSON.stringify(first) === JSON.stringify(again) && Number((await one("select count(*) n from public.orders where ad_description = 'חזרה'")).n) === 1);
+
+    // Partial payments
+    const ob = await one("select id, updated_at from public.financial_obligations where order_id = $1", [cash.id]);
+    const p1 = await rpc("record_obligation_payment", { p_obligation_id: ob.id, p_amount: 400, p_received_on: "2026-11-22", p_notes: "", p_expected_updated_at: ob.updated_at, p_idempotency_key: uuid() });
+    check("9 partial payment 400 of 1180: status pending, received 400, outstanding 780", p1.status === "pending" && Number(p1.received) === 400 && Number(p1.outstanding) === 780, JSON.stringify(p1));
+    const view1 = await one("select cash_due, cash_received, cash_outstanding, payment_status from public.business_financial_summary where item_id = $1", [cash.id]);
+    check("9b the financial view shows the same 1180 / 400 / 780", Number(view1.cash_due) === 1180 && Number(view1.cash_received) === 400 && Number(view1.cash_outstanding) === 780, JSON.stringify(view1));
+    const stale = await fails(() => rpc("record_obligation_payment", { p_obligation_id: ob.id, p_amount: 10, p_received_on: "2026-11-22", p_notes: "", p_expected_updated_at: ob.updated_at, p_idempotency_key: uuid() }));
+    const ob2 = await one("select updated_at from public.financial_obligations where id = $1", [ob.id]);
+    const over = await fails(() => rpc("record_obligation_payment", { p_obligation_id: ob.id, p_amount: 781, p_received_on: "2026-11-22", p_notes: "", p_expected_updated_at: ob2.updated_at, p_idempotency_key: uuid() }));
+    const p2 = await rpc("record_obligation_payment", { p_obligation_id: ob.id, p_amount: 780, p_received_on: "2026-11-22", p_notes: "", p_expected_updated_at: ob2.updated_at, p_idempotency_key: uuid() });
+    const orderPaid = await one("select payment_status from public.orders where id = $1", [cash.id]);
+    check("10 stale version refused; over-payment refused; the remaining 780 completes it (order status 'paid')", !!stale && !!over && p2.status === "paid" && orderPaid.payment_status === "paid", `${stale} | ${over} | ${p2.status}`);
+    const receipt = await one("select id from public.business_payment_events where obligation_id = $1 and event_type = 'payment' order by event_at limit 1", [ob.id]);
+    const rev = await rpc("reverse_obligation_payment", { p_event_id: receipt.id, p_reason: "צ׳ק חזר", p_idempotency_key: uuid() });
+    const rev2 = await fails(() => rpc("reverse_obligation_payment", { p_event_id: receipt.id, p_reason: "שוב", p_idempotency_key: uuid() }));
+    check("reversal: one documented reversal per receipt; the charge reopens (received 780)", rev.status === "pending" && Number(rev.received) === 780 && !!rev2, `${rev.status} ${rev.received} | ${rev2}`);
+
+    // Cancellation
+    const open = (await rpc("create_orders_batch", { p_client_id: "c-2", p_orders: [{ sheet_number: "126", ad_description: "לביטול", cash_amount_before_vat: 500 }], p_idempotency_key: uuid() }))[0];
+    const openRow = await one("select updated_at from public.orders where id = $1", [open.id]);
+    const outBefore = Number((await one("select total_cash_outstanding t from public.business_financial_totals")).t);
+    const c1 = await rpc("cancel_business_order", { p_order_id: open.id, p_expected_updated_at: openRow.updated_at, p_reason: "הלקוח ביטל", p_idempotency_key: uuid() });
+    const outAfter = Number((await one("select total_cash_outstanding t from public.business_financial_totals")).t);
+    const cancelled = await one("select o.cancelled_at is not null as c, f.status, (select count(*) from public.orders where id = $1) as kept from public.orders o join public.financial_obligations f on f.order_id = o.id where o.id = $1", [open.id]);
+    check("11 cancel an unpaid cash order: kept, charge cancelled, open debt drops by 590", c1.already_cancelled === false && cancelled.c && cancelled.status === "cancelled" && Number(cancelled.kept) === 1 && Math.round((outBefore - outAfter) * 100) === 59000, `${outBefore} → ${outAfter}`);
+    const creditRow = await one("select updated_at from public.orders where id = $1", [credit.id]);
+    const c2 = await rpc("cancel_business_order", { p_order_id: credit.id, p_expected_updated_at: creditRow.updated_at, p_reason: "טעות", p_idempotency_key: uuid() });
+    const c3 = await rpc("cancel_business_order", { p_order_id: credit.id, p_expected_updated_at: creditRow.updated_at, p_reason: "שוב", p_idempotency_key: uuid() });
+    const bal = await one("select credit_balance from public.business_client_credit_balances where client_id = 'c-4'");
+    const returns = await one("select count(*) n from public.credit_ledger where order_id = $1 and entry_type = 'order_cancellation'", [credit.id]);
+    check("12-13 cancel a credits order: 3 credits back once; a second cancel changes nothing", Number(c2.credits_returned) === 3 && c3.already_cancelled === true && Number(bal.credit_balance) === 0 && Number(returns.n) === 1, `${c2.credits_returned} ${c3.already_cancelled} bal=${bal.credit_balance}`);
+    const cashRow2 = await one("select updated_at from public.orders where id = $1", [cash.id]);
+    const c4 = await rpc("cancel_business_order", { p_order_id: cash.id, p_expected_updated_at: cashRow2.updated_at, p_reason: "ביטול אחרי תשלום", p_idempotency_key: uuid() });
+    const kept = await one("select cash_due, cash_received, cash_outstanding, payment_status from public.business_financial_summary where item_id = $1", [cash.id]);
+    check("11b cancel after money was received: the 780 stays received, nothing open, history kept", Number(c4.cash_received_kept) === 780 && Number(kept.cash_received) === 780 && Number(kept.cash_outstanding) === 0 && kept.payment_status === "cancelled", JSON.stringify(kept));
+
+    // Editing
+    const ed = (await rpc("create_orders_batch", { p_client_id: "c-3", p_orders: [{ sheet_number: "126", ad_description: "פירוט", cash_amount_before_vat: 200 }], p_idempotency_key: uuid() }))[0];
+    let row = await one("select updated_at from public.orders where id = $1", [ed.id]);
+    const d1 = await rpc("update_order_details", { p_order_id: ed.id, p_expected_updated_at: row.updated_at, p_ad_description: "פירוט מעודכן", p_notes: "הערה", p_sheet_number: "127", p_file_status: "received", p_placement_status: "placed", p_idempotency_key: uuid() });
+    const d2 = await fails(() => rpc("update_order_details", { p_order_id: ed.id, p_expected_updated_at: row.updated_at, p_ad_description: "x", p_notes: "", p_sheet_number: "127", p_file_status: "received", p_placement_status: "placed", p_idempotency_key: uuid() }));
+    row = await one("select updated_at from public.orders where id = $1", [ed.id]);
+    const d3 = await fails(() => rpc("update_order_details", { p_order_id: ed.id, p_expected_updated_at: row.updated_at, p_ad_description: "פירוט מעודכן", p_notes: "", p_sheet_number: "127", p_file_status: "unknown", p_placement_status: "placed", p_idempotency_key: uuid() }));
+    const ch = await rpc("update_order_charge", { p_order_id: ed.id, p_expected_updated_at: row.updated_at, p_cash_amount_before_vat: 250, p_credits_used: null, p_idempotency_key: uuid() });
+    const edRow = await one("select o.ad_description, o.sheet_number, o.file_status, o.placement_status, o.amount, f.amount_due from public.orders o join public.financial_obligations f on f.order_id = o.id where o.id = $1", [ed.id]);
+    check("14-15 edit details and statuses; stale version refused (40001); 'unknown' cannot return; price 250 → 295 incl. VAT on order and charge",
+      !!d1.updated_at && /עודכנה/.test(d2 || "") && !!d3 && Number(ch.amount) === 295 && Number(edRow.amount_due) === 295 && edRow.file_status === "received" && edRow.sheet_number === "127", `${d2} | ${d3} | ${JSON.stringify(edRow)}`);
+    const legacyRow = await one("select id, updated_at from public.orders where billing_mode = 'legacy' order by order_number limit 1");
+    const lg = await fails(() => rpc("update_order_charge", { p_order_id: legacyRow.id, p_expected_updated_at: legacyRow.updated_at, p_cash_amount_before_vat: 100, p_credits_used: null, p_idempotency_key: uuid() }));
+    check("16 a legacy order's charge cannot be changed (unknown VAT basis)", !!lg, lg);
+
+    // Package schedule after purchase
+    const pk = await one("select id, updated_at, price_before_vat from public.customer_packages where id = $1", [pkg.customer_package_id]);
+    const insts = await q("select f.id, f.due_on::text as due_on, i.amount_before_vat, f.updated_at from public.financial_obligations f join public.package_installments i on i.id = f.package_installment_id where i.customer_package_id = $1 order by f.due_on", [pk.id]);
+    await rpc("record_obligation_payment", { p_obligation_id: insts[0].id, p_amount: 211.22, p_received_on: "2026-11-01", p_notes: "", p_expected_updated_at: insts[0].updated_at, p_idempotency_key: uuid() });
+    await rpc("record_obligation_payment", { p_obligation_id: insts[1].id, p_amount: 100, p_received_on: "2026-12-01", p_notes: "", p_expected_updated_at: insts[1].updated_at, p_idempotency_key: uuid() });
+    const pk2 = await one("select updated_at from public.customer_packages where id = $1", [pk.id]);
+    // New schedule: keep 1 (paid) and 2 (partly paid), drop the last two, add one bigger final payment.
+    const items = insts.slice(0, 10).map((x) => ({ obligation_id: x.id, due_on: x.due_on, amount_before_vat: Number(x.amount_before_vat) }));
+    items.push({ obligation_id: null, due_on: "2027-09-15", amount_before_vat: 358 });
+    const s1 = await rpc("update_installment_schedule", { p_customer_package_id: pk.id, p_expected_updated_at: pk2.updated_at, p_items: items, p_reason: "איחוד שני תשלומים", p_idempotency_key: uuid() });
+    const pk3 = await one("select updated_at from public.customer_packages where id = $1", [pk.id]);
+    const lockedTry = items.map((x, i) => (i === 0 ? { ...x, due_on: "2026-11-05" } : x));
+    const s2 = await fails(() => rpc("update_installment_schedule", { p_customer_package_id: pk.id, p_expected_updated_at: pk3.updated_at, p_items: lockedTry, p_reason: "בדיקה", p_idempotency_key: uuid() }));
+    const s3 = await fails(() => rpc("update_installment_schedule", { p_customer_package_id: pk.id, p_expected_updated_at: pk3.updated_at, p_items: items.slice(0, -1), p_reason: "בדיקה", p_idempotency_key: uuid() }));
+    const lowered = items.map((x, i) => (i === 1 ? { ...x, amount_before_vat: 50 } : i === 2 ? { ...x, amount_before_vat: 308 } : x));
+    const s4 = await fails(() => rpc("update_installment_schedule", { p_customer_package_id: pk.id, p_expected_updated_at: pk3.updated_at, p_items: lowered, p_reason: "בדיקה", p_idempotency_key: uuid() }));
+    const sched = await one("select count(*) filter (where f.status <> 'cancelled') as active, count(*) filter (where f.status = 'cancelled') as cancelled, sum(coalesce(f.amount_before_vat, i.amount_before_vat)) filter (where f.status <> 'cancelled') as net from public.financial_obligations f join public.package_installments i on i.id = f.package_installment_id where i.customer_package_id = $1", [pk.id]);
+    check("8 schedule after purchase: 11 active installments summing to the price, 2 unpaid ones cancelled (kept as history)",
+      Number(s1.installment_count) === 11 && Number(sched.active) === 11 && Number(sched.cancelled) === 2 && Number(sched.net) === Number(pk.price_before_vat), JSON.stringify(sched));
+    check("8b a paid installment cannot change; the sum must equal the price; a partly paid one cannot drop below what was received", !!s2 && !!s3 && !!s4, `${s2} | ${s3} | ${s4}`);
+
+    // One source for money
+    const tot = await one("select total_cash_billed b, total_cash_received r, total_cash_outstanding o, orders_missing_obligation m, payment_status_mismatches x from public.business_financial_totals");
+    check("20 totals: billed = received + outstanding; no missing charge; no status mismatch", Math.round(Number(tot.b) * 100) === Math.round((Number(tot.r) + Number(tot.o)) * 100) && Number(tot.m) === 0 && Number(tot.x) === 0, JSON.stringify(tot));
+    const credTotals = await one("select (select coalesce(sum(delta),0) from public.credit_ledger) as ledger, (select coalesce(sum(credit_balance),0) from public.business_client_credit_balances) as balances");
+    check("credits: the balance view equals the ledger", Number(credTotals.ledger) === Number(credTotals.balances), JSON.stringify(credTotals));
+  });
+
+  // ----- permissions -----
+  const notApproved = await as(OTHER, () => fails(() => rpc("create_orders_batch", { p_client_id: "c-1", p_orders: [{ sheet_number: "1", ad_description: "x", cash_amount_before_vat: 1 }], p_idempotency_key: uuid() })));
+  const anonCall = await (async () => { await db.exec("set role anon"); try { return await fails(() => q("select public.cancel_business_order('x', null, 'xyz', gen_random_uuid())")); } finally { await db.exec("reset role"); } })();
+  check("22 a signed-in user who is not approved is refused; anonymous cannot even call the new functions", !!notApproved && /permission denied/i.test(anonCall || ""), `${notApproved} | ${anonCall}`);
+  const directBefore = await as(STAFF, () => fails(() => q("update public.orders set amount = 1 where order_number = 1")));
+  check("before cut-over: an approved user CAN still write orders directly (the production finding, reproduced)", directBefore === null);
+  const cut = await fails(async () => db.exec(await file("supabase-business-upgrade-cutover.sql")));
+  check("cut-over file runs on top of v3", cut === null, cut || "");
+  const directAfter = await as(STAFF, () => fails(() => q("update public.orders set amount = 1 where order_number = 2")));
+  const insertAfter = await as(STAFF, () => fails(() => q("insert into public.orders (id, client_id, publication_date, section, amount) values ('o-x', 'c-1', current_date, 'x', 1)")));
+  const rpcAfter = await as(STAFF, () => fails(() => rpc("create_orders_batch", { p_client_id: "c-1", p_orders: [{ sheet_number: "126", ad_description: "אחרי cutover", cash_amount_before_vat: 10 }], p_idempotency_key: uuid() })));
+  const readAfter = await as(STAFF, async () => Number((await one("select count(*) n from public.orders")).n));
+  check("7 after cut-over: direct update/insert refused, all new functions still work, reading still works", !!directAfter && !!insertAfter && rpcAfter === null && readAfter > 8, `${directAfter} | ${insertAfter} | ${rpcAfter}`);
+
+  // ----- rollback guard -----
+  const rb = await fails(async () => db.exec(await file("supabase-orders-v3-rollback.sql")));
+  check("rollback stops by itself once the new model is in use (nothing changed)", /already in use|Partial receipts/.test(rb || ""), rb);
+
+  // ----- sheets v2 on top -----
+  const sheetsSql = (await file("supabase-sheets-v2.sql")).replace("'__REPLACE_WITH_THE_ACTIVE_SHEET__'", "'126'");
+  const sv = await fails(() => db.exec(sheetsSql));
+  check("install: supabase-sheets-v2.sql (keep-open = the active sheet) runs on top of orders v3", sv === null, sv || "");
+  if (sv === null) {
+    const sverify = (await db.exec(await file("supabase-sheets-v2-verify.sql"))).flatMap((r) => r.rows || []);
+    const bad = sverify.filter((r) => Object.values(r).some((v) => String(v).startsWith("FAIL")));
+    check("supabase-sheets-v2-verify.sql: no FAIL", sverify.length > 0 && bad.length === 0, JSON.stringify(bad).slice(0, 300));
+    const made = await as(STAFF, () => fails(() => rpc("create_sheets_batch", { p_sheets: [{ sheet_number: "200", publication_date: "2027-03-07", closes_at_local: "2027-03-05T00:00", description: "" }], p_idempotency_key: uuid() })));
+    const ov = await one("select count(*) n from public.sheet_overview where sheet_number = '200'");
+    check("17 an empty future sheet can be created and appears in sheet_overview", made === null && Number(ov.n) === 1, made || "");
+  }
+
+  // ----- the frontend contract: every RPC and column the UI uses exists in this database -----
+  const js = (await file("business-app.js")) + "\n" + (await file("app.js"));
+  const procs = await q("select p.proname, coalesce(p.proargnames, '{}') as args from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public'");
+  const procMap = new Map(procs.map((p) => [p.proname, p.args]));
+  const rpcProblems = [];
+  for (const m of js.matchAll(/rpc\("([a-z_]+)"(?:,\s*\{([\s\S]*?)\}\s*\))?/g)) {
+    const args = procMap.get(m[1]);
+    if (!args) { rpcProblems.push(`missing function ${m[1]}`); continue; }
+    for (const key of new Set([...(m[2] || "").matchAll(/\b(p_[a-z_]+)\s*:/g)].map((k) => k[1]))) if (!args.includes(key)) rpcProblems.push(`${m[1]}: no parameter ${key}`);
+    for (const a of args) if (m[2] !== undefined && !(m[2] || "").includes(a)) rpcProblems.push(`${m[1]}: UI does not send ${a}`);
+  }
+  check("contract: every rpc() call in the UI matches a function and its exact parameter names", rpcProblems.length === 0, rpcProblems.join("; "));
+  const cols = await q("select table_name, column_name from information_schema.columns where table_schema = 'public'");
+  const colSet = new Set(cols.map((c) => `${c.table_name}.${c.column_name}`));
+  const consts = Object.fromEntries([...js.matchAll(/const ([A-Z_]+_COLUMNS) = [`"]([^`"]+)[`"]/g)].map((m) => [m[1], m[2]]));
+  const expand = (s) => s.replace(/\$\{([A-Z_]+)\}/g, (_, k) => expand(consts[k] || "")).replace(/\$\{[^}]*\?\s*"([^"]*)"\s*:\s*""\s*\}/g, "$1");
+  const colProblems = [];
+  const reads = [...js.matchAll(/from\("([a-z_]+)"\)\s*\.select\(\s*([`"])([\s\S]*?)\2/g)].map((m) => [m[1], expand(m[3])]);
+  for (const name of ["BASE_ORDER_COLUMNS", "BUSINESS_ORDER_COLUMNS", "ORDER_V3_COLUMNS"]) reads.push(["orders", expand(consts[name] || "")]);
+  for (const [table, list] of reads) for (const col of list.split(",").map((c) => c.trim()).filter(Boolean)) if (!colSet.has(`${table}.${col}`)) colProblems.push(`${table}.${col}`);
+  check("contract: every column the UI reads exists (orders v3 + sheets v2 installed)", colProblems.length === 0 && reads.length > 10, colProblems.join(", ") || `${reads.length} reads checked`);
+}
+
+run().catch((e) => log(`ERROR ${e && (e.stack || e.message) || e}`)).finally(() => {
+  const fails = out.filter((l) => l.startsWith("FAIL") || l.startsWith("ERROR")).length;
+  const passes = out.filter((l) => l.startsWith("PASS")).length;
+  document.getElementById("out").textContent = `RESULT ${fails ? "FAILED" : "OK"} (${passes}/${passes + fails})\n` + out.join("\n") + "\nDONE";
+});
+</script></body></html>
