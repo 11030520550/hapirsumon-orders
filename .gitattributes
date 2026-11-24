@@ -10,3 +10,6 @@ vendor/** -text
 
 # Archived data exports are kept byte-for-byte as originally saved (LF line endings).
 archive/data-exports-2026-11-11/*.json -text
+
+# Windows batch files need CRLF line endings on every machine.
+*.cmd text eol=crlf

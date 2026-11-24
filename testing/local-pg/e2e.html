@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>end-to-end: real UI + real PostgreSQL</title></head>
+<body>
+<pre id="out">RUNNING</pre>
+<iframe id="f" style="width:1440px;height:900px"></iframe>
+<script>
+"use strict";
+// End to end, browser to database: the real site (index.html, app.js, business-app.js) on a real PostgreSQL
+// (PGlite) built from the project's SQL files in the planned production order, including the cut-over.
+// Every check reads the database itself (window.__localpg.sql, read only). Separate database "e2e", rebuilt
+// at the start; the manual test database is not touched. Test data only, no network, no Supabase.
+const out = [];
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const frame = document.getElementById("f");
+let w, d;
+const errors = [];
+const $ = (s) => d.querySelector(s);
+const $$ = (s) => [...d.querySelectorAll(s)];
+const check = (name, cond, detail = "") => {
+  out.push(`${cond ? "PASS" : "FAIL"} ${name}${detail !== "" ? " — " + detail : ""}`);
+  document.getElementById("out").textContent = `RUNNING (${out.length})\n${out.join("\n")}`;
+};
+const text = (s) => ($(s)?.textContent || "").replace(/\s+/g, " ").trim();
+const visible = (s) => { const el = $(s); return !!el && !el.closest("[hidden]") && el.getClientRects().length > 0; };
+function setVal(el, value) { el.value = value; el.dispatchEvent(new w.Event("input", { bubbles: true })); el.dispatchEvent(new w.Event("change", { bubbles: true })); }
+async function until(fn, ms = 15000, every = 100) {
+  const end = Date.now() + ms;
+  for (;;) { let v; try { v = await fn(); } catch { v = false; } if (v) return v; if (Date.now() > end) return false; await sleep(every); }
+}
+const sql = (q, args = []) => w.__localpg.sql(q, args);
+const one = async (q, args = []) => (await sql(q, args))[0];
+const num = (v) => Number(v);
+async function load(query, hash = "") {
+  await new Promise((resolve) => { frame.onload = resolve; frame.src = `/?${query}&load=${Date.now()}${hash}`; });
+  w = frame.contentWindow; d = w.document;
+  w.addEventListener("error", (event) => errors.push(`error: ${event.message}`));
+  w.addEventListener("unhandledrejection", (event) => errors.push(`rejection: ${event.reason?.message || event.reason}`));
+  await until(() => w.__localpg && ["ready", "error"].includes(w.__localpg.status.phase), 180000);
+}
+async function signIn(email, password) {
+  await until(() => visible("#login-form"), 20000);
+  const form = $("#login-form");
+  form.elements.email.value = email; form.elements.password.value = password;
+  form.requestSubmit();
+}
+const appReady = () => until(() => visible("#app-shell") && !$("#app-shell").hidden && w.ModaatApp && w.ModaatApp.isOrdersV3() && $$("#orders-body tr[data-order-row-id]").length > 0, 30000);
+const nav = async (view) => { $(`.main-nav [data-view="${view}"]`).click(); await sleep(150); };
+const rowOf = (orderId) => $(`#orders-body tr[data-order-row-id="${orderId}"]`);
+const cellOf = (orderId, key) => rowOf(orderId)?.querySelector(`td[data-edit="${key}"]`) || null;
+const cells = (orderId) => [...(rowOf(orderId)?.children || [])].map((td) => td.textContent.replace(/\s+/g, " ").trim());
+const order = (id) => one("select o.*, o.entered_at::text as entered, o.updated_at::text as version from public.orders o where o.id = $1", [id]);
+const obOf = (orderId) => one("select f.*, f.updated_at::text as version from public.financial_obligations f where f.order_id = $1", [orderId]);
+const received = async (obId) => num((await one("select coalesce(sum(amount), 0) as r from public.business_payment_events where obligation_id = $1", [obId])).r);
+const balanceOf = async (clientId) => num((await one("select coalesce(sum(delta), 0) as b from public.credit_ledger where client_id = $1", [clientId])).b);
+async function answerDialog({ reason = null, cancel = false } = {}) {
+  if (!(await until(() => $("#app-confirm-modal")?.open, 3000, 50))) return false;
+  if (cancel) { $("#app-confirm-modal [data-close-modal]").click(); await sleep(40); return true; }
+  if (reason !== null) $("#app-confirm-reason").value = reason;
+  $("#app-confirm-form").requestSubmit();
+  return true;
+}
+async function newOrderUI(clientId, rows) {
+  const maxBefore = num((await one("select coalesce(max(order_number), 0) as n from public.orders")).n);
+  await nav("orders");
+  $('[data-page="orders"] [data-go="new-order"]').click(); await sleep(250);
+  $("#new-order-reset").click(); await sleep(60);
+  const select = $("#new-order-client");
+  select.value = clientId; select.dispatchEvent(new w.Event("change", { bubbles: true }));
+  for (let index = 0; index < rows.length; index += 1) {
+    if (index > 0) { $("#new-order-add-row").click(); await sleep(60); }
+    const tr = $$("#new-order-rows [data-order-row]")[index];
+    for (const [name, value] of Object.entries(rows[index])) setVal(tr.querySelector(`[name="${name}"]`), value);
+  }
+  await sleep(80);
+  $("#new-order-form").requestSubmit();
+  const made = await until(async () => { const r = await sql("select id from public.orders where order_number > $1 order by order_number", [maxBefore]); return r.length >= rows.length ? r : false; }, 8000);
+  if (made) await until(() => made.every((m) => w.ModaatApp.orders().some((o) => o.id === m.id)), 8000);
+  return made ? made.map((m) => m.id) : [];
+}
+async function editCell(orderId, key, value) {
+  await nav("orders");
+  const td = await until(() => cellOf(orderId, key), 5000);
+  if (!td) return { error: "no editable cell" };
+  td.dispatchEvent(new w.MouseEvent("dblclick", { bubbles: true })); await sleep(60);
+  const input = td.querySelector("[data-edit-input]");
+  if (!input) return { error: "no editor" };
+  setVal(input, value); await sleep(30);
+  const toast = $("#toast"); if (toast) toast.textContent = "";
+  td.querySelector("[data-edit-save]").click();
+  // The save is finished when afterSave shows its toast ("הזמנה N עודכנה."), or the editor shows an error.
+  await until(() => (td.isConnected && td.querySelector("[data-edit-error]")?.textContent) || text("#toast").includes("עודכנה"), 10000);
+  const error = td.isConnected ? (td.querySelector("[data-edit-error]")?.textContent || "") : "";
+  // Right after the save the screen must hold the database's version, or the next edit is refused as a conflict.
+  const dbVersion = (await one("select updated_at from public.orders where id = $1", [orderId])).updated_at;
+  const appVersion = w.ModaatApp.orders().find((o) => o.id === orderId)?.updatedAt;
+  const fresh = Date.parse(appVersion) === new Date(dbVersion).getTime();
+  return { error, fresh, trace: fresh ? "" : `app ${appVersion} db ${new Date(dbVersion).toISOString()} toast "${text("#toast")}"` };
+}
+async function openPay(obligationId) {
+  await nav("orders");
+  const button = await until(() => $(`#orders-body [data-biz-pay-open="${obligationId}"]`), 5000);
+  if (!button) return false;
+  button.click();
+  return until(() => $("#biz-pay-modal").open, 3000);
+}
+async function payUI(obligationId, amount, date = null) {
+  if (!(await openPay(obligationId))) return "no pay button";
+  const form = $("#biz-pay-form");
+  setVal(form.elements.amount, String(amount));
+  if (date) setVal(form.elements.received_on, date);
+  form.requestSubmit();
+  await until(() => !$("#biz-pay-modal").open || text("#biz-pay-message") !== "", 8000);
+  const message = $("#biz-pay-modal").open ? text("#biz-pay-message") : "";
+  if ($("#biz-pay-modal").open) $("#biz-pay-modal").close();
+  return message;
+}
+
+async function run() {
+  // ----- E1: build, sign-in rules -----
+  const t0 = Date.now();
+  await load("db=e2e&reset=1");
+  check("E1a the database is built from the project SQL (8 files + verify) with test data", w.__localpg.status.phase === "ready", `${w.__localpg.status.phase} ${w.__localpg.status.detail} ${Date.now() - t0}ms`);
+  const installed = await one(`select to_regprocedure('public.cancel_business_order(text, timestamp with time zone, text, uuid)') is not null as v3,
+    to_regclass('public.sheet_overview') is not null as sheets_v2, exists (select 1 from pg_trigger where tgname = 'orders_enforce_open_sheet') as enforce,
+    not has_table_privilege('authenticated', 'public.orders', 'UPDATE') as cutover, (select last_number from private.order_number_counters where counter_name = 'orders') as counter_after_seed`);
+  check("E1b installed: orders v3, sheets v2 + enforcement, and the cut-over (no direct order writes)", installed.v3 && installed.sheets_v2 && installed.enforce && installed.cutover, JSON.stringify(installed));
+  await signIn("staff@local.test", "wrong-password");
+  const wrong = await until(() => /שגויים|לא נכונים|אינם תקינים|פרטי/.test(text("#login-message")) && text("#login-message"), 8000);
+  await signIn("pending@local.test", "test1234");
+  const pending = await until(() => text("#login-message").includes("אושר") && text("#login-message"), 8000);
+  const pendingBlocked = !visible("#app-shell") || $("#app-shell").hidden;
+  w.ModaatApp && await w.ModaatApp.client().auth.signOut(); await sleep(300);
+  await signIn("staff@local.test", "test1234");
+  const inApp = await appReady();
+  check("E1c sign-in: wrong password refused; an unapproved account is stopped; the approved account enters with the v3 orders screen",
+    !!wrong && !!pending && pendingBlocked && !!inApp, `${wrong} | ${pending}`);
+  const sheetsOpen = await sql("select sheet_number from public.sheet_overview where not is_closed order by sheet_number");
+  const S1 = sheetsOpen[0].sheet_number, S2 = sheetsOpen[1].sheet_number;
+
+  // ----- E2: cash order with a free description, VAT, numbering, Israel date -----
+  const counterBefore = num((await one("select last_number from private.order_number_counters where counter_name = 'orders'")).last_number);
+  const [cashId] = await newOrderUI("c-local-4", [{ sheet_number: S1, ad_description: "חצי עמוד — בדיקת קצה לקצה", cash_amount_before_vat: "1000" }]);
+  const cash = await order(cashId);
+  const cashOb = await obOf(cashId);
+  const israel = (await one("select ((now() at time zone 'Asia/Jerusalem')::date)::text as d")).d;
+  check("E2 new cash order from the screen: saved in PostgreSQL with 1,000 + 18% = 1,180, a charge of 1,180, the next number after the counter, the Israel date, 'לא התקבל / לא שובץ'",
+    !!cash && num(cash.amount) === 1180 && num(cash.cash_amount_before_vat) === 1000 && num(cashOb.amount_due) === 1180 && num(cash.order_number) === counterBefore + 1
+    && cash.entered === israel && cash.file_status === "not_received" && cash.placement_status === "not_placed" && cash.ad_description === "חצי עמוד — בדיקת קצה לקצה" && cash.entered_by_name === "בודקת מקומית",
+    cash ? `#${cash.order_number} ${cash.amount} ${cash.entered} by ${cash.entered_by_name}` : "not saved");
+  await nav("orders");
+  await until(() => cells(cashId).length > 9, 8000);
+  const cc = cells(cashId);
+  check("E2b the orders table shows what the database holds (description, 1,000 / 1,180, 'לא שולם')",
+    cc[4] === "חצי עמוד — בדיקת קצה לקצה" && cc.some((c) => c.includes("1,000")) && cc.some((c) => c.includes("1,180")) && cc[9] === "לא שולם", cc.join("|"));
+
+  // ----- E3, E4: credits order; never both -----
+  const balBefore = await balanceOf("c-local-5");
+  const [creditId] = await newOrderUI("c-local-5", [{ sheet_number: S1, ad_description: "רבע עמוד בקרדיטים", credits_used: "2" }]);
+  const credit = await order(creditId);
+  const creditOb = await one("select count(*) as n from public.financial_obligations where order_id = $1", [creditId]);
+  check("E3 credits order: 2 credits taken from the ledger (balance −2 without a package), no money charge, amount 0",
+    credit && credit.billing_mode === "credits" && num(credit.credits_used) === 2 && (await balanceOf("c-local-5")) === balBefore - 2 && num(creditOb.n) === 0 && num(credit.amount) === 0,
+    credit ? `${credit.billing_mode} ${credit.credits_used} bal=${await balanceOf("c-local-5")} charges=${creditOb.n}` : "not saved");
+  const countBefore = num((await one("select count(*) as n from public.orders")).n);
+  await newOrderUI("c-local-4", [{ sheet_number: S1, ad_description: "שניהם", cash_amount_before_vat: "100", credits_used: "1" }]);
+  const uiBlocked = text("#new-order-message");
+  const rpcBoth = await w.ModaatApp.client().rpc("create_orders_batch", { p_client_id: "c-local-4", p_orders: [{ sheet_number: S1, ad_description: "x", cash_amount_before_vat: 100, credits_used: 1 }], p_idempotency_key: w.crypto.randomUUID() });
+  check("E4 money and credits together: refused by the form and by the database; nothing saved",
+    uiBlocked.includes("מחיר או קרדיטים") && !!rpcBoth.error && num((await one("select count(*) as n from public.orders")).n) === countBefore, `${uiBlocked} | ${rpcBoth.error?.message}`);
+
+  // ----- E5: package purchase with credits and installments -----
+  const tpl = await one("select id, credits, total_price_before_vat as price from public.package_catalog where is_active order by credits limit 1");
+  w.location.hash = "#/client/c-local-4"; await until(() => w.ModaatApp.route().param === "c-local-4" && visible('[data-client-page-action="package"]'), 8000);
+  const credBeforePkg = await balanceOf("c-local-4");
+  $('[data-client-page-action="package"]').click(); await until(() => $("#biz-package-select"), 3000);
+  setVal($("#biz-package-select"), tpl.id); await sleep(100);
+  $("#biz-package-submit").click();
+  const pkg = await until(() => one("select p.*, p.updated_at::text as version from public.customer_packages p where client_id = 'c-local-4'"), 8000);
+  const inst = pkg ? await one("select count(*) as n, sum(i.amount_before_vat) as net, sum(f.amount_due) as due from public.package_installments i join public.financial_obligations f on f.package_installment_id = i.id where i.customer_package_id = $1", [pkg.id]) : {};
+  check("E5 package purchase from the client page: credits added at once, installments sum to the price before VAT, each installment is a charge incl. VAT",
+    !!pkg && (await balanceOf("c-local-4")) === credBeforePkg + num(tpl.credits) && num(inst.net) === num(tpl.price) && Math.abs(num(inst.due) - num(tpl.price) * 1.18) < 0.05 * num(inst.n),
+    pkg ? `credits +${num(tpl.credits)} installments=${inst.n} net=${inst.net} due=${inst.due}` : "no package");
+
+  // ----- E6–E9: partial payment, future date, completion, over-payment, reversal -----
+  const partial = await payUI(cashOb.id, 400);
+  const afterPartial = await one("select cash_due, cash_received, cash_outstanding, payment_status from public.business_financial_summary where item_id = $1", [cashId]);
+  await nav("orders"); await until(() => cells(cashId)[9] === "שולם חלקית", 8000);
+  check("E6 partial payment 400 of 1,180: the database holds received 400 / open 780; the table shows 'שולם חלקית'",
+    partial === "" && num(afterPartial.cash_received) === 400 && num(afterPartial.cash_outstanding) === 780 && cells(cashId)[9] === "שולם חלקית", `${partial} ${JSON.stringify(afterPartial)} | ${cells(cashId).join("|")}`);
+  const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 3);
+  const futureIso = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, "0")}-${String(tomorrow.getDate()).padStart(2, "0")}`;
+  const eventsBefore = num((await one("select count(*) as n from public.business_payment_events")).n);
+  const future = await payUI(cashOb.id, 10, futureIso);
+  const stillOb = await obOf(cashId);
+  const futureRpc = await w.ModaatApp.client().rpc("record_obligation_payment", { p_obligation_id: cashOb.id, p_amount: 10, p_received_on: futureIso, p_notes: "", p_expected_updated_at: stillOb.version, p_idempotency_key: w.crypto.randomUUID() });
+  check("E7 a receipt dated in the future: blocked by the form and refused by the database; nothing recorded",
+    future.includes("בעתיד") && !!futureRpc.error && num((await one("select count(*) as n from public.business_payment_events")).n) === eventsBefore, `${future} | ${futureRpc.error?.message}`);
+  const over = await payUI(cashOb.id, 781);
+  const done = await payUI(cashOb.id, 780);
+  const paidState = await one("select o.payment_status, f.status from public.orders o join public.financial_obligations f on f.order_id = o.id where o.id = $1", [cashId]);
+  check("E8 more than the balance refused; the remaining 780 completes it: charge and order 'paid' in the database, two receipts",
+    over.includes("גבוה מהיתרה") && done === "" && paidState.status === "paid" && paidState.payment_status === "paid" && num((await one("select count(*) as n from public.business_payment_events where obligation_id = $1 and event_type = 'payment'", [cashOb.id])).n) === 2,
+    `${over} | ${JSON.stringify(paidState)}`);
+  await openPay(cashOb.id);
+  const reverseButton = await until(() => $("#biz-pay-receipts [data-receipt-reverse]"), 3000);
+  reverseButton && reverseButton.click();
+  await answerDialog({ reason: "צ׳ק חזר" });
+  const reopened = await until(async () => { const r = await one("select status from public.financial_obligations where id = $1", [cashOb.id]); return r.status === "pending" && r; }, 8000);
+  if ($("#biz-pay-modal").open) $("#biz-pay-modal").close();
+  const rec = await received(cashOb.id);
+  check("E9 reversing a receipt (bounced cheque) is a documented reversal: the charge reopens and the received total drops",
+    !!reopened && (rec === 780 || rec === 400) && num((await one("select count(*) as n from public.business_payment_events where obligation_id = $1 and event_type = 'reversal'", [cashOb.id])).n) === 1, `received=${rec}`);
+
+  // ----- E10, E11: cancellations keep the financial history consistent -----
+  const [toCancel] = await newOrderUI("c-local-2", [{ sheet_number: S2, ad_description: "מודעה לביטול", cash_amount_before_vat: "500" }]);
+  const outBefore = num((await one("select total_cash_outstanding as t from public.business_financial_totals")).t);
+  await nav("orders");
+  (await until(() => rowOf(toCancel)?.querySelector("[data-order-cancel]"), 5000)).click();
+  await answerDialog({ reason: "הלקוח ביטל" });
+  const cancelled = await until(async () => { const r = await one("select o.cancelled_at is not null as c, f.status from public.orders o join public.financial_obligations f on f.order_id = o.id where o.id = $1", [toCancel]); return r.c && r; }, 8000);
+  const outAfter = num((await one("select total_cash_outstanding as t from public.business_financial_totals")).t);
+  check("E10 cancelling an unpaid cash order: the order stays (marked cancelled), its charge is cancelled and the open debt drops by 590",
+    !!cancelled && cancelled.status === "cancelled" && Math.round((outBefore - outAfter) * 100) === 59000, `${outBefore} → ${outAfter}`);
+  await nav("orders");
+  (await until(() => rowOf(creditId)?.querySelector("[data-order-cancel]"), 5000)).click();
+  await answerDialog({ reason: "טעות בהזנה" });
+  const back = await until(async () => (await balanceOf("c-local-5")) === balBefore, 8000);
+  const credVersion = (await order(creditId)).version;
+  const again = await w.ModaatApp.client().rpc("cancel_business_order", { p_order_id: creditId, p_expected_updated_at: credVersion, p_reason: "שוב", p_idempotency_key: w.crypto.randomUUID() });
+  check("E11 cancelling a credits order returns the 2 credits once; a second cancellation changes nothing",
+    !!back && again.data?.already_cancelled === true && (await balanceOf("c-local-5")) === balBefore
+    && num((await one("select count(*) as n from public.credit_ledger where order_id = $1 and entry_type = 'order_cancellation'", [creditId])).n) === 1, JSON.stringify(again.data || again.error));
+
+  // ----- E12–E14: editing, statuses, conflicts -----
+  const [editId] = await newOrderUI("c-local-1", [{ sheet_number: S2, ad_description: "פירוט ראשון", cash_amount_before_vat: "200" }]);
+  const e1 = await editCell(editId, "description", "פירוט מעודכן");
+  const e2 = await editCell(editId, "net", "250");
+  const edited = await order(editId);
+  const editedOb = await obOf(editId);
+  check("E12 double-click edits the description and then at once the price: the database holds 250 → 295 on the order and on its charge; after each save the screen holds the new version",
+    !e1.error && !e2.error && e1.fresh && e2.fresh && edited.ad_description === "פירוט מעודכן" && num(edited.amount) === 295 && num(editedOb.amount_due) === 295,
+    `${e1.error}|${e2.error}|fresh ${e1.fresh}/${e2.fresh} ${e1.trace} ${e2.trace}|${edited.ad_description}|${edited.amount}/${editedOb.amount_due}`);
+  const s1 = await editCell(editId, "file", "received");
+  const s2 = await editCell(editId, "placement", "placed");
+  const s3 = await editCell(editId, "sheet", S1);
+  const st = await order(editId);
+  check("E13 file and placement statuses and the sheet change by double-click and are saved",
+    !s1.error && !s2.error && !s3.error && st.file_status === "received" && st.placement_status === "placed" && st.sheet_number === S1, `${st.file_status}/${st.placement_status}/${st.sheet_number}`);
+  const staleVersion = edited.version;
+  const stale = await w.ModaatApp.client().rpc("update_order_details", { p_order_id: editId, p_expected_updated_at: staleVersion, p_ad_description: "דריסה", p_notes: "", p_sheet_number: S1,
+    p_file_status: "received", p_placement_status: "placed", p_idempotency_key: w.crypto.randomUUID() });
+  check("E14 a save based on an older version (another user changed it meanwhile) is refused; nothing is overwritten",
+    !!stale.error && /עודכנה/.test(stale.error.message) && (await order(editId)).ad_description === "פירוט מעודכן", stale.error?.message);
+
+  // ----- E15: installment schedule after purchase -----
+  if (pkg) {
+    const obs = await sql("select f.id, f.due_on::text as due, f.status from public.financial_obligations f join public.package_installments i on i.id = f.package_installment_id where i.customer_package_id = $1 order by f.due_on, f.id", [pkg.id]);
+    w.location.hash = "#/client/c-local-4";
+    const editBtn = await until(() => $(`[data-biz-schedule="${pkg.id}"]`), 8000);
+    editBtn && editBtn.click();
+    await until(() => $("#biz-schedule-modal")?.open, 3000);
+    const lastIndex = obs.length - 1;
+    const due = $(`#biz-schedule-editor [data-sched="due"][data-index="${lastIndex}"]`);
+    const moved = new Date(`${obs[lastIndex].due}T12:00:00Z`); moved.setUTCDate(moved.getUTCDate() + 10);
+    const movedIso = moved.toISOString().slice(0, 10);
+    due && setVal(due, movedIso);
+    setVal($("#biz-schedule-form").elements.reason, "הלקוח ביקש לדחות"); await sleep(50);
+    $("#biz-schedule-form").requestSubmit();
+    const ok = await until(async () => (await one("select due_on::text as d from public.financial_obligations where id = $1", [obs[lastIndex].id])).d === movedIso, 8000);
+    check("E15 editing the schedule after purchase: the last installment moves 10 days in the database, the total stays equal to the price",
+      !!ok && num((await one("select sum(coalesce(f.amount_before_vat, i.amount_before_vat)) as s from public.financial_obligations f join public.package_installments i on i.id = f.package_installment_id where i.customer_package_id = $1 and f.status <> 'cancelled'", [pkg.id])).s) === num(tpl.price),
+      ok ? movedIso : text("#biz-schedule-message"));
+    if ($("#biz-schedule-modal")?.open) $("#biz-schedule-modal").close();
+  }
+
+  // ----- E16: credit adjustment -----
+  w.location.hash = "#/client/c-local-1"; await until(() => w.ModaatApp.route().param === "c-local-1" && visible('[data-client-page-action="credits"]'), 8000);
+  const c1Before = await balanceOf("c-local-1");
+  $('[data-client-page-action="credits"]').click(); await until(() => $("#biz-credit-form"), 3000);
+  setVal($('#biz-credit-form [name="delta"]'), "5"); setVal($('#biz-credit-form [name="reason"]'), "מתנה ללקוח");
+  $("#biz-credit-submit").click();
+  check("E16 manual credit adjustment (+5 with a reason) is written to the ledger",
+    !!(await until(async () => (await balanceOf("c-local-1")) === c1Before + 5, 8000)), `${c1Before} → ${await balanceOf("c-local-1")}`);
+
+  // ----- E17: sheets: add, close, enforcement -----
+  const maxSheet = num((await one("select max(sheet_number::int) as m from public.sheets")).m);
+  await nav("sheets");
+  (await until(() => visible("#sheets-add") && $("#sheets-add"), 8000)).click();
+  await until(() => $("#sheets-add-modal").open, 3000);
+  setVal($("#sheets-add-form").elements.count, "2"); await sleep(100);
+  $("#sheets-add-submit").click();
+  const added = await until(async () => { const r = await sql("select sheet_number from public.sheets where sheet_number::int > $1 order by 1", [maxSheet]); return r.length === 2 && r; }, 8000);
+  check("E17a 'הוספת גיליונות': two new sheets continue the numbering and are saved", !!added, JSON.stringify(added));
+  const closeNo = String(maxSheet + 2);
+  w.location.hash = `#/sheet/${closeNo}`;
+  const toggle = await until(() => !$("#sheet-toggle-status").hidden && !$("#sheet-toggle-status").disabled && $("#sheet-toggle-status"), 8000);
+  toggle && toggle.click();
+  const asked = await answerDialog();
+  const closeTrace = `toggle=${!!toggle} dialog=${asked} page=${text("#sheet-page-status")} err=${text("#app-confirm-error")}`;
+  const closed = await until(async () => (await one("select is_closed from public.sheet_overview where sheet_number = $1", [closeNo])).is_closed, 8000);
+  const toClosed = await w.ModaatApp.client().rpc("create_orders_batch", { p_client_id: "c-local-1", p_orders: [{ sheet_number: closeNo, ad_description: "לגיליון סגור", cash_amount_before_vat: 10 }], p_idempotency_key: w.crypto.randomUUID() });
+  const toMissing = await w.ModaatApp.client().rpc("create_orders_batch", { p_client_id: "c-local-1", p_orders: [{ sheet_number: "9999", ad_description: "לגיליון שלא קיים", cash_amount_before_vat: 10 }], p_idempotency_key: w.crypto.randomUUID() });
+  check("E17b closing a sheet from its page is saved; the database then refuses orders to the closed sheet and to a sheet that does not exist",
+    !!closed && !!toClosed.error && !!toMissing.error, `${closeTrace} | ${toClosed.error?.message} | ${toMissing.error?.message}`);
+
+  // ----- E18: clients (direct writes stay allowed) and the cut-over (direct order writes refused) -----
+  await nav("clients");
+  $('[data-page="clients"] [data-open-modal="client-modal"]').click(); await until(() => $("#client-modal").open, 3000);
+  const cf = $("#client-form");
+  cf.elements.name.value = "לקוחה חדשה מהמסך"; cf.elements.phone.value = "050-1234567"; cf.requestSubmit();
+  const newClient = await until(() => one("select * from public.clients where name = 'לקוחה חדשה מהמסך'"), 8000);
+  const direct = await w.ModaatApp.client().from("orders").update({ amount: 1 }).eq("id", cashId).select("id");
+  const directPay = await w.ModaatApp.client().from("payments").insert({ id: w.crypto.randomUUID(), order_id: cashId, amount: 1 }).select("id");
+  check("E18 a client created from the screen is saved (phone too, Israel join date); writing orders or payments directly is refused after the cut-over",
+    !!newClient && newClient.phone === "050-1234567" && /permission denied/.test(direct.error?.message || "") && /permission denied/.test(directPay.error?.message || ""), `${direct.error?.message} | ${directPay.error?.message}`);
+
+  // ----- E19, E20: one source for money; credits consistent -----
+  const tot = await one("select total_cash_billed b, total_cash_received r, total_cash_outstanding o, orders_missing_obligation m, payment_status_mismatches x from public.business_financial_totals");
+  const creds = await one("select (select coalesce(sum(delta),0) from public.credit_ledger) as ledger, (select coalesce(sum(credit_balance),0) from public.business_client_credit_balances) as balances");
+  check("E19 database totals: billed = received + open; no order without a charge; no status mismatch; the credit balances equal the ledger",
+    Math.round(num(tot.b) * 100) === Math.round((num(tot.r) + num(tot.o)) * 100) && num(tot.m) === 0 && num(tot.x) === 0 && num(creds.ledger) === num(creds.balances), JSON.stringify({ ...tot, ...creds }));
+  await nav("dashboard"); await sleep(300);
+  const dashBalance = text("#stat-balance");
+  await nav("payments"); setVal($("#payments-filter"), "all"); await sleep(200);
+  const payFooter = text("#payments-count");
+  await nav("reports"); await sleep(300);
+  const money = (s) => Number(String(s).replace(/[^\d.-]/g, ""));
+  check("E20 the dashboard, the payments screen and the reports show the same open balance as the database",
+    money(dashBalance) === Math.round(num(tot.o) * 100) / 100 && payFooter.endsWith(dashBalance) && dashBalance === text("#report-outstanding"), `${dashBalance} | ${payFooter} | ${text("#report-outstanding")} | db ${tot.o}`);
+
+  // ----- E21, E22: persistence and sign-out -----
+  const ordersNow = num((await one("select count(*) as n from public.orders")).n);
+  await load("db=e2e", "#/orders");
+  const kept = await appReady();
+  check("E21 reload: the session and every saved row are still there (the database is stored in the browser)",
+    !!kept && num((await one("select count(*) as n from public.orders")).n) === ordersNow && w.ModaatApp.orders().some((o) => o.id === editId));
+  $("#logout-button, [data-action='logout'], #sign-out")?.click();
+  if (visible("#app-shell")) await w.ModaatApp.client().auth.signOut();
+  const signedOut = await until(() => visible("#login-form") && text("#login-message").includes("ההתנתקות"), 8000);
+  check("E22 sign-out returns to the sign-in screen with the sign-out notice", !!signedOut, text("#login-message"));
+
+  check("E23 no uncaught JavaScript errors along the way", errors.length === 0, errors.slice(0, 3).join(" | "));
+}
+
+run().catch((error) => out.push(`ERROR ${error && error.stack || error}`)).finally(() => {
+  const fails = out.filter((l) => !l.startsWith("PASS")).length;
+  document.getElementById("out").textContent = `RESULT ${fails ? "FAILED" : "OK"} (${out.length - fails}/${out.length})\n` + out.join("\n") + "\nDONE";
+});
+</script>
+</body></html>
