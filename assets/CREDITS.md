@@ -11,11 +11,22 @@
 הקובץ המקורי (PNG, ‏1536×1024) הומר ל-JPEG באיכות 90 באותה רזולוציה, לטעינה מהירה של מסך ההתחברות.
 התמונה הקודמת (Unsplash, Kevin Lieder) הוחלפה ואינה בשימוש.
 
-## גופנים (V4, 25/11/2026)
+## גופנים (V5, 24/11/2026)
+| קובץ | מקור | רישיון |
+|---|---|---|
+| `fonts/rubik-hebrew.woff2`, `fonts/rubik-latin.woff2` | Rubik (The Rubik Project Authors), גרסה משתנה במשקלים 300–600, מ-Google Fonts. מאוחסן מקומית. | SIL Open Font License 1.1 — `fonts/OFL-Rubik.txt` |
+
+## גופנים קודמים (V4, 25/11/2026): נשארים בתיקייה, ולא נטענים מאז V5
 | קובץ | מקור | רישיון |
 |---|---|---|
 | `fonts/heebo-hebrew.woff2`, `fonts/heebo-latin.woff2` | Heebo (Oded Ezer), גרסת המשתנה מ-Google Fonts | SIL Open Font License 1.1 — `fonts/OFL-Heebo.txt` |
 | `fonts/frank-ruhl-libre-hebrew.woff2`, `fonts/frank-ruhl-libre-latin.woff2` | Frank Ruhl Libre (Fontef), גרסת המשתנה מ-Google Fonts | SIL Open Font License 1.1 — `fonts/OFL-FrankRuhlLibre.txt` |
 
 ## תמונות למסכים (`photos/`)
-עדיין אין. הדרישות והפרומפטים: `IMAGE-ASSETS.md`. כל תמונה שתיכנס תירשם כאן עם המקור והרישיון.
+| קובץ | מקור | זכויות |
+|---|---|---|
+| `photos/home.webp` | נחתך מקולאז' התמונות שבעלת הפרויקט צירפה ב-24/11/2026: עיתונים ואגרטל פרחים באור בוקר. הומר ל-WebP, ‏1000×236. | נמסר על ידי בעלת הפרויקט. |
+| `photos/orders.webp` | נחתך מאותו קולאז': מחברת פתוחה ועט. WebP, ‏383×218. | נמסר על ידי בעלת הפרויקט. |
+| `photos/clients.webp` | נחתך מאותו קולאז': חדר עבודה עם שולחן אגוז. WebP, ‏556×462. | נמסר על ידי בעלת הפרויקט. |
+
+צילומי המסך של teimot.com שצורפו שימשו רפרנס לשפה העיצובית בלבד, ולא הועתק מהם אף נכס. הדרישות לשאר המסכים נמצאות ב-`IMAGE-ASSETS.md`.
