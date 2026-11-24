@@ -835,6 +835,9 @@
   }
 
   function orderStatusPill(order) {
+    // With the business schema: the same payment state as every business screen (partial, cancelled).
+    const business = businessSchema && window.ModaatBusiness?.payPill ? window.ModaatBusiness.payPill(order) : null;
+    if (business) return business;
     if (order.billingMode === "credits") return '<span class="payment-select neutral">קרדיטים</span>';
     const paid = order.paymentStatus === "paid";
     return `<span class="payment-select ${paid ? "paid" : "pending"}">${paid ? "שולם" : "ממתין לתשלום"}</span>`;
@@ -851,6 +854,8 @@
       $("#client-detail-joined").textContent = "—";
       $("#client-detail-notes").textContent = "הערות פנימיות זמינות לאחר התקנת הסכימה העסקית.";
     }
+    // With the business schema the orders of the client file (statuses, money, cancelled orders) come from business-app.js.
+    if (businessSchema && window.ModaatBusiness?.renderClientOrders) { window.ModaatBusiness.renderClientOrders(clientId); return; }
     const orders = data.orders.filter((order) => order.clientId === clientId).sort(compareOrdersNewestFirst);
     $("#client-orders-body").innerHTML = orders.map((order) => `<tr>
       <td class="order-number">${escapeHtml(orderLabel(order))}</td>

@@ -121,10 +121,10 @@
           </header>
 
           <nav class="quick-actions" aria-label="פעולות מהירות">
-            <button class="quick-action" type="button" data-go="orders"><span class="nav-icon"><svg><use href="#i-orders"/></svg></span><span><strong>כל ההזמנות</strong><small>חיפוש לפי מספר, לקוח או גיליון</small></span></button>
-            <button class="quick-action" type="button" data-go="clients"><span class="nav-icon"><svg><use href="#i-clients"/></svg></span><span><strong>לקוחות</strong><small>פתיחת תיק לקוח</small></span></button>
-            <button class="quick-action" type="button" data-go="payments"><span class="nav-icon"><svg><use href="#i-payments"/></svg></span><span><strong>גבייה</strong><small>חיובים פתוחים וסימון תשלום</small></span></button>
-            <button class="quick-action" type="button" data-go="sheets"><span class="nav-icon"><svg><use href="#i-issues"/></svg></span><span><strong>גיליונות</strong><small>ההזמנות בכל גיליון</small></span></button>
+            <button class="quick-action biz-only" type="button" data-desk-go="payments" data-desk-select="#payments-filter" data-desk-value="open"><span class="nav-icon"><svg><use href="#i-payments"/></svg></span><span><strong>רישום תקבול</strong><small>בחירת חיוב פתוח ורישום תשלום, גם חלקי</small></span></button>
+            <button class="quick-action biz-only" type="button" data-go="packages"><span class="nav-icon"><svg><use href="#i-clients"/></svg></span><span><strong>רכישת חבילה</strong><small>בחירת לקוח, קרדיטים ופריסת תשלומים</small></span></button>
+            <button class="quick-action" type="button" id="quick-current-sheet" data-go="sheets"><span class="nav-icon"><svg><use href="#i-issues"/></svg></span><span><strong id="quick-current-sheet-title">הגיליון הנוכחי</strong><small id="quick-current-sheet-text">ההזמנות והמודעות של השבוע</small></span></button>
+            <button class="quick-action" type="button" data-go="orders"><span class="nav-icon"><svg><use href="#i-orders"/></svg></span><span><strong>כל ההזמנות</strong><small>חיפוש לפי מספר, לקוח או פירוט</small></span></button>
           </nav>
 
           <div class="desk-grid">
@@ -134,7 +134,7 @@
               <p class="desk-note" id="desk-attention-note" hidden></p>
             </section>
             <section class="desk-panel" aria-labelledby="desk-sheets-title">
-              <div class="desk-panel-head"><h2 id="desk-sheets-title">גיליונות פתוחים</h2><button class="link-button" type="button" data-go="sheets">כל הגיליונות</button></div>
+              <div class="desk-panel-head"><h2 id="desk-sheets-title">הגיליון הנוכחי והבא</h2><button class="link-button" type="button" data-go="sheets">כל הגיליונות</button></div>
               <ul class="desk-list" id="desk-sheets"><li class="desk-empty">טוען נתונים…</li></ul>
               <p class="desk-note" id="desk-sheets-note" hidden></p>
             </section>
@@ -209,7 +209,7 @@
             <div class="form-panel">
               <datalist id="sheet-options"></datalist>
               <p class="field-hint" id="new-order-sheet-warning" hidden></p>
-              <p class="field-hint" id="new-order-rule">בכל שורה ממלאים מחיר לפני מע״מ <strong>או</strong> קרדיטים, לא שניהם. המחיר כולל מע״מ מחושב אוטומטית.</p>
+              <p class="field-hint" id="new-order-rule">בכל שורה ממלאים מחיר לפני מע״מ <strong>או</strong> קרדיטים, לא שניהם. המחיר כולל מע״מ מחושב אוטומטית. <span class="key-hint">Enter — לשדה הבא ולשורה חדשה · Ctrl+Enter — שמירה</span></p>
               <div class="summary-box" id="new-order-summary" aria-live="polite"></div>
               <div class="credit-alert" id="new-order-credit-alert" role="status" hidden></div>
               <p class="form-message" id="new-order-message" role="alert"></p>
@@ -256,7 +256,11 @@
                   <option value="">הכול</option><option value="unknown">לא ידוע</option><option value="not_placed">לא שובץ</option><option value="placed">שובץ</option><option value="published">פורסם</option>
                 </select>
               </label>
+              <label class="filter-label orders-v3-only" hidden>סוג
+                <select id="orders-type-filter" aria-label="סינון לפי סוג הזמנה"><option value="">הכול</option><option value="cash">כספית</option><option value="credits">קרדיטים</option></select>
+              </label>
               <label class="check-label orders-v3-only" hidden><input type="checkbox" id="orders-show-cancelled"> כולל מבוטלות</label>
+              <span class="toolbar-actions orders-v3-only" hidden><button class="link-button" type="button" id="orders-clear-filters" hidden>ניקוי סינון</button><button class="button button-outline button-small" type="button" id="orders-export" title="ייצוא ההזמנות שמוצגות כעת, לפי החיפוש והסינון">ייצוא CSV</button></span>
             </div>
             <p class="import-preview warning biz-only" id="orders-v2-note" hidden>פירוט חופשי, סטטוס קובץ, סטטוס שיבוץ, ביטול הזמנה ותשלומים חלקיים יופעלו לאחר התקנת עדכון המסד (supabase-orders-v3.sql). עד אז מוצגים הנתונים הקיימים.</p>
             <div class="table-wrap orders-table-wrap">
@@ -302,7 +306,7 @@
             </div>
             <div class="table-wrap sheets-table-wrap">
               <table class="sheets-table" id="sheets-table">
-                <thead><tr><th scope="col">גיליון</th><th scope="col" class="sheet-col-date">תאריך פרסום</th><th scope="col" class="sheet-col-place">מיקום</th><th scope="col">קבלת הזמנות</th><th scope="col"><span class="sr-only">כניסה לגיליון</span></th></tr></thead>
+                <thead><tr><th scope="col">גיליון</th><th scope="col" class="sheet-col-date">תאריך פרסום</th><th scope="col" class="sheet-col-place">מיקום</th><th scope="col" class="sheet-col-production">הזמנות והפקה</th><th scope="col">קבלת הזמנות</th><th scope="col"><span class="sr-only">כניסה לגיליון</span></th></tr></thead>
                 <tbody id="sheets-body" aria-live="polite"></tbody>
               </table>
               <div class="empty-state sheets-empty" id="sheets-empty" hidden><strong id="sheets-empty-title">אין גיליונות להצגה</strong><p id="sheets-empty-text"></p></div>
@@ -339,7 +343,14 @@
             <div class="sheet-orders-head">
               <h2 class="sheet-orders-title" id="sheet-orders-title">הזמנות הגיליון</h2>
               <span class="sheet-orders-meta" id="sheet-orders-meta"></span>
+              <label class="filter-label sheet-orders-filter orders-v3-only" hidden>הצגה
+                <select id="sheet-orders-filter" aria-label="סינון הזמנות הגיליון לפי שלב בהפקה">
+                  <option value="">כל ההזמנות</option><option value="noFile">ממתינות לקובץ</option><option value="toApprove">ממתינות לאישור</option>
+                  <option value="notPlaced">טרם שובצו</option><option value="placed">שובצו</option><option value="published">פורסמו</option><option value="cancelled">שבוטלו</option>
+                </select>
+              </label>
             </div>
+            <div class="sheet-production" id="sheet-production" hidden></div>
             <div class="table-wrap sheet-orders-wrap">
               <table class="sheet-orders-table" id="sheet-orders-table">
                 <thead id="sheet-orders-head"></thead>
@@ -403,7 +414,7 @@
             </div>
           </div>
           <p class="import-preview" id="client-page-status" role="status" hidden></p>
-          <section class="stats-grid stats-grid-3 biz-only" aria-label="סיכום תיק לקוח">
+          <section class="stats-grid biz-only" aria-label="סיכום תיק לקוח">
             <article class="stat-card">
               <div class="stat-top"><span class="stat-icon icon-blue">◈</span><span class="stat-caption">חבילה פעילה</span></div>
               <div class="stat-value stat-value-text" id="client-kpi-package">—</div>
@@ -415,9 +426,14 @@
               <div class="stat-foot" id="client-kpi-credits-foot"></div>
             </article>
             <article class="stat-card">
-              <div class="stat-top"><span class="stat-icon icon-orange">◷</span><span class="stat-caption">חוב בפיגור</span></div>
+              <div class="stat-top"><span class="stat-icon icon-orange">◷</span><span class="stat-caption">יתרת חוב כספי</span></div>
               <div class="stat-value" id="client-kpi-overdue">₪0</div>
               <div class="stat-foot" id="client-kpi-overdue-foot"></div>
+            </article>
+            <article class="stat-card">
+              <div class="stat-top"><span class="stat-icon icon-blue">◴</span><span class="stat-caption">התשלום הבא</span></div>
+              <div class="stat-value" id="client-kpi-next">—</div>
+              <div class="stat-foot" id="client-kpi-next-foot"></div>
             </article>
           </section>
           <div class="biz-required" hidden><p>חבילות, קרדיטים ותשלומים יוצגו כאן לאחר התקנת הסכימה העסקית.</p></div>
@@ -428,9 +444,15 @@
             <button class="tab-button" type="button" role="tab" data-tab="details" aria-selected="false">פרטים והערות</button>
           </div>
           <section class="orders-section tab-panel" data-tab-panel="orders">
+            <div class="table-toolbar compact-toolbar biz-only">
+              <label class="filter-label">הצגה
+                <select id="client-orders-filter" aria-label="אילו הזמנות להציג"><option value="active">הזמנות פעילות</option><option value="cancelled">הזמנות שבוטלו</option><option value="all">כל ההזמנות</option></select>
+              </label>
+              <span class="cell-muted" id="client-orders-count"></span>
+            </div>
             <div class="table-wrap">
-              <table>
-                <thead><tr><th scope="col">מספר הזמנה</th><th scope="col">תאריך הזמנה</th><th scope="col">גיליון</th><th scope="col">מוצר</th><th scope="col">חיוב</th><th scope="col">סטטוס</th></tr></thead>
+              <table class="client-orders-table">
+                <thead id="client-orders-head"><tr><th scope="col">מספר הזמנה</th><th scope="col">תאריך הזמנה</th><th scope="col">גיליון</th><th scope="col">מוצר</th><th scope="col">חיוב</th><th scope="col">סטטוס</th></tr></thead>
                 <tbody id="client-orders-body"></tbody>
               </table>
               <div class="empty-state" id="client-orders-empty" hidden><strong>אין הזמנות ללקוח זה</strong></div>
@@ -450,6 +472,12 @@
             </section>
           </section>
           <section class="orders-section tab-panel" data-tab-panel="payments" hidden>
+            <div class="table-toolbar compact-toolbar">
+              <label class="filter-label">הצגה
+                <select id="client-payments-filter" aria-label="אילו חיובים להציג"><option value="open">פתוחים</option><option value="overdue">באיחור</option><option value="future">עתידיים</option><option value="paid">שולמו</option><option value="all">הכול</option></select>
+              </label>
+              <span class="cell-muted" id="client-payments-count"></span>
+            </div>
             <div class="table-wrap">
               <table>
                 <thead><tr><th scope="col">חיוב</th><th scope="col">מועד פירעון</th><th scope="col">סכום כולל מע"מ</th><th scope="col">התקבל</th><th scope="col">יתרה</th><th scope="col">סטטוס</th><th scope="col"><span class="sr-only">פעולות</span></th></tr></thead>
@@ -516,13 +544,16 @@
                   <option value="open">פתוחים (באיחור + ללא מועד)</option>
                   <option value="overdue">באיחור</option>
                   <option value="undated">ללא מועד פירעון</option>
-                  <option value="future">עתידיים</option>
+                  <option value="week">לפירעון בשבוע הקרוב</option>
+                  <option value="month">לפירעון ב-30 הימים הקרובים</option>
+                  <option value="future">כל העתידיים</option>
                   <option value="partial">שולמו חלקית</option>
                   <option value="paid">שולמו</option>
                   <option value="cancelled">בוטלו</option>
                   <option value="all">הכול</option>
                 </select>
               </label>
+              <span class="toolbar-actions"><button class="button button-outline button-small" type="button" id="payments-export" title="ייצוא החיובים שמוצגים כעת">ייצוא CSV</button></span>
             </div>
             <div class="table-wrap">
               <table>
@@ -546,6 +577,30 @@
             <article class="stat-card"><div class="stat-top"><span class="stat-icon icon-purple">₪</span><span class="stat-caption">יתרה פתוחה</span></div><div class="stat-value" id="report-outstanding">₪0</div><div class="stat-foot">כולל עתידי</div></article>
             <article class="stat-card"><div class="stat-top"><span class="stat-icon icon-orange">◷</span><span class="stat-caption">באיחור</span></div><div class="stat-value" id="report-overdue">₪0</div><div class="stat-foot">מועד הפירעון עבר</div></article>
           </section>
+          <section class="orders-section biz-only report-builder" aria-labelledby="report-builder-title">
+            <div class="section-heading"><div><h2 id="report-builder-title">דוח לפי בחירה</h2><p>הטבלה והקובץ המיוצא מציגים בדיוק אותן שורות, לפי הסינון שנבחר.</p></div></div>
+            <div class="table-toolbar report-toolbar">
+              <label class="filter-label">דוח
+                <select id="report-kind" aria-label="סוג הדוח">
+                  <option value="orders">הזמנות לפי גיליון ותאריכים</option>
+                  <option value="debts">חובות פתוחים לפי לקוח</option>
+                  <option value="receipts">תקבולים לפי תקופה</option>
+                  <option value="credits">יתרות קרדיטים</option>
+                  <option value="production">מצב מודעות לגיליון</option>
+                </select>
+              </label>
+              <label class="filter-label" data-report-field="period">מתאריך <input type="date" id="report-from" aria-label="מתאריך"></label>
+              <label class="filter-label" data-report-field="period">עד תאריך <input type="date" id="report-to" aria-label="עד תאריך"></label>
+              <label class="filter-label" data-report-field="sheet">גיליון <select id="report-sheet" aria-label="גיליון"></select></label>
+              <span class="toolbar-actions"><button class="button button-outline button-small" type="button" id="report-export">ייצוא CSV</button></span>
+            </div>
+            <p class="report-summary" id="report-summary" role="status"></p>
+            <div class="table-wrap">
+              <table class="report-table"><thead id="report-head"></thead><tbody id="report-body"></tbody></table>
+              <div class="empty-state" id="report-empty" hidden><strong>אין נתונים לסינון שנבחר</strong></div>
+            </div>
+          </section>
+
           <section class="orders-section">
             <div class="section-heading"><div><h2>פילוח חודשי של הזמנות</h2><p>לפי חודש הזמנה, בלי תשלומי חבילות ובלי הזמנות מבוטלות</p></div></div>
             <div class="table-wrap">

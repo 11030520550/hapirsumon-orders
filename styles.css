@@ -767,12 +767,23 @@ button.desk-item:hover { background: #F7F2EA; }
 .orders-toolbar .search-box { flex: 1 1 260px; max-width: 360px; border-radius: 0; }
 .orders-toolbar select { border-radius: 0; }
 .orders-table-wrap { overflow-x: auto; }
-.orders-table { min-width: 1480px; font-size: 13.5px; }
-.orders-table th, .orders-table td { padding: 8px 10px; vertical-align: top; }
+/* The orders workspace uses the full width: all 13 columns fit at 1440 and wider; at 1280 the table scrolls
+   inside its frame with the order number pinned on the right, and the page itself never scrolls sideways. */
+.page-content:has(> [data-page="orders"]:not([hidden])) { width: 100%; max-width: 1760px; }
+.orders-table { width: 100%; min-width: 980px; font-size: 13px; }
+.orders-table thead th { white-space: normal; line-height: 1.25; vertical-align: bottom; }
+.orders-table .sort-button { white-space: normal; text-align: start; }
+.orders-table th:first-child, .orders-table td:first-child { position: sticky; right: 0; z-index: 1; background: var(--surface); box-shadow: -1px 0 0 var(--line-soft); }
+.orders-table thead th:first-child { z-index: 2; }
+.orders-table tr.is-cancelled td:first-child { background: #F3EEE6; }
+.toolbar-actions { display: inline-flex; align-items: center; gap: 12px; margin-inline-start: auto; }
+.button-small { min-height: 34px; padding: 0 12px; font-size: 13.5px; }
+.cell-go { margin-inline-start: 4px; padding: 0 2px; border: 0; color: var(--forest); background: none; font-size: 12px; text-decoration: underline; cursor: pointer; }
+.orders-table th, .orders-table td { padding: 7px 5px; vertical-align: top; }
 .orders-table thead th { position: sticky; top: 0; z-index: 1; background: var(--surface); white-space: nowrap; }
 .orders-table td { border-top: 1px solid var(--line-soft); }
-.orders-table .cell-description { min-width: 220px; max-width: 320px; white-space: normal; line-height: 1.45; }
-.orders-table .cell-notes { min-width: 160px; max-width: 260px; white-space: normal; color: var(--ink-2); line-height: 1.45; }
+.orders-table .cell-description { min-width: 130px; max-width: 280px; white-space: normal; line-height: 1.4; }
+.orders-table .cell-notes { min-width: 70px; max-width: 220px; white-space: normal; color: var(--ink-2); line-height: 1.4; }
 .orders-table .cell-date, .orders-table .order-number, .orders-table .amount-cell { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .orders-table .cell-muted, .cell-muted { color: var(--ink-3); }
 .orders-table tr.is-cancelled td { color: var(--ink-3); background: rgba(236, 229, 219, .35); }
@@ -845,8 +856,61 @@ button.desk-item:hover { background: #F7F2EA; }
 
 @media (max-width: 760px) {
   .orders-toolbar .search-box { max-width: none; }
-  .orders-table { min-width: 1280px; }
+  .orders-table { min-width: 980px; }
   .pay-figures { grid-template-columns: 1fr; }
   .pay-figures div + div { border-inline-start: 0; border-top: 1px solid var(--line); }
   .receipt-list li { grid-template-columns: 1fr 1fr; }
+}
+
+/* New order: optional price-list picker beside the free description (fills description and price; editable). */
+.entry-table .row-describe { display: flex; gap: 6px; align-items: stretch; }
+.entry-table .row-describe input { flex: 1 1 auto; min-width: 0; }
+.entry-table .row-pick { flex: 0 0 118px; max-width: 118px; border-radius: 0; color: var(--ink-2); font-size: 13px; }
+.orders-table td.cell-muted:nth-child(3) { max-width: 64px; white-space: normal; line-height: 1.3; }
+.orders-table .client-name { max-width: 118px; white-space: normal; line-height: 1.35; }
+.orders-table .client-name .link-button { text-align: start; white-space: normal; }
+.key-hint { margin-inline-start: 8px; color: var(--ink-3); font-size: 12.5px; white-space: nowrap; }
+.compact-toolbar { justify-content: flex-start; gap: 16px; padding: 10px 18px; }
+.client-orders-table td, .client-orders-table th { white-space: nowrap; }
+.client-orders-table td.cell-description { white-space: normal; min-width: 180px; }
+.client-orders-table tr.is-cancelled td { color: var(--ink-3); }
+.client-orders-table tr.is-cancelled .cell-description { text-decoration: line-through; text-decoration-color: rgba(107, 100, 92, .5); }
+.stat-value.is-due { color: var(--warn-fg); }
+.due-text { color: var(--bad-fg); font-weight: 600; }
+.package-progress { margin: 10px 0 0; font-size: 13.5px; color: var(--ink-2); }
+
+/* Sheets: orders and production state per sheet; each count opens the orders screen already filtered. */
+.sheet-row-production { min-width: 220px; }
+.prod-total { display: block; color: var(--ink); font-weight: 600; font-size: 14px; }
+.prod-chips { display: flex; flex-wrap: wrap; gap: 4px 6px; margin-top: 4px; }
+.prod-chip { padding: 1px 7px; border: 1px solid var(--line); border-radius: 0; background: var(--surface); color: var(--ink-2); font-size: 12px; line-height: 1.6; cursor: pointer; }
+.prod-chip:hover { border-color: var(--wood); color: var(--ink); }
+.prod-chip.is-warn { border-color: #E6C99B; background: var(--warn-bg); color: var(--warn-fg); }
+.prod-chip.is-ok { color: var(--ok-fg); }
+@media (max-width: 900px) { .sheets-table .sheet-row-production { grid-area: 3 / 1 / 4 / 3; min-width: 0; } }
+.sheet-orders-head { flex-wrap: wrap; gap: 8px 16px; }
+.sheet-orders-filter { margin-inline-start: auto; }
+.sheet-production { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 10px 20px; border-bottom: 1px solid var(--line-soft); background: rgba(243, 230, 210, .35); font-size: 13.5px; }
+.sheet-production .prod-chips { margin-top: 0; }
+.prod-done { color: var(--ok-fg); }
+.wf-select { min-height: 30px; padding: 2px 6px; border: 1px solid var(--line); border-radius: 0; background: var(--surface); font-size: 13px; }
+.wf-select.wf-not_received, .wf-select.wf-not_placed { color: var(--warn-fg); }
+.wf-select.wf-approved, .wf-select.wf-published, .wf-select.wf-placed { color: var(--ok-fg); }
+.sheet-orders-table tr.is-cancelled td { color: var(--ink-3); }
+/* Dashboard: the current and next sheet, each with its production counts (each count opens filtered orders). */
+.desk-sheet { border-top: 1px solid var(--line-soft); }
+.desk-sheet:first-child { border-top: 0; }
+.desk-sheet .desk-item { border-top: 0; }
+.desk-chips { margin: -4px 0 0; padding: 0 22px 14px 22px; padding-inline-start: 86px; }
+/* Reports: the report builder (one data set for the table and the CSV). */
+.report-toolbar { justify-content: flex-start; gap: 10px 16px; }
+.report-toolbar input[type="date"] { border-radius: 0; }
+.report-summary { margin: 0; padding: 10px 22px; border-bottom: 1px solid var(--line-soft); color: var(--ink-2); font-size: 13.5px; }
+.report-table td, .report-table th { font-size: 13.5px; }
+.report-table td { white-space: nowrap; }
+.report-table td:nth-child(5) { white-space: normal; min-width: 160px; }
+@media (max-width: 1280px) {
+  .sheet-row-production { min-width: 0; }
+  .sheets-table th, .sheets-table td { padding-inline: 10px; }
+  .sheet-row-production .prod-chip { font-size: 11.5px; }
 }

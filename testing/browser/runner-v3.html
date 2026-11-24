@@ -100,7 +100,10 @@ async function run() {
   $("#biz-package-submit").click(); await sleep(600);
   check("B2 package saved: KPI + premium", text("#client-kpi-package") === "מינימום מקסימום" && visible("#client-page-premium") && text("#client-kpi-credits") === "30");
   $('[data-tab="payments"]').click(); await sleep(50);
-  check("B3 payments tab: 12 installments + legacy order", $$("#client-payments-body tr").length === 13, String($$("#client-payments-body tr").length));
+  // The tab opens on the open charges; "הכול" shows every charge, also the paid legacy order.
+  const openCharges = $$("#client-payments-body tr").length;
+  $("#client-payments-filter").value = "all"; $("#client-payments-filter").dispatchEvent(new w.Event("change", { bubbles: true })); await sleep(50);
+  check("B3 payments tab: opens on the open charges (12 installments); 'הכול' adds the paid legacy order (13)", openCharges === 12 && $$("#client-payments-body tr").length === 13, `${openCharges} / ${$$("#client-payments-body tr").length}`);
   $('[data-tab="packages"]').click(); await sleep(50);
   check("B4 packages tab: card + ledger", $$("#client-packages .package-card").length === 1 && $$("#client-ledger-body tr").length === 1);
   $('[data-client-page-action="credits"]').click(); await sleep(80);
@@ -419,7 +422,7 @@ async function run() {
   const rowClick = w.location.hash === "#/sheet/124";
   await nav("sheets");
   check("G6 the list is a table like the orders table (sheet, publication date, place, order intake); a click anywhere on a row opens the sheet; each row has a keyboard-reachable link",
-    listHeads.slice(0, 4).join() === "גיליון,תאריך פרסום,מיקום,קבלת הזמנות" && rowClick && listRows().every((n) => sheetRow(n).querySelector("button.sheet-row-link")?.dataset.sheetView === n), listHeads.join("|"));
+    listHeads.slice(0, 5).join() === "גיליון,תאריך פרסום,מיקום,הזמנות והפקה,קבלת הזמנות" && rowClick && listRows().every((n) => sheetRow(n).querySelector("button.sheet-row-link")?.dataset.sheetView === n), listHeads.join("|"));
   check("G7 no money on the sheets screen: no amounts in the banner or the list (the figures are on each sheet's page); no newspaper icon repeated in the rows",
     !text('[data-page="sheets"]').includes("₪") && $$('[data-page="sheets"] *').every((el) => !/sheet-newspaper/.test(w.getComputedStyle(el).backgroundImage)));
 

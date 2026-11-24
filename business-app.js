@@ -74,6 +74,25 @@
     button.disabled = busy;
     button.textContent = busy ? "שומרת…" : idleText;
   }
+  // CSV for Excel: UTF-8 with BOM (Hebrew opens correctly), CRLF, quoted where needed. Text that starts like a
+  // formula (= + - @) is prefixed with ' so a spreadsheet never runs it; numbers stay numbers.
+  function downloadCsv(filename, headers, rows) {
+    const cell = (value) => {
+      if (value === null || value === undefined) return "";
+      if (typeof value === "number") return Number.isFinite(value) ? String(value) : "";
+      let text = String(value);
+      if (/^[=+\-@\t\r]/.test(text) && !/^-?\d+(\.\d+)?$/.test(text)) text = `'${text}`;
+      return /[",\r\n']/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+    };
+    const csv = "﻿" + [headers, ...rows].map((row) => row.map(cell).join(",")).join("\r\n") + "\r\n";
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url; link.download = filename.replace(/[\/:*?"<>|]/g, "-");
+    document.body.append(link); link.click(); link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 5000);
+    app().toast(`הקובץ ${link.download} נוצר (${number.format(rows.length)} שורות).`);
+  }
+
   function pill(kind, text) {
     const tone = ["paid", "neutral", "open"].includes(kind) ? kind : "pending";
     return `<span class="payment-select ${tone}">${escapeHtml(text)}</span>`;
@@ -94,6 +113,8 @@
     state.catalog = catalog;
     state.allProducts = products;
     state.products = products.filter((item) => item.is_active && item.base_price_before_vat != null && item.credit_cost != null);
+    // The price list in the order form (model v3): every active product with a price; credits are optional.
+    state.priceList = products.filter((item) => item.is_active && item.base_price_before_vat != null);
   }
 
   // A newer load supersedes an older one; the older caller (for example afterSave) then waits for the newer load,
@@ -297,6 +318,26 @@
     </button></li>`;
   }
 
+  // Production work on the sheets that are not published yet: files to receive, files to approve, ads to place.
+  function productionDesk() {
+    if (!v3() || !state.sheetsInstalled) return [];
+    const today = jerusalemLocal(serverMs()).date;
+    const live = new Set(sheetBoard().filter((sheet) => (sheet.publication ? sheet.publication >= today : !sheet.closed)).map((sheet) => sheet.number));
+    const orders = app().orders().filter((order) => !order.cancelledAt && live.has(order.sheetNumber));
+    const sheetsOf = (list) => [...new Set(list.map((order) => order.sheetNumber))].sort(compareSheets).join(", ");
+    const noFile = orders.filter((order) => order.fileStatus === "not_received");
+    const toApprove = orders.filter((order) => order.fileStatus === "received");
+    const notPlaced = orders.filter((order) => order.placementStatus === "not_placed");
+    const item = (list, title, hint, select, value) => deskItem({ count: list.length, title, hint, meta: list.length ? `גיליון ${sheetsOf(list)}` : "",
+      attrs: deskLink("orders", list.length && new Set(list.map((order) => order.sheetNumber)).size === 1 ? `#orders-sheet-filter|${select}` : select,
+        list.length && new Set(list.map((order) => order.sheetNumber)).size === 1 ? `${list[0].sheetNumber}|${value}` : value) });
+    return [
+      item(noFile, "מודעות שהקובץ שלהן לא התקבל", "בגיליונות שטרם פורסמו", "#orders-file-filter", "not_received"),
+      item(toApprove, "קבצים שהתקבלו וממתינים לאישור", "בגיליונות שטרם פורסמו", "#orders-file-filter", "received"),
+      item(notPlaced, "מודעות שטרם שובצו", "בגיליונות שטרם פורסמו", "#orders-placement-filter", "not_placed")
+    ];
+  }
+
   function deskLink(view, select = "", value = "") {
     return `data-desk-go="${escapeHtml(view)}" data-desk-select="${escapeHtml(select)}" data-desk-value="${escapeHtml(value)}"`;
   }
@@ -348,27 +389,43 @@
     $("#desk-attention-source").textContent = "לפי החיובים במסך התשלומים";
     attention.innerHTML = [
       deskItem({ count: overdue.length, title: "תשלומים באיחור", hint: "מועד הפירעון עבר והחיוב עדיין פתוח", meta: sum(overdue), tone: "alert", attrs: deskLink("payments", "#payments-filter", "overdue") }),
-      deskItem({ count: dueSoon.length, title: "לפירעון בשבוע הקרוב", hint: "חיובים שמועד הפירעון שלהם בשבעת הימים הקרובים", meta: sum(dueSoon), attrs: deskLink("payments", "#payments-filter", "future") }),
+      deskItem({ count: dueSoon.length, title: "לפירעון בשבוע הקרוב", hint: "חיובים שמועד הפירעון שלהם בשבעת הימים הקרובים", meta: sum(dueSoon), attrs: deskLink("payments", "#payments-filter", "week") }),
       deskItem({ count: undated.length, title: "חיובים פתוחים ללא מועד פירעון", hint: "לא ייחשבו באיחור עד שייקבע להם מועד", meta: sum(undated), attrs: deskLink("payments", "#payments-filter", "undated") }),
-      deskItem({ count: negative.length, title: "לקוחות ביתרת קרדיטים שלילית", hint: "ניצלו יותר קרדיטים ממה שהוקצה להם", meta: "לבדיקה", attrs: deskLink("packages") })
+      deskItem({ count: negative.length, title: "לקוחות ביתרת קרדיטים שלילית", hint: "ניצלו יותר קרדיטים ממה שהוקצה להם", meta: "לבדיקה", attrs: deskLink("packages") }),
+      ...productionDesk()
     ].join("");
     attentionNote.hidden = true;
     renderMoneyStrip(rows);
 
-    const open = sheetGroups().filter((group) => !sheetClosed(group.sheet));
-    // Masthead "edition": the newest open sheet that actually has orders (no invented issue data).
+    // The sheet of the week (next to be published, also after it closed for orders) and the one after it.
+    const board = sheetBoard();
+    const upcoming = state.sheetModel === "v2"
+      ? sheetHighlights(board).planned.slice(0, 2)
+      : board.filter((sheet) => !sheet.closed && sheet.orders > 0).sort((a, b) => compareSheets(a.number, b.number)).slice(0, 2);
     const edition = $("#masthead-edition");
     if (edition) {
-      edition.hidden = open.length === 0;
-      edition.textContent = open.length ? `הגיליון הפתוח האחרון · ${open[0].sheet}` : "";
+      edition.hidden = upcoming.length === 0;
+      edition.textContent = upcoming.length ? `הגיליון הנוכחי · ${upcoming[0].number}` : "";
     }
-    sheetsList.innerHTML = open.length ? open.slice(0, 5).map((group) => `<li><button class="desk-item sheet-item" type="button" data-sheet-view="${escapeHtml(group.sheet)}">
-      <span class="desk-count">${escapeHtml(group.sheet)}</span>
-      <span class="desk-text"><strong>גיליון ${escapeHtml(group.sheet)}</strong><small>${escapeHtml(`${number.format(group.orders.length)} הזמנות · ${number.format(group.clients.size)} לקוחות`)}</small></span>
-      <span class="desk-meta">${pill("open", "פתוח")}</span>
-    </button></li>`).join("") : '<li class="desk-empty">אין גיליונות פתוחים עם הזמנות.</li>';
+    const current = upcoming[0];
+    const quick = $("#quick-current-sheet");
+    if (current) { delete quick.dataset.go; quick.dataset.sheetView = current.number; }
+    else { quick.dataset.go = "sheets"; delete quick.dataset.sheetView; }
+    $("#quick-current-sheet-title").textContent = current ? `גיליון ${current.number}` : "הגיליון הנוכחי";
+    $("#quick-current-sheet-text").textContent = current ? `${current.publication ? `${weekdayDate(current.publication)} · ` : ""}${number.format(current.orders)} הזמנות` : "ההזמנות והמודעות של השבוע";
+    sheetsList.innerHTML = upcoming.length ? upcoming.map((sheet, index) => {
+      const p = sheetProduction(sheet.number);
+      const intake = sheetIntake(sheet);
+      return `<li class="desk-sheet">
+        <button class="desk-item sheet-item" type="button" data-sheet-view="${escapeHtml(sheet.number)}">
+          <span class="desk-count">${escapeHtml(sheet.number)}</span>
+          <span class="desk-text"><strong>${index === 0 ? "הגיליון הנוכחי" : "הגיליון הבא"}${sheet.publication ? ` · ${escapeHtml(weekdayDate(sheet.publication))}` : ""}</strong><small>${escapeHtml(`${number.format(p.orders)} הזמנות · ${number.format(sheet.clients.size)} לקוחות${intake.note ? ` · ${intake.note}` : ""}`)}</small></span>
+          <span class="desk-meta">${pill(sheet.closed ? "neutral" : "open", sheet.closed ? "סגור להזמנות" : "פתוח")}</span>
+        </button>
+        ${v3() && p.orders ? `<div class="prod-chips desk-chips">${productionChips(sheet.number, p, { withPlaced: false }) || '<span class="prod-done">כל המודעות התקבלו, אושרו ושובצו.</span>'}</div>` : ""}
+      </li>`;
+    }).join("") : '<li class="desk-empty">אין גיליונות מתוכננים. אפשר להוסיף במסך "גיליונות".</li>';
     const notes = [];
-    if (open.length > 5) notes.push(`ועוד ${number.format(open.length - 5)} גיליונות פתוחים.`);
     if (!state.sheetsInstalled) notes.push("סגירת גיליונות עדיין לא הופעלה במסד הנתונים, ולכן כל הגיליונות מוצגים כפתוחים.");
     sheetsNote.hidden = notes.length === 0;
     sheetsNote.textContent = notes.join(" ");
@@ -380,6 +437,7 @@
     if (route.name === "dashboard") renderDashboard();
     if (route.name === "reports") renderReports();
     if (!state.ready) return;
+    $$(".orders-v3-only").forEach((element) => { element.hidden = !v3(); });
     if (route.name === "orders") renderOrdersPage();
     if (route.name === "client") renderClientPage(route.param);
     if (route.name === "new-order") prepareNewOrder(route.param);
@@ -403,12 +461,26 @@
       ? `יתרה שלילית · <button class="link-button" type="button" data-biz-package="${escapeHtml(clientId)}">רכישת חבילה</button>`
       : "קרדיטים זמינים, ללא תאריך תפוגה";
     $("#client-kpi-credits").classList.toggle("negative", balance < 0);
+    // Money of this client: the same rows as the payments screen (one source), split by what needs attention.
     const rows = obligationRows().filter((row) => row.clientId === clientId);
-    const overdue = rows.filter((row) => row.kind === "overdue");
-    $("#client-kpi-overdue").textContent = money.format(roundMoney(overdue.reduce((sum, row) => sum + row.outstanding, 0)));
-    $("#client-kpi-overdue-foot").textContent = overdue.length ? `${overdue.length} חיובים באיחור` : "אין חוב בפיגור";
-    $("#client-payments-body").innerHTML = state.loaded ? obligationTableRows(rows, false) : loadingRow(7);
-    $("#client-payments-empty").hidden = !state.loaded || rows.length !== 0;
+    const open = rows.filter((row) => !row.cancelled && row.outstanding > 0);
+    const overdue = open.filter((row) => row.kind === "overdue");
+    const sum = (list) => roundMoney(list.reduce((total, row) => total + row.outstanding, 0));
+    $("#client-kpi-overdue").textContent = state.loaded ? money.format(sum(open)) : "…";
+    $("#client-kpi-overdue").classList.toggle("is-due", overdue.length > 0);
+    $("#client-kpi-overdue-foot").innerHTML = !state.loaded ? "" : !open.length ? "אין חיובים פתוחים"
+      : overdue.length ? `<strong class="due-text">${escapeHtml(money.format(sum(overdue)))} באיחור</strong> · ${escapeHtml(number.format(open.length))} חיובים פתוחים`
+      : `${escapeHtml(number.format(open.length))} חיובים פתוחים · אין איחור`;
+    const next = open.filter((row) => row.kind === "future").sort((a, b) => String(a.dueOn).localeCompare(String(b.dueOn)))[0];
+    $("#client-kpi-next").textContent = !state.loaded ? "…" : next ? money.format(next.outstanding) : "—";
+    $("#client-kpi-next-foot").textContent = !state.loaded ? "" : next ? `${displayDate(next.dueOn)} · ${next.label}` : "אין תשלומים עתידיים";
+    const payFilter = $("#client-payments-filter").value;
+    const shown = rows.filter((row) => payFilter === "all" || (payFilter === "open" ? !row.cancelled && row.outstanding > 0 : payFilter === "paid" ? row.paid : row.kind === payFilter));
+    $("#client-payments-body").innerHTML = state.loaded ? obligationTableRows(shown, false) : loadingRow(7);
+    $("#client-payments-empty").hidden = !state.loaded || shown.length !== 0;
+    $("#client-payments-empty").querySelector("strong").textContent = rows.length ? "אין חיובים בתצוגה זו" : "אין חיובים ללקוח זה";
+    $("#client-payments-count").textContent = state.loaded ? `${number.format(shown.length)} מתוך ${number.format(rows.length)} חיובים · התקבל בסך הכול ${money.format(roundMoney(rows.reduce((t, row) => t + row.received, 0)))}` : "";
+    renderClientOrders(clientId);
     const packages = state.packages.filter((item) => item.client_id === clientId);
     $("#client-packages").innerHTML = packages.length ? packages.map((item) => {
       const benefits = Array.isArray(item.benefits_snapshot) ? item.benefits_snapshot : [];
@@ -425,6 +497,16 @@
           <span>מחיר כולל מע"מ</span><strong>${escapeHtml(money.format(item.gross_total))}</strong>
           <span>מספר תשלומים</span><strong>${escapeHtml(number.format(item.installment_count))}</strong>
         </div>
+        ${(() => {
+          // Payment progress of this purchase: the same charge rows as the payments screen.
+          const own = rows.filter((row) => row.packageId === item.id && !row.cancelled);
+          if (!own.length) return "";
+          const paidCount = own.filter((row) => row.paid).length;
+          const late = own.filter((row) => row.kind === "overdue");
+          const received = roundMoney(own.reduce((t, row) => t + row.received, 0));
+          const left = roundMoney(own.reduce((t, row) => t + row.outstanding, 0));
+          return `<p class="package-progress">שולמו ${escapeHtml(number.format(paidCount))} מתוך ${escapeHtml(number.format(own.length))} תשלומים · התקבל ${escapeHtml(money.format(received))} · נותר ${escapeHtml(money.format(left))}${late.length ? ` · <strong class="due-text">${escapeHtml(number.format(late.length))} באיחור (${escapeHtml(money.format(roundMoney(late.reduce((t, row) => t + row.outstanding, 0))))})</strong>` : ""}</p>`;
+        })()}
         ${benefits.length ? `<p class="field-hint package-benefits">הטבות: ${escapeHtml(benefits.map((benefit) => `${benefit.label} (${number.format(benefit.quantity)} ${benefit.unit})`).join(" · "))}</p>` : ""}
       </section>`;
     }).join("") : '<div class="empty-panel">ללקוח אין חבילות. לרכישה: "רכישת חבילה" בראש העמוד.</div>';
@@ -455,6 +537,38 @@
     }
   }
 
+  // Orders of one client (model with the business schema): production statuses, money, cancelled orders on request.
+  function renderClientOrders(clientId) {
+    const filter = $("#client-orders-filter").value;
+    const all = app().orders().filter((order) => order.clientId === clientId);
+    const orders = all.filter((order) => filter === "all" || (filter === "cancelled" ? order.cancelledAt : !order.cancelledAt))
+      .sort((a, b) => String(b.orderDate).localeCompare(String(a.orderDate)) || (Number(b.orderNumber) || 0) - (Number(a.orderNumber) || 0));
+    const modelV3 = v3();
+    $("#client-orders-head").innerHTML = `<tr><th scope="col">מס׳ הזמנה</th><th scope="col">תאריך</th><th scope="col">גיליון</th><th scope="col">פירוט הזמנה</th><th scope="col">חיוב</th><th scope="col">תשלום</th>${modelV3 ? '<th scope="col">קובץ</th><th scope="col">שיבוץ</th>' : ""}</tr>`;
+    $("#client-orders-body").innerHTML = !state.loaded ? loadingRow(modelV3 ? 8 : 6) : orders.map((order) => {
+      const payState = orderPayState(order);
+      const obligation = state.obligations.find((item) => item.order_id === order.id);
+      const charge = order.billingMode === "credits" ? `${number.format(order.creditsUsed)} קרדיטים` : money.format(order.amount);
+      const payCell = modelV3 && obligation && !(payState === "cancelled" && orderMoney(order).received <= 0)
+        ? `<button class="pay-state ${PAY_TONE[payState]}" type="button" data-biz-pay-open="${escapeHtml(obligation.id)}" title="תקבולים ורישום תשלום">${escapeHtml(PAY_TEXT[payState] || "")}</button>`
+        : pill(PAY_TONE[payState] || "neutral", PAY_TEXT[payState] || "");
+      return `<tr class="${order.cancelledAt ? "is-cancelled" : ""}">
+        <td class="order-number"><button class="link-button" type="button" data-order-find="${escapeHtml(order.orderNumber ?? "")}" title="להזמנה במסך ההזמנות">${escapeHtml(order.orderNumber ?? "")}</button></td>
+        <td>${escapeHtml(app().formatOrderDate(order.orderDate))}</td>
+        <td>${order.sheetNumber ? `<button class="link-button" type="button" data-sheet-view="${escapeHtml(order.sheetNumber)}">${escapeHtml(order.sheetNumber)}</button>` : "—"}</td>
+        <td class="cell-description">${escapeHtml(order.description || order.product || "")}${order.cancelledAt ? ` <span class="cell-muted" title="${escapeHtml(order.cancelReason || "")}">· בוטלה</span>` : ""}</td>
+        <td class="amount-cell">${escapeHtml(charge)}</td>
+        <td>${payCell}</td>
+        ${modelV3 ? `<td>${order.fileStatus ? `<span class="wf wf-${escapeHtml(order.fileStatus)}">${escapeHtml(FILE_STATUS[order.fileStatus] || "")}</span>` : ""}</td>
+        <td>${order.placementStatus ? `<span class="wf wf-${escapeHtml(order.placementStatus)}">${escapeHtml(PLACEMENT_STATUS[order.placementStatus] || "")}</span>` : ""}</td>` : ""}
+      </tr>`;
+    }).join("");
+    $("#client-orders-empty").hidden = !state.loaded || orders.length !== 0;
+    $("#client-orders-empty").querySelector("strong").textContent = all.length ? "אין הזמנות בתצוגה זו" : "אין הזמנות ללקוח זה";
+    const cancelled = all.filter((order) => order.cancelledAt).length;
+    $("#client-orders-count").textContent = state.loaded ? `${number.format(all.length - cancelled)} פעילות${cancelled ? ` · ${number.format(cancelled)} בוטלו` : ""}` : "";
+  }
+
   function renderPackagesPage() {
     const query = $("#packages-search").value.trim().toLocaleLowerCase("he");
     const clients = [...app().clients()].sort((a, b) => a.name.localeCompare(b.name, "he"))
@@ -482,6 +596,19 @@
     </tr>`).join("");
   }
 
+  // The charges the payments screen shows (filter + search); the CSV export uses exactly the same rows.
+  function paymentRowsShown(all = obligationRows()) {
+    const filter = $("#payments-filter").value;
+    const query = $("#payments-search").value.trim().toLocaleLowerCase("he");
+    const horizon = (days) => localDateValue(new Date(Date.now() + days * 24 * 60 * 60 * 1000));
+    const matchesFilter = (row) => filter === "all" || (filter === "open" ? ["overdue", "undated"].includes(row.kind)
+      : filter === "partial" ? row.partial
+      : filter === "week" ? row.kind === "future" && row.dueOn <= horizon(7)
+      : filter === "month" ? row.kind === "future" && row.dueOn <= horizon(30)
+      : row.kind === filter);
+    return all.filter((row) => matchesFilter(row) && `${clientName(row.clientId)} ${row.label}`.toLocaleLowerCase("he").includes(query));
+  }
+
   function renderPaymentsPage() {
     const all = obligationRows();
     const open = (kind) => roundMoney(all.filter((row) => row.kind === kind).reduce((total, row) => total + row.outstanding, 0));
@@ -489,11 +616,7 @@
     $("#payments-undated").textContent = money.format(open("undated"));
     $("#payments-future").textContent = money.format(open("future"));
     $("#payments-paid").textContent = money.format(roundMoney(all.reduce((total, row) => total + row.received, 0)));
-    const filter = $("#payments-filter").value;
-    const query = $("#payments-search").value.trim().toLocaleLowerCase("he");
-    const matchesFilter = (row) => filter === "all" || (filter === "open" ? ["overdue", "undated"].includes(row.kind)
-      : filter === "partial" ? row.partial : row.kind === filter);
-    const rows = all.filter((row) => matchesFilter(row) && `${clientName(row.clientId)} ${row.label}`.toLocaleLowerCase("he").includes(query));
+    const rows = paymentRowsShown(all);
     $("#payments-body").innerHTML = state.loaded ? obligationTableRows(rows, true) : loadingRow(8);
     $("#payments-empty").hidden = !state.loaded || rows.length !== 0;
     $("#payments-count").textContent = `${number.format(rows.length)} חיובים · יתרה לתשלום ${money.format(roundMoney(rows.reduce((total, row) => total + row.outstanding, 0)))}`;
@@ -677,6 +800,33 @@
   }
 
   // One row per sheet: number, publication date, place on the timeline, order intake. No money in the list.
+  // Production state of a sheet, from its active orders (cancelled orders are not counted).
+  function sheetProduction(sheetNumber) {
+    const orders = app().orders().filter((order) => order.sheetNumber === sheetNumber && !order.cancelledAt);
+    const count = (test) => orders.filter(test).length;
+    return {
+      orders: orders.length,
+      noFile: count((order) => order.fileStatus === "not_received"),
+      toApprove: count((order) => order.fileStatus === "received"),
+      notPlaced: count((order) => order.placementStatus === "not_placed"),
+      placed: count((order) => order.placementStatus === "placed"),
+      published: count((order) => order.placementStatus === "published"),
+      unknown: count((order) => order.fileStatus === "unknown" || order.placementStatus === "unknown")
+    };
+  }
+  // Counts that open the orders screen already filtered (sheet + status). Zero counts are not shown.
+  function productionChips(sheetNumber, p, { withPlaced = true } = {}) {
+    const chip = (n, text, select, value, tone) => (n > 0
+      ? `<button class="prod-chip is-${tone}" type="button" ${deskLink("orders", `#orders-sheet-filter|${select}`, `${sheetNumber}|${value}`)}>${escapeHtml(number.format(n))} ${escapeHtml(text)}</button>` : "");
+    return [
+      chip(p.noFile, "ממתינות לקובץ", "#orders-file-filter", "not_received", "warn"),
+      chip(p.toApprove, "ממתינות לאישור", "#orders-file-filter", "received", "warn"),
+      chip(p.notPlaced, "טרם שובצו", "#orders-placement-filter", "not_placed", "warn"),
+      withPlaced ? chip(p.placed, "שובצו", "#orders-placement-filter", "placed", "ok") : "",
+      withPlaced ? chip(p.published, "פורסמו", "#orders-placement-filter", "published", "ok") : ""
+    ].join("");
+  }
+
   function sheetRowMarkup(sheet, sections) {
     const n = escapeHtml(sheet.number);
     const place = sheetPlace(sheet, sections);
@@ -689,6 +839,11 @@
       <th class="sheet-row-id" scope="row"><button class="sheet-row-link" type="button" data-sheet-view="${n}">גיליון <span class="sheet-row-no">${n}</span></button>${sheet.description ? `<span class="sheet-row-desc" title="${escapeHtml(sheet.description)}">${escapeHtml(sheet.description)}</span>` : ""}</th>
       <td class="sheet-row-date">${date}</td>
       <td class="sheet-row-place sheet-col-place"${place.title ? ` title="${escapeHtml(place.title)}"` : ""}>${place.label ? `<span class="sheet-place is-${place.key}">${escapeHtml(place.label)}</span>` : ""}${place.note ? `<span class="sheet-row-note">${escapeHtml(place.note)}</span>` : ""}</td>
+      <td class="sheet-row-production">${(() => {
+        const p = sheetProduction(sheet.number);
+        if (!p.orders) return '<span class="is-quiet">אין הזמנות</span>';
+        return `<span class="prod-total">${escapeHtml(number.format(p.orders))} הזמנות</span><span class="prod-chips">${v3() ? productionChips(sheet.number, p) : ""}</span>`;
+      })()}</td>
       <td class="sheet-row-intake"${intake.title ? ` title="${escapeHtml(intake.title)}"` : ""}>${intake.label ? `<span class="sheet-intake is-${intake.key}">${escapeHtml(intake.label)}</span>` : ""}${intake.note ? `<span class="sheet-row-note${intake.soon ? " is-soon" : ""}">${escapeHtml(intake.note)}${left ? ` · ${escapeHtml(left)}` : ""}</span>` : ""}</td>
       <td class="sheet-row-go" aria-hidden="true">‹</td>
     </tr>`;
@@ -938,6 +1093,8 @@
       orders.some((order) => order.cashBeforeVat != null) && { key: "net", head: "מחיר לפני מע״מ" },
       cash && { key: "price", head: "מחיר כולל מע״מ" },
       { key: "status", head: "סטטוס תשלום" },
+      v3() && { key: "file", head: "קובץ" },
+      v3() && { key: "placement", head: "שיבוץ" },
       orders.some((order) => order.notes) && { key: "notes", head: "הערות" }
     ].filter(Boolean);
   }
@@ -948,11 +1105,29 @@
       case "number": return `<td class="order-number">${escapeHtml(order.orderNumber ?? "—")}</td>`;
       case "date": return `<td>${order.orderDate ? escapeHtml(displayDate(String(order.orderDate).slice(0, 10))) : "—"}</td>`;
       case "client": return `<td><button class="link-button sheet-order-client" type="button" data-client-view="${escapeHtml(order.clientId)}">${escapeHtml(clientName(order.clientId))}</button></td>`;
-      case "description": return `<td class="sheet-order-desc">${escapeHtml(order.product || "—")}${order.dimensions ? ` <span class="muted">· ${escapeHtml(order.dimensions)}</span>` : ""}</td>`;
+      case "description": return `<td class="sheet-order-desc">${escapeHtml(order.description || order.product || "—")}${!order.description && order.dimensions ? ` <span class="muted">· ${escapeHtml(order.dimensions)}</span>` : ""}${order.cancelledAt ? ' <span class="cell-muted">· בוטלה</span>' : ""}</td>`;
       case "credits": return `<td class="amount-cell">${credits ? escapeHtml(number.format(order.creditsUsed)) : "—"}</td>`;
       case "net": return `<td class="amount-cell">${!credits && order.cashBeforeVat != null ? escapeHtml(money.format(order.cashBeforeVat)) : "—"}</td>`;
       case "price": return `<td class="amount-cell${due ? " is-due" : ""}">${credits ? "—" : escapeHtml(money.format(order.amount))}</td>`;
-      case "status": return `<td>${credits ? pill("neutral", "קרדיטים") : pill(due ? "pending" : "paid", due ? "ממתין לתשלום" : "שולם")}</td>`;
+      case "status": {
+        // The same payment state as the orders table (partial payments included); opens the receipts when possible.
+        const payState = orderPayState(order);
+        const obligation = state.obligations.find((item) => item.order_id === order.id);
+        if (v3() && obligation && !(payState === "cancelled" && orderMoney(order).received <= 0)) {
+          return `<td><button class="pay-state ${PAY_TONE[payState]}" type="button" data-biz-pay-open="${escapeHtml(obligation.id)}" title="תקבולים ורישום תשלום">${escapeHtml(PAY_TEXT[payState] || "")}</button></td>`;
+        }
+        return `<td>${credits ? pill("neutral", "קרדיטים") : pill(PAY_TONE[payState] || "pending", PAY_TEXT[payState] || (due ? "ממתין לתשלום" : "שולם"))}</td>`;
+      }
+      case "file":
+      case "placement": {
+        // Quick status change right in the sheet (same rules as the orders table: "unknown" cannot be chosen again).
+        const map = key === "file" ? FILE_STATUS : PLACEMENT_STATUS;
+        const current = key === "file" ? order.fileStatus : order.placementStatus;
+        if (order.cancelledAt || !current) return `<td>${current ? `<span class="wf wf-${escapeHtml(current)}">${escapeHtml(map[current] || "")}</span>` : ""}</td>`;
+        const options = Object.entries(map).filter(([value]) => value !== "unknown" || current === "unknown")
+          .map(([value, label]) => `<option value="${value}" ${value === current ? "selected" : ""}>${escapeHtml(label)}</option>`).join("");
+        return `<td><select class="wf-select wf-${escapeHtml(current)}" data-sheet-status="${key}" data-order="${escapeHtml(order.id)}" aria-label="${key === "file" ? "סטטוס קובץ" : "סטטוס שיבוץ"} להזמנה ${escapeHtml(order.orderNumber ?? "")}">${options}</select></td>`;
+      }
       case "notes": return `<td class="sheet-order-notes">${escapeHtml(order.notes || "")}</td>`;
       default: return "<td></td>";
     }
@@ -1021,16 +1196,58 @@
       $("#sheet-orders-empty").hidden = true;
       return;
     }
+    // Production state of the sheet: what is still missing before it can go to print. Information only; closing a
+    // sheet is not restricted by it.
+    const production = sheetProduction(sheetNumber);
+    const prodBox = $("#sheet-production");
+    const pendingWork = production.noFile + production.toApprove + production.notPlaced;
+    prodBox.hidden = !v3() || !orders.length;
+    if (!prodBox.hidden) {
+      const lead = !closed && pendingWork ? "<strong>לפני סגירה:</strong> " : closed && phase !== "published" && pendingWork ? "<strong>לפני הדפוס:</strong> " : "";
+      prodBox.innerHTML = `${lead}<span class="prod-chips">${productionChips(sheetNumber, production)}</span>${!pendingWork ? '<span class="prod-done">כל המודעות התקבלו, אושרו ושובצו.</span>' : ""}`;
+    }
     // Every order of the sheet, one row each. Sorted by client name, so a client's orders stay next to each other.
-    const name = new Map(orders.map((order) => [order.clientId, clientName(order.clientId)]));
-    const sorted = [...orders].sort((left, right) => name.get(left.clientId).localeCompare(name.get(right.clientId), "he")
+    const filter = v3() ? $("#sheet-orders-filter").value : "";
+    const FILTERS = {
+      noFile: (order) => order.fileStatus === "not_received", toApprove: (order) => order.fileStatus === "received",
+      notPlaced: (order) => order.placementStatus === "not_placed", placed: (order) => order.placementStatus === "placed",
+      published: (order) => order.placementStatus === "published"
+    };
+    const list = filter === "cancelled" ? app().orders().filter((order) => order.sheetNumber === sheetNumber && order.cancelledAt)
+      : filter ? orders.filter(FILTERS[filter]) : orders;
+    const name = new Map(list.map((order) => [order.clientId, clientName(order.clientId)]));
+    const sorted = [...list].sort((left, right) => name.get(left.clientId).localeCompare(name.get(right.clientId), "he")
       || (Number(left.orderNumber) || 0) - (Number(right.orderNumber) || 0));
-    const columns = sheetOrderColumns(orders);
-    $("#sheet-orders-head").innerHTML = orders.length ? `<tr>${columns.map((column) => `<th scope="col">${escapeHtml(column.head)}</th>`).join("")}</tr>` : "";
-    $("#sheet-orders-meta").textContent = orders.length ? `${plural(name.size, "לקוח", "לקוחות")} · ${plural(orders.length, "הזמנה", "הזמנות")}` : "";
-    body.innerHTML = sorted.map((order) => `<tr class="sheet-order" data-order="${escapeHtml(order.id)}" data-client="${escapeHtml(order.clientId)}">${columns.map((column) => sheetOrderCell(order, column.key)).join("")}</tr>`).join("");
-    table.hidden = orders.length === 0;
-    $("#sheet-orders-empty").hidden = orders.length !== 0;
+    const columns = sheetOrderColumns(orders.length ? orders : list);
+    $("#sheet-orders-head").innerHTML = list.length ? `<tr>${columns.map((column) => `<th scope="col">${escapeHtml(column.head)}</th>`).join("")}</tr>` : "";
+    $("#sheet-orders-meta").textContent = orders.length ? `${plural(new Set(orders.map((order) => order.clientId)).size, "לקוח", "לקוחות")} · ${plural(orders.length, "הזמנה", "הזמנות")}${filter ? ` · מוצגות ${number.format(list.length)}` : ""}` : "";
+    body.innerHTML = sorted.map((order) => `<tr class="sheet-order${order.cancelledAt ? " is-cancelled" : ""}" data-order="${escapeHtml(order.id)}" data-client="${escapeHtml(order.clientId)}">${columns.map((column) => sheetOrderCell(order, column.key)).join("")}</tr>`).join("");
+    table.hidden = list.length === 0;
+    $("#sheet-orders-empty").hidden = list.length !== 0;
+    $("#sheet-orders-empty").querySelector("strong").textContent = orders.length || filter === "cancelled" ? "אין הזמנות בתצוגה זו" : "אין הזמנות בגיליון זה";
+  }
+
+  // Quick file / placement status change from the sheet page, through update_order_details (version-checked).
+  async function setSheetOrderStatus(select) {
+    const order = orderById(select.dataset.order);
+    if (!order) return;
+    const key = select.dataset.sheetStatus;
+    const next = { file: order.fileStatus, placement: order.placementStatus };
+    next[key] = select.value;
+    select.disabled = true;
+    try {
+      await q(sb().rpc("update_order_details", {
+        p_order_id: order.id, p_expected_updated_at: order.updatedAt, p_ad_description: order.description || null, p_notes: order.notes || "",
+        p_sheet_number: order.sheetNumber || null, p_file_status: next.file, p_placement_status: next.placement, p_idempotency_key: crypto.randomUUID()
+      }));
+      await afterSave(`הזמנה ${order.orderNumber}: ${key === "file" ? "קובץ" : "שיבוץ"} — ${(key === "file" ? FILE_STATUS : PLACEMENT_STATUS)[select.value]}.`);
+    } catch (error) {
+      console.error("עדכון סטטוס נכשל:", error);
+      app().toast(String(error.code || "") === "40001" ? "ההזמנה עודכנה בינתיים במקום אחר. הנתונים נטענו מחדש; נסי שוב." : errorText(error), true);
+      await app().refresh().then(() => loadBusinessData()).then(() => renderCurrent()).catch(() => {});
+    } finally {
+      select.disabled = false;
+    }
   }
 
   // Closing/reopening changes only the sheet status row; orders and payments are untouched.
@@ -1039,8 +1256,11 @@
     const closing = $("#sheet-toggle-status").dataset.closed !== "1";
     let reason = "";
     if (closing) {
+      // Operational information before closing (no new restriction: the sheet can be closed anyway).
+      const p = sheetProduction(sheetNumber);
+      const open = [p.noFile && `${number.format(p.noFile)} ממתינות לקובץ`, p.toApprove && `${number.format(p.toApprove)} ממתינות לאישור`, p.notPlaced && `${number.format(p.notPlaced)} טרם שובצו`].filter(Boolean);
       const answer = await app().ask({ kicker: "סגירת גיליון", title: `לסגור את גיליון ${sheetNumber}?`,
-        message: "ההזמנות, התשלומים והקרדיטים לא ישתנו.", confirmText: "סגירת הגיליון" });
+        message: `${p.orders ? `בגיליון ${number.format(p.orders)} הזמנות${open.length ? `; ${open.join(", ")}` : ", כולן התקבלו ואושרו"}. ` : "אין הזמנות בגיליון. "}ההזמנות, התשלומים והקרדיטים לא ישתנו.`, confirmText: "סגירת הגיליון" });
       if (!answer) return;
       reason = "סגירת גיליון";
     } else {
@@ -1090,6 +1310,7 @@
         <td>${escapeHtml(number.format(row.credits))}</td></tr>`;
     }).join("") || '<tr><td colspan="6" class="empty-cell">אין הזמנות.</td></tr>';
     if (!state.ready || !state.loaded) return;
+    renderReportBuilder();
     // Totals from the same rows as the payments screen and the dashboard (orders + package installments).
     const rows = obligationRows();
     const total = (pick) => money.format(roundMoney(rows.reduce((sum, row) => sum + pick(row), 0)));
@@ -1097,6 +1318,114 @@
     $("#report-received").textContent = total((row) => row.received);
     $("#report-outstanding").textContent = total((row) => row.outstanding);
     $("#report-overdue").textContent = total((row) => (row.kind === "overdue" ? row.outstanding : 0));
+  }
+
+  // ---------- report builder: one data set for the table on screen and for the CSV export ----------
+  // Every figure comes from the loaded rows (orders, charges, receipts, credit balances); nothing is estimated.
+  const REPORT_FIELDS = { orders: ["period", "sheet"], debts: [], receipts: ["period"], credits: [], production: ["sheet"] };
+  function reportDefaults() {
+    if ($("#report-from").value) return;
+    const today = localDateValue();
+    $("#report-from").value = `${today.slice(0, 7)}-01`;
+    $("#report-to").value = today;
+  }
+  function populateReportSheets(kind) {
+    const select = $("#report-sheet");
+    const current = select.value;
+    const numbers = [...new Set([...state.sheetStatus.keys(), ...app().orders().map((order) => order.sheetNumber).filter(Boolean)])].sort(compareSheets);
+    const all = kind === "production" ? "" : '<option value="">כל הגיליונות</option>';
+    select.innerHTML = all + numbers.map((n) => `<option value="${escapeHtml(n)}">גיליון ${escapeHtml(n)}</option>`).join("");
+    const fallback = kind === "production" ? (state.sheetModel === "v2" ? sheetHighlights(sheetBoard()).next?.number : numbers[0]) || numbers[0] || "" : "";
+    select.value = numbers.includes(current) || (current === "" && kind !== "production") ? current : fallback;
+  }
+  function buildReport() {
+    const kind = $("#report-kind").value;
+    const from = $("#report-from").value || "0000-01-01";
+    const to = $("#report-to").value || "9999-12-31";
+    const sheet = $("#report-sheet").value;
+    const inPeriod = (day) => day && day >= from && day <= to;
+    const periodText = `${displayDate(from)}–${displayDate(to)}`;
+    if (kind === "orders") {
+      const orders = app().orders().filter((order) => !order.cancelledAt && inPeriod(String(order.orderDate).slice(0, 10)) && (!sheet || order.sheetNumber === sheet))
+        .sort((a, b) => String(a.orderDate).localeCompare(String(b.orderDate)) || (Number(a.orderNumber) || 0) - (Number(b.orderNumber) || 0));
+      let due = 0, received = 0, open = 0, credits = 0;
+      const rows = orders.map((order) => {
+        const m = orderMoney(order);
+        const cash = order.billingMode !== "credits";
+        if (cash) { due += m.due; received += m.received; open += m.outstanding; } else credits += Number(order.creditsUsed || 0);
+        return [String(order.orderNumber ?? ""), order.orderDate ? displayDate(String(order.orderDate).slice(0, 10)) : "", clientName(order.clientId), order.sheetNumber || "",
+          order.description || order.product || "", cash ? "כספית" : "קרדיטים", cash ? "" : Number(order.creditsUsed), cash && order.cashBeforeVat != null ? Number(order.cashBeforeVat) : "",
+          cash ? m.due : "", cash ? m.received : "", cash ? m.outstanding : "", FILE_STATUS[order.fileStatus] || "", PLACEMENT_STATUS[order.placementStatus] || ""];
+      });
+      return { name: `הזמנות-${sheet ? `גיליון-${sheet}-` : ""}${from}-עד-${to}`, money: [7, 8, 9, 10],
+        headers: ["מס׳ הזמנה", "תאריך הזמנה", "לקוח", "גיליון", "פירוט הזמנה", "סוג", "קרדיטים", "מחיר לפני מע״מ", "חיוב כולל מע״מ", "התקבל", "יתרה", "קובץ", "שיבוץ"], rows,
+        summary: `${number.format(rows.length)} הזמנות${sheet ? ` בגיליון ${sheet}` : ""} בתאריכי ההזמנה ${periodText} (בלי מבוטלות) · חיובים ${money.format(roundMoney(due))} · התקבל ${money.format(roundMoney(received))} · יתרה ${money.format(roundMoney(open))} · ${number.format(credits)} קרדיטים` };
+    }
+    if (kind === "debts") {
+      const byClient = new Map();
+      for (const row of obligationRows()) {
+        if (row.cancelled || row.outstanding <= 0) continue;
+        const item = byClient.get(row.clientId) || { open: 0, overdue: 0, count: 0, late: 0, next: null };
+        item.open = roundMoney(item.open + row.outstanding); item.count += 1;
+        if (row.kind === "overdue") { item.overdue = roundMoney(item.overdue + row.outstanding); item.late += 1; }
+        if (row.kind === "future" && (!item.next || row.dueOn < item.next)) item.next = row.dueOn;
+        byClient.set(row.clientId, item);
+      }
+      const list = [...byClient.entries()].sort((a, b) => b[1].overdue - a[1].overdue || b[1].open - a[1].open);
+      const total = roundMoney(list.reduce((t, [, item]) => t + item.open, 0));
+      const late = roundMoney(list.reduce((t, [, item]) => t + item.overdue, 0));
+      return { name: `חובות-פתוחים-${localDateValue()}`, money: [2, 4],
+        headers: ["לקוח", "חיובים פתוחים", "יתרה לתשלום", "מתוכם באיחור (חיובים)", "סכום באיחור", "מועד הפירעון הקרוב"],
+        rows: list.map(([clientId, item]) => [clientName(clientId), item.count, item.open, item.late, item.overdue, item.next ? displayDate(item.next) : ""]),
+        summary: `${number.format(list.length)} לקוחות עם חוב פתוח · יתרה ${money.format(total)} · מתוכה באיחור ${money.format(late)} (נכון להיום; הזמנות ותשלומי חבילות)` };
+    }
+    if (kind === "receipts") {
+      const charges = new Map(obligationRows().map((row) => [row.id, row]));
+      const events = state.events.filter((event) => ["payment", "reversal"].includes(event.event_type) && inPeriod(event.received_on || String(event.event_at).slice(0, 10)))
+        .sort((a, b) => String(a.received_on || a.event_at).localeCompare(String(b.received_on || b.event_at)));
+      const net = roundMoney(events.reduce((t, event) => t + Number(event.amount), 0));
+      const reversals = events.filter((event) => event.event_type === "reversal");
+      return { name: `תקבולים-${from}-עד-${to}`, money: [4],
+        headers: ["תאריך", "לקוח", "חיוב", "תנועה", "סכום", "הערה"],
+        rows: events.map((event) => {
+          const charge = charges.get(event.obligation_id);
+          return [displayDate(event.received_on || String(event.event_at).slice(0, 10)), charge ? clientName(charge.clientId) : "", charge ? charge.label : "",
+            event.event_type === "reversal" ? "ביטול תקבול / החזר" : "תקבול", Number(event.amount), event.notes || ""];
+        }),
+        summary: `${number.format(events.length - reversals.length)} תקבולים${reversals.length ? ` ו-${number.format(reversals.length)} ביטולים` : ""} בתאריכים ${periodText} · סך נטו ${money.format(net)}` };
+    }
+    if (kind === "credits") {
+      const clients = app().clients().filter((client) => state.balances.has(client.id) || state.packages.some((pkg) => pkg.client_id === client.id))
+        .map((client) => ({ client, balance: state.balances.get(client.id) ?? 0, pkg: activePackage(client.id) }))
+        .sort((a, b) => a.balance - b.balance);
+      const negative = clients.filter((item) => item.balance < 0);
+      return { name: `יתרות-קרדיטים-${localDateValue()}`, money: [],
+        headers: ["לקוח", "יתרת קרדיטים", "חבילה פעילה", "תקופת ההטבות עד"],
+        rows: clients.map((item) => [item.client.name, item.balance, item.pkg ? item.pkg.package_name_snapshot : "", item.pkg ? displayDate(item.pkg.ends_on) : ""]),
+        summary: `${number.format(clients.length)} לקוחות עם קרדיטים או חבילה · סך היתרות ${number.format(roundMoney(clients.reduce((t, item) => t + item.balance, 0)))}${negative.length ? ` · ${number.format(negative.length)} ביתרה שלילית` : ""} · הקרדיטים אינם פוקעים` };
+    }
+    // production: every active order of one sheet with its file and placement status
+    const orders = app().orders().filter((order) => order.sheetNumber === sheet && !order.cancelledAt)
+      .sort((a, b) => clientName(a.clientId).localeCompare(clientName(b.clientId), "he") || (Number(a.orderNumber) || 0) - (Number(b.orderNumber) || 0));
+    const p = sheetProduction(sheet);
+    return { name: `מצב-מודעות-גיליון-${sheet}`, money: [],
+      headers: ["מס׳ הזמנה", "לקוח", "פירוט הזמנה", "קובץ", "שיבוץ", "הערות"],
+      rows: orders.map((order) => [String(order.orderNumber ?? ""), clientName(order.clientId), order.description || order.product || "", FILE_STATUS[order.fileStatus] || "", PLACEMENT_STATUS[order.placementStatus] || "", order.notes || ""]),
+      summary: sheet ? `גיליון ${sheet}: ${number.format(p.orders)} מודעות · ${number.format(p.noFile)} ממתינות לקובץ · ${number.format(p.toApprove)} ממתינות לאישור · ${number.format(p.notPlaced)} טרם שובצו · ${number.format(p.placed)} שובצו · ${number.format(p.published)} פורסמו` : "בחרו גיליון." };
+  }
+  function renderReportBuilder() {
+    if (!state.ready || !state.loaded) { $("#report-body").innerHTML = loadingRow(6); return; }
+    const kind = $("#report-kind").value;
+    reportDefaults();
+    populateReportSheets(kind);
+    for (const field of $$("[data-report-field]")) field.hidden = !REPORT_FIELDS[kind].includes(field.dataset.reportField);
+    const report = buildReport();
+    $("#report-head").innerHTML = `<tr>${report.headers.map((head) => `<th scope="col">${escapeHtml(head)}</th>`).join("")}</tr>`;
+    $("#report-body").innerHTML = report.rows.slice(0, 500).map((row) => `<tr>${row.map((value, index) => `<td class="${report.money.includes(index) ? "amount-cell" : ""}">${escapeHtml(
+      value === "" ? "" : report.money.includes(index) ? money.format(value) : typeof value === "number" ? number.format(value) : value)}</td>`).join("")}</tr>`).join("");
+    $("#report-empty").hidden = report.rows.length !== 0;
+    $("#report-summary").textContent = report.summary + (report.rows.length > 500 ? ` · מוצגות 500 השורות הראשונות; הקובץ כולל את כולן.` : "");
+    $("#report-export").disabled = report.rows.length === 0;
   }
 
   function renderSettings() {
@@ -1335,11 +1664,11 @@
       <td class="row-number"></td>
       <td class="cell-sheet" data-label="גיליון *"><input name="sheet_number" maxlength="80" list="sheet-options" inputmode="numeric" value="${escapeHtml(values.sheet_number || "")}" aria-label="מספר גיליון"></td>
       ${v3()
-        ? `<td class="cell-product" data-label="פירוט הזמנה *"><input name="ad_description" maxlength="500" value="${escapeHtml(values.ad_description || "")}" aria-label="פירוט הזמנה" placeholder="מה מפרסמים, גודל, מיקום"></td>`
+        ? `<td class="cell-product" data-label="פירוט הזמנה *"><span class="row-describe">${(state.priceList || []).length ? `<select class="row-pick" data-row-pick aria-label="מילוי מהמחירון" title="מילוי הפירוט והמחיר מהמחירון (אפשר לשנות אחר כך)"><option value="">מהמחירון…</option>${state.priceList.map((product) => `<option value="${escapeHtml(product.id)}">${escapeHtml(product.name)}</option>`).join("")}</select>` : ""}<input name="ad_description" maxlength="500" value="${escapeHtml(values.ad_description || "")}" aria-label="פירוט הזמנה" placeholder="מה מפרסמים, גודל, מיקום"></span></td>`
         : `<td class="cell-product" data-label="מוצר *"><select name="product_id" aria-label="מוצר">${productOptions(values.product_id)}</select></td>`}
       <td class="cell-price" data-label="מחיר לפני מע״מ"><input name="cash_amount_before_vat" type="number" min="0.01" step="0.01" value="${escapeHtml(values.cash_amount_before_vat || "")}" aria-label="מחיר לפני מע״מ"></td>
       <td class="cell-credits" data-label="או קרדיטים"><input name="credits_used" type="number" min="0.01" step="0.01" value="${escapeHtml(values.credits_used || "")}" aria-label="קרדיטים"></td>
-      <td class="cell-status" data-label="סטטוס תשלום"><select name="payment_status" aria-label="סטטוס תשלום"><option value="pending">עדיין לא</option><option value="paid" ${values.payment_status === "paid" ? "selected" : ""}>שולם</option></select></td>
+      <td class="cell-status" data-label="סטטוס תשלום"><select name="payment_status" aria-label="סטטוס תשלום"><option value="pending">עדיין לא</option><option value="paid" ${values.payment_status === "paid" ? "selected" : ""}>שולם</option><option value="credits" hidden>ללא חיוב כספי</option></select></td>
       <td class="cell-due" data-label="מועד פירעון"><input name="due_on" type="date" value="${escapeHtml(values.due_on || "")}" aria-label="מועד פירעון"></td>
       <td class="cell-notes" data-label="הערות"><input name="notes" maxlength="300" value="${escapeHtml(values.notes || "")}" aria-label="הערות"></td>
       <td class="client-actions cell-actions"><button class="button button-outline client-action" type="button" data-row-copy>שכפול</button><button class="delete-order" type="button" data-row-remove aria-label="הסרת שורה">×</button></td>
@@ -1354,9 +1683,17 @@
 
   function addOrderRow(values) {
     const body = $("#new-order-rows");
-    if (body.children.length >= MAX_ROWS) { app().toast(`אפשר עד ${MAX_ROWS} שורות בהזמנה אחת.`, true); return; }
-    body.insertAdjacentHTML("beforeend", rowMarkup(values));
+    if (body.children.length >= MAX_ROWS) { app().toast(`אפשר עד ${MAX_ROWS} שורות בהזמנה אחת.`, true); return null; }
+    const last = body.lastElementChild;
+    const start = values || (last ? { sheet_number: last.querySelector('[name="sheet_number"]').value } : { sheet_number: defaultSheet() });
+    body.insertAdjacentHTML("beforeend", rowMarkup(start));
     updateNewOrder();
+    return body.lastElementChild;
+  }
+  // The nearest sheet still open for orders (by closing time); only a starting value, always editable.
+  function defaultSheet() {
+    if (!state.loaded || !state.sheetsInstalled) return "";
+    return sheetHighlights(sheetBoard()).openNext?.number || "";
   }
 
   function populateClientSelect(selected) {
@@ -1407,9 +1744,10 @@
       row.querySelector(".row-number").textContent = String(index + 1);
       const credits = Number(row.querySelector('[name="credits_used"]').value) > 0;
       const status = row.querySelector('[name="payment_status"]');
-      // Credit rows are always "paid"; when the row switches back to cash, return to an explicit "not yet".
-      if (credits) status.value = "paid";
-      else if (status.disabled) status.value = "pending";
+      // A credits row has no cash charge. Its payment status is not defined by the business yet, so the form
+      // claims nothing ("ללא חיוב כספי"); when the row switches back to cash it returns to an explicit "not yet".
+      if (credits) status.value = "credits";
+      else if (status.disabled || status.value === "credits") status.value = "pending";
       status.disabled = credits;
       row.querySelector('[name="due_on"]').disabled = credits;
     });
@@ -1479,7 +1817,7 @@
         sheet_number: row.sheet_number, publication_date: localDateValue(),
         ...(v3() ? { ad_description: row.ad_description } : { product_id: row.product_id }),
         cash_amount_before_vat: cash ? Number(cash) : null, credits_used: credits ? Number(credits) : null,
-        payment_status: credits ? "paid" : row.payment_status, due_on: credits ? null : (row.due_on || null), notes: row.notes
+        ...(credits ? {} : { payment_status: row.payment_status === "paid" ? "paid" : "pending" }), due_on: credits ? null : (row.due_on || null), notes: row.notes
       });
     }
     const button = $("#new-order-submit");
@@ -1620,8 +1958,9 @@
         const earlier = order.product ? `<span class="earlier-info" title="מידע שנשמר לפני שדה הפירוט (מוצר או מדור). אינו פירוט שהוזן.">${escapeHtml(order.product)}${order.dimensions ? ` · ${escapeHtml(order.dimensions)}` : ""}</span>` : "";
         return cell(earlier, "cell-description");
       }
-      case "sheet": return cell(order.sheetNumber && !editable
-        ? `<button class="link-button" type="button" data-sheet-view="${escapeHtml(order.sheetNumber)}">${escapeHtml(order.sheetNumber)}</button>` : escapeHtml(order.sheetNumber), "cell-sheet");
+      case "sheet": return cell(!order.sheetNumber ? "" : !editable
+        ? `<button class="link-button" type="button" data-sheet-view="${escapeHtml(order.sheetNumber)}">${escapeHtml(order.sheetNumber)}</button>`
+        : `${escapeHtml(order.sheetNumber)}<button class="cell-go" type="button" data-sheet-view="${escapeHtml(order.sheetNumber)}" aria-label="לדף גיליון ${escapeHtml(order.sheetNumber)}" title="לדף הגיליון">↗</button>`, "cell-sheet");
       case "credits": return cell(order.billingMode === "credits" ? escapeHtml(number.format(order.creditsUsed)) : "", "amount-cell");
       case "net": return cell(order.billingMode === "cash" && order.cashBeforeVat != null ? escapeHtml(money.format(order.cashBeforeVat)) : "", "amount-cell");
       case "gross": {
@@ -1659,8 +1998,10 @@
     const file = v3() ? $("#orders-file-filter").value : "";
     const placement = v3() ? $("#orders-placement-filter").value : "";
     const withCancelled = v3() && $("#orders-show-cancelled").checked;
+    const type = v3() ? $("#orders-type-filter").value : "";
     return app().orders().filter((order) => {
       if (order.cancelledAt && !withCancelled) return false;
+      if (type && order.billingMode !== type) return false;
       if (sheet && order.sheetNumber !== sheet) return false;
       if (pay !== "all" && orderPayState(order) !== pay) return false;
       if (file && order.fileStatus !== file) return false;
@@ -1721,6 +2062,8 @@
         : order.cancelledAt ? `<span class="cell-muted" title="${escapeHtml(order.cancelReason)}">בוטלה</span>` : ""}</td>
     </tr>`).join("");
     $("#empty-state").hidden = orders.length !== 0;
+    $("#orders-clear-filters").hidden = !(["#orders-sheet-filter", "#orders-file-filter", "#orders-placement-filter", "#orders-type-filter"].some((id) => $(id).value)
+      || $("#payment-filter").value !== "all" || $("#search-input").value.trim() || $("#orders-show-cancelled").checked);
     const hidden = modelV3 && !$("#orders-show-cancelled").checked ? app().orders().filter((order) => order.cancelledAt).length : 0;
     $("#orders-count").textContent = `${number.format(orders.length)} ${orders.length === 1 ? "הזמנה" : "הזמנות"}${hidden ? ` · ${number.format(hidden)} מבוטלות מוסתרות` : ""}`;
   }
@@ -2116,11 +2459,16 @@
     renderCurrent();
     // A dashboard shortcut may open a list with a preset filter (applied after the screen reset its filters).
     if (deskFilter.view && event.detail && event.detail.name === deskFilter.view) {
-      const select = deskFilter.select && $(deskFilter.select);
-      if (select && [...select.options].some((option) => option.value === deskFilter.value)) {
-        select.value = deskFilter.value;
-        select.dispatchEvent(new Event("change", { bubbles: true }));
-      }
+      const selectors = (deskFilter.select || "").split("|");
+      const values = (deskFilter.value || "").split("|");
+      selectors.forEach((selector, index) => {
+        const field = selector && $(selector);
+        if (!field) return;
+        if (field.type === "checkbox") field.checked = values[index] === "1";
+        else if ([...field.options].some((option) => option.value === values[index])) field.value = values[index];
+        else return;
+        field.dispatchEvent(new Event("change", { bubbles: true }));
+      });
       deskFilter.view = "";
     }
   });
@@ -2147,7 +2495,38 @@
     updateNewOrder();
   });
   $("#new-order-client").addEventListener("change", updateNewOrder);
-  $("#new-order-add-row").addEventListener("click", () => addOrderRow());
+  $("#new-order-add-row").addEventListener("click", () => { addOrderRow()?.querySelector('[name="ad_description"], [name="product_id"]')?.focus(); });
+  $("#new-order-rows").addEventListener("change", (event) => {
+    const pick = event.target.closest("[data-row-pick]");
+    if (!pick) return;
+    const product = (state.priceList || []).find((item) => item.id === pick.value);
+    const row = pick.closest("[data-order-row]");
+    pick.value = "";
+    if (!product || !row) return;
+    const description = row.querySelector('[name="ad_description"]');
+    const credits = row.querySelector('[name="credits_used"]');
+    const cash = row.querySelector('[name="cash_amount_before_vat"]');
+    description.value = description.value.trim() ? description.value : `${product.name}${product.dimensions ? ` (${product.dimensions})` : ""} — `;
+    // Fills the field already in use: credits stay credits, otherwise the list price before VAT.
+    if (Number(credits.value) > 0 && product.credit_cost != null) credits.value = String(product.credit_cost);
+    else { cash.value = String(product.base_price_before_vat); credits.value = ""; }
+    updateNewOrder();
+    description.focus();
+    description.setSelectionRange(description.value.length, description.value.length);
+  });
+  $("#new-order-form").addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || event.target.matches("textarea, button")) return;
+    if (event.ctrlKey || event.metaKey) { event.preventDefault(); $("#new-order-form").requestSubmit(); return; }
+    const row = event.target.closest("[data-order-row]");
+    if (!row || event.target.matches("select")) return;
+    event.preventDefault();
+    // Enter moves on: the next field of the row, or a new row after the last field of the last row.
+    const fields = [...row.querySelectorAll("input:not([disabled]), select:not([disabled])")].filter((field) => !field.matches("[data-row-pick]"));
+    const next = fields[fields.indexOf(event.target) + 1];
+    if (next) next.focus();
+    else if (row === $("#new-order-rows").lastElementChild) addOrderRow()?.querySelector('[name="ad_description"], [name="product_id"]')?.focus();
+    else row.nextElementSibling?.querySelector("input")?.focus();
+  });
   $("#new-order-apply-sequence").addEventListener("click", applySequence);
   $("#new-order-reset").addEventListener("click", () => { $("#new-order-result").hidden = true; resetNewOrder(); });
   $("#new-order-rows").addEventListener("click", (event) => {
@@ -2161,8 +2540,30 @@
   $("#packages-search").addEventListener("input", renderPackagesPage);
   $("#payments-search").addEventListener("input", renderPaymentsPage);
   $("#payments-filter").addEventListener("change", renderPaymentsPage);
+  for (const id of ["#report-kind", "#report-from", "#report-to", "#report-sheet"]) $(id).addEventListener("change", renderReportBuilder);
+  $("#report-export").addEventListener("click", () => {
+    const report = buildReport();
+    downloadCsv(`${report.name}.csv`, report.headers, report.rows);
+  });
+  $("#payments-export").addEventListener("click", () => {
+    const rows = paymentRowsShown();
+    const view = $("#payments-filter").selectedOptions[0]?.textContent || "";
+    downloadCsv(`חיובים-${view}-${localDateValue()}.csv`,
+      ["לקוח", "חיוב", "מועד פירעון", "סכום כולל מע״מ", "התקבל", "יתרה", "מצב"],
+      rows.map((row) => [clientName(row.clientId), row.label, row.dueOn || "", row.amount, row.received, row.outstanding, chargeStatusText(row)]));
+  });
   $("#product-new").addEventListener("click", () => openProduct());
   $("#sheets-search").addEventListener("input", renderSheetsPage);
+  // A production count inside a sheet row opens the filtered orders, not the sheet page behind it.
+  for (const container of ["#sheets-body", "#sheet-production"]) {
+    $(container)?.addEventListener("click", (event) => {
+      const chip = event.target.closest(".prod-chip[data-desk-go]");
+      if (!chip) return;
+      event.stopPropagation();
+      Object.assign(deskFilter, { view: chip.dataset.deskGo, select: chip.dataset.deskSelect, value: chip.dataset.deskValue });
+      app().navigate(chip.dataset.deskGo);
+    });
+  }
   $("#sheets-add").addEventListener("click", openAddSheets);
   $("#sheets-add-form").addEventListener("input", onAddSheetsInput);
   $("#sheets-add-form").addEventListener("submit", submitAddSheets);
@@ -2174,6 +2575,12 @@
     if (route === "sheet") renderSheetPage(app().route().param);
   }, 60000);
   $("#sheet-toggle-status").addEventListener("click", toggleSheetStatus);
+  $("#sheet-orders-filter").addEventListener("change", () => renderSheetPage(app().route().param));
+  $("#sheet-orders-body").addEventListener("change", (event) => {
+    const select = event.target.closest("[data-sheet-status]");
+    if (select) setSheetOrderStatus(select);
+  });
+  document.addEventListener("modaat:view", (event) => { if (event.detail?.name !== "sheet") $("#sheet-orders-filter").value = ""; });
   $("#sheet-new-order").addEventListener("click", () => {
     state.presetSheet = app().route().param;
     app().navigate("new-order");
@@ -2207,9 +2614,31 @@
   });
 
   // ----- orders table -----
-  for (const id of ["#orders-sheet-filter", "#orders-file-filter", "#orders-placement-filter", "#orders-show-cancelled"]) {
-    $(id).addEventListener("change", renderOrdersPage);
-  }
+  const ORDER_FILTERS = ["#orders-sheet-filter", "#orders-file-filter", "#orders-placement-filter", "#orders-type-filter"];
+  for (const id of [...ORDER_FILTERS, "#orders-show-cancelled"]) $(id).addEventListener("change", renderOrdersPage);
+  $("#orders-clear-filters").addEventListener("click", () => {
+    for (const id of ORDER_FILTERS) $(id).value = "";
+    $("#payment-filter").value = "all";
+    $("#search-input").value = "";
+    $("#orders-show-cancelled").checked = false;
+    renderOrdersPage();
+    $("#search-input").focus();
+  });
+  $("#orders-export").addEventListener("click", () => {
+    const orders = sortOrders(filteredOrders());
+    const sheet = $("#orders-sheet-filter").value;
+    downloadCsv(`הזמנות${sheet ? `-גיליון-${sheet}` : ""}-${localDateValue()}.csv`,
+      ["מס׳ הזמנה", "תאריך הזמנה", "מכניס הזמנה", "לקוח", "פירוט הזמנה", "גיליון", "סוג", "קרדיטים", "מחיר לפני מע״מ", "מחיר כולל מע״מ", "התקבל", "יתרה", "סטטוס תשלום", "סטטוס קובץ", "סטטוס שיבוץ", "הערות", "בוטלה"],
+      orders.map((order) => {
+        const m = orderMoney(order);
+        const cash = order.billingMode !== "credits";
+        return [order.orderNumber ?? "", order.orderDate || "", order.enteredBy || "", clientName(order.clientId), order.description || order.product || "", order.sheetNumber || "",
+          order.billingMode === "credits" ? "קרדיטים" : order.billingMode === "legacy" ? "ישנה" : "כספית",
+          order.billingMode === "credits" ? order.creditsUsed : "", cash && order.cashBeforeVat != null ? order.cashBeforeVat : "", cash ? order.amount : "",
+          cash ? m.received : "", cash ? m.outstanding : "", PAY_TEXT[orderPayState(order)] || "", FILE_STATUS[order.fileStatus] || "", PLACEMENT_STATUS[order.placementStatus] || "",
+          order.notes || "", order.cancelledAt ? "כן" : ""];
+      }));
+  });
   $("#orders-head").addEventListener("click", (event) => {
     const button = event.target.closest("[data-order-sort]");
     if (!button) return;
@@ -2247,8 +2676,31 @@
   document.addEventListener("modaat:view", (event) => {
     if (event.detail?.name === "orders") return;
     state.editing = null;
-    for (const id of ["#orders-sheet-filter", "#orders-file-filter", "#orders-placement-filter"]) $(id).value = "";
+    for (const id of ["#orders-sheet-filter", "#orders-file-filter", "#orders-placement-filter", "#orders-type-filter"]) $(id).value = "";
     $("#orders-show-cancelled").checked = false;
+  });
+
+  // ----- client file: filters, and from an order to the orders screen -----
+  $("#client-orders-filter").addEventListener("change", () => renderClientOrders(app().route().param));
+  $("#client-payments-filter").addEventListener("change", () => renderClientPage(app().route().param));
+  let pendingOrderSearch = "";
+  document.addEventListener("click", (event) => {
+    const find = event.target.closest("[data-order-find]");
+    if (!find) return;
+    pendingOrderSearch = find.dataset.orderFind;
+    app().navigate("orders");
+  });
+  document.addEventListener("modaat:view", (event) => {
+    if (event.detail?.name === "client" && ($("#client-orders-filter").value !== "active" || $("#client-payments-filter").value !== "open")) {
+      // A new client file starts on the active orders and the open charges.
+      $("#client-orders-filter").value = "active"; $("#client-payments-filter").value = "open";
+      if (state.ready) renderClientPage(event.detail.param);
+    }
+    if (event.detail?.name !== "orders" || !pendingOrderSearch) return;
+    $("#search-input").value = pendingOrderSearch;
+    $("#orders-show-cancelled").checked = true;
+    pendingOrderSearch = "";
+    renderOrdersPage();
   });
 
   // ----- receipts and payment schedules -----
@@ -2277,6 +2729,8 @@
 
   window.ModaatBusiness = Object.freeze({
     isPremium: (clientId) => state.ready && Boolean(activePackage(clientId)),
-    setOrderPaid, deleteOrder, renderOrdersPage
+    setOrderPaid, deleteOrder, renderOrdersPage, renderClientOrders,
+    // The payment state of an order as every business screen shows it (partial payments and cancellations included).
+    payPill: (order) => (state.loaded ? pill(PAY_TONE[orderPayState(order)] || "neutral", PAY_TEXT[orderPayState(order)] || "") : null)
   });
 })();
