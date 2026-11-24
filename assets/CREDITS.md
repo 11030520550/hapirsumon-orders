@@ -10,3 +10,12 @@
 
 הקובץ המקורי (PNG, ‏1536×1024) הומר ל-JPEG באיכות 90 באותה רזולוציה, לטעינה מהירה של מסך ההתחברות.
 התמונה הקודמת (Unsplash, Kevin Lieder) הוחלפה ואינה בשימוש.
+
+## גופנים (V4, 25/11/2026)
+| קובץ | מקור | רישיון |
+|---|---|---|
+| `fonts/heebo-hebrew.woff2`, `fonts/heebo-latin.woff2` | Heebo (Oded Ezer), גרסת המשתנה מ-Google Fonts | SIL Open Font License 1.1 — `fonts/OFL-Heebo.txt` |
+| `fonts/frank-ruhl-libre-hebrew.woff2`, `fonts/frank-ruhl-libre-latin.woff2` | Frank Ruhl Libre (Fontef), גרסת המשתנה מ-Google Fonts | SIL Open Font License 1.1 — `fonts/OFL-FrankRuhlLibre.txt` |
+
+## תמונות למסכים (`photos/`)
+עדיין אין. הדרישות והפרומפטים: `IMAGE-ASSETS.md`. כל תמונה שתיכנס תירשם כאן עם המקור והרישיון.
