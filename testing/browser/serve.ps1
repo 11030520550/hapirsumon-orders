@@ -24,7 +24,7 @@ if ($HeadersFile) {
   Write-Output ("Sending {0} headers from {1}" -f $extraHeaders.Count, $HeadersFile)
 }
 $recorderTag = '<script src="/__test/csp-recorder.js"></script>'
-$types = @{ ".html" = "text/html; charset=utf-8"; ".css" = "text/css; charset=utf-8"; ".js" = "text/javascript; charset=utf-8"; ".png" = "image/png"; ".svg" = "image/svg+xml"; ".jpg" = "image/jpeg"; ".jpeg" = "image/jpeg" }
+$types = @{ ".html" = "text/html; charset=utf-8"; ".css" = "text/css; charset=utf-8"; ".js" = "text/javascript; charset=utf-8"; ".png" = "image/png"; ".svg" = "image/svg+xml"; ".jpg" = "image/jpeg"; ".jpeg" = "image/jpeg"; ".woff2" = "font/woff2"; ".webp" = "image/webp" }
 $listener = New-Object System.Net.HttpListener
 $listener.Prefixes.Add("http://127.0.0.1:$Port/")
 $listener.Prefixes.Add("http://localhost:$Port/")

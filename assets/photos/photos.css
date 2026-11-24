@@ -1,0 +1,20 @@
+/* =====================================================================
+   Photograph slots of the screens (V4 Editorial Blue & Honey).
+   Each screen header has a slot (.page-photo[data-photo=…]). Until a photograph is supplied, the slot shows
+   the editorial blue-and-honey plate defined in styles.css; the layout is the same either way (no shift).
+
+   To add a photograph: put the file in this folder (name and size in IMAGE-ASSETS.md at the project root),
+   record its source and licence in assets/CREDITS.md, and remove the comment marks around its line below.
+   Nothing else changes. A line stays commented while its file does not exist (no failed requests).
+   ===================================================================== */
+:root {
+  /* --photo-home: url("home.webp"); */
+  /* --photo-orders: url("orders.webp"); */
+  /* --photo-clients: url("clients.webp"); */
+  /* --photo-client: url("client.webp"); */
+  /* --photo-sheets: url("sheets.webp"); */
+  /* --photo-packages: url("packages.webp"); */
+  /* --photo-payments: url("payments.webp"); */
+  /* --photo-reports: url("reports.webp"); */
+  /* --photo-settings: url("settings.webp"); */
+}

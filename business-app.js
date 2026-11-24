@@ -318,6 +318,18 @@
     </button></li>`;
   }
 
+  // Progress of a sheet's production, from its active orders only: how many files arrived, were approved, were placed.
+  function productionMeter(p) {
+    const received = p.orders - p.noFile - p.unknown;
+    const approved = Math.max(received - p.toApprove, 0);
+    const placed = p.placed + p.published;
+    const row = (label, done) => {
+      const share = p.orders ? Math.round((done / p.orders) * 100) : 0;
+      return `<div class="prod-meter-row${done === p.orders ? " is-done" : ""}"><span>${escapeHtml(label)}</span><span class="prod-meter-bar" role="img" aria-label="${escapeHtml(`${label}: ${done} מתוך ${p.orders}`)}"><i data-share="${share}"></i></span><b>${escapeHtml(`${done}/${p.orders}`)}</b></div>`;
+    };
+    return `<div class="prod-meter">${row("קבצים התקבלו", Math.max(received, 0))}${row("קבצים אושרו", approved)}${row("שובצו או פורסמו", placed)}</div>`;
+  }
+
   // Production work on the sheets that are not published yet: files to receive, files to approve, ads to place.
   function productionDesk() {
     if (!v3() || !state.sheetsInstalled) return [];
@@ -422,9 +434,12 @@
           <span class="desk-text"><strong>${index === 0 ? "הגיליון הנוכחי" : "הגיליון הבא"}${sheet.publication ? ` · ${escapeHtml(weekdayDate(sheet.publication))}` : ""}</strong><small>${escapeHtml(`${number.format(p.orders)} הזמנות · ${number.format(sheet.clients.size)} לקוחות${intake.note ? ` · ${intake.note}` : ""}`)}</small></span>
           <span class="desk-meta">${pill(sheet.closed ? "neutral" : "open", sheet.closed ? "סגור להזמנות" : "פתוח")}</span>
         </button>
+        ${v3() && p.orders ? productionMeter(p) : ""}
         ${v3() && p.orders ? `<div class="prod-chips desk-chips">${productionChips(sheet.number, p, { withPlaced: false }) || '<span class="prod-done">כל המודעות התקבלו, אושרו ושובצו.</span>'}</div>` : ""}
       </li>`;
     }).join("") : '<li class="desk-empty">אין גיליונות מתוכננים. אפשר להוסיף במסך "גיליונות".</li>';
+    // Bar widths through the CSSOM (the CSP allows no inline style attributes).
+    sheetsList.querySelectorAll("[data-share]").forEach((bar) => { bar.style.width = `${Number(bar.dataset.share) || 0}%`; });
     const notes = [];
     if (!state.sheetsInstalled) notes.push("סגירת גיליונות עדיין לא הופעלה במסד הנתונים, ולכן כל הגיליונות מוצגים כפתוחים.");
     sheetsNote.hidden = notes.length === 0;
@@ -481,6 +496,16 @@
     $("#client-payments-empty").querySelector("strong").textContent = rows.length ? "אין חיובים בתצוגה זו" : "אין חיובים ללקוח זה";
     $("#client-payments-count").textContent = state.loaded ? `${number.format(shown.length)} מתוך ${number.format(rows.length)} חיובים · התקבל בסך הכול ${money.format(roundMoney(rows.reduce((t, row) => t + row.received, 0)))}` : "";
     renderClientOrders(clientId);
+    // Overview: what needs attention for this client (open charges, overdue first) and the latest orders.
+    const charges = open.slice().sort((a, b) => (a.kind === "overdue" ? 0 : 1) - (b.kind === "overdue" ? 0 : 1) || String(a.dueOn || "9999").localeCompare(String(b.dueOn || "9999"))).slice(0, 6);
+    $("#client-overview-charges").innerHTML = !state.loaded ? '<li class="overview-empty">טוען נתונים…</li>' : charges.length ? charges.map((row) => `<li>
+        <span><strong>${escapeHtml(row.label)}</strong><small>${escapeHtml(row.dueOn ? `לפירעון ${displayDate(row.dueOn)}` : "ללא מועד פירעון")}${row.kind === "overdue" ? " · " : ""}${row.kind === "overdue" ? '<b class="due-text">באיחור</b>' : ""}</small></span>
+        <span class="amount">${escapeHtml(money.format(row.outstanding))}</span></li>`).join("") : '<li class="overview-empty">אין חיובים פתוחים.</li>';
+    const recent = app().orders().filter((order) => order.clientId === clientId && !order.cancelledAt)
+      .sort((a, b) => String(b.orderDate).localeCompare(String(a.orderDate)) || (Number(b.orderNumber) || 0) - (Number(a.orderNumber) || 0)).slice(0, 6);
+    $("#client-overview-orders").innerHTML = !state.loaded ? '<li class="overview-empty">טוען נתונים…</li>' : recent.length ? recent.map((order) => `<li>
+        <span><strong>${escapeHtml(order.description || order.product || "")}</strong><small>הזמנה ${escapeHtml(order.orderNumber ?? "")} · גיליון ${escapeHtml(order.sheetNumber || "—")} · ${escapeHtml(FILE_STATUS[order.fileStatus] || "")} · ${escapeHtml(PLACEMENT_STATUS[order.placementStatus] || "")}</small></span>
+        <span class="amount">${escapeHtml(order.billingMode === "credits" ? `${number.format(order.creditsUsed)} קרדיטים` : money.format(order.amount))}</span></li>`).join("") : '<li class="overview-empty">אין הזמנות פעילות.</li>';
     const packages = state.packages.filter((item) => item.client_id === clientId);
     $("#client-packages").innerHTML = packages.length ? packages.map((item) => {
       const benefits = Array.isArray(item.benefits_snapshot) ? item.benefits_snapshot : [];
@@ -1419,6 +1444,7 @@
     reportDefaults();
     populateReportSheets(kind);
     for (const field of $$("[data-report-field]")) field.hidden = !REPORT_FIELDS[kind].includes(field.dataset.reportField);
+    $$("[data-report-kind]").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.reportKind === kind)));
     const report = buildReport();
     $("#report-head").innerHTML = `<tr>${report.headers.map((head) => `<th scope="col">${escapeHtml(head)}</th>`).join("")}</tr>`;
     $("#report-body").innerHTML = report.rows.slice(0, 500).map((row) => `<tr>${row.map((value, index) => `<td class="${report.money.includes(index) ? "amount-cell" : ""}">${escapeHtml(
@@ -1660,14 +1686,16 @@
   function rowMarkup(values = {}) {
     // Each order line is laid out as a two-line card (see .entry-table in styles.css), so all fields fit
     // without horizontal scrolling; data-label shows the field name above each input.
-    return `<tr data-order-row>
+    const mode = Number(values.credits_used) > 0 && !(Number(values.cash_amount_before_vat) > 0) ? "credits" : "cash";
+    return `<tr data-order-row data-mode="${mode}" class="${mode === "credits" ? "is-credits" : ""}">
       <td class="row-number"></td>
       <td class="cell-sheet" data-label="גיליון *"><input name="sheet_number" maxlength="80" list="sheet-options" inputmode="numeric" value="${escapeHtml(values.sheet_number || "")}" aria-label="מספר גיליון"></td>
       ${v3()
         ? `<td class="cell-product" data-label="פירוט הזמנה *"><span class="row-describe">${(state.priceList || []).length ? `<select class="row-pick" data-row-pick aria-label="מילוי מהמחירון" title="מילוי הפירוט והמחיר מהמחירון (אפשר לשנות אחר כך)"><option value="">מהמחירון…</option>${state.priceList.map((product) => `<option value="${escapeHtml(product.id)}">${escapeHtml(product.name)}</option>`).join("")}</select>` : ""}<input name="ad_description" maxlength="500" value="${escapeHtml(values.ad_description || "")}" aria-label="פירוט הזמנה" placeholder="מה מפרסמים, גודל, מיקום"></span></td>`
         : `<td class="cell-product" data-label="מוצר *"><select name="product_id" aria-label="מוצר">${productOptions(values.product_id)}</select></td>`}
-      <td class="cell-price" data-label="מחיר לפני מע״מ"><input name="cash_amount_before_vat" type="number" min="0.01" step="0.01" value="${escapeHtml(values.cash_amount_before_vat || "")}" aria-label="מחיר לפני מע״מ"></td>
-      <td class="cell-credits" data-label="או קרדיטים"><input name="credits_used" type="number" min="0.01" step="0.01" value="${escapeHtml(values.credits_used || "")}" aria-label="קרדיטים"></td>
+      <td class="cell-billing" data-label="סוג חיוב"><span class="billing-toggle" role="group" aria-label="סוג חיוב"><button type="button" data-billing="cash" aria-pressed="${mode === "cash"}">כספית</button><button type="button" data-billing="credits" aria-pressed="${mode === "credits"}">קרדיטים</button></span></td>
+      <td class="cell-price" data-label="מחיר לפני מע״מ *"><input name="cash_amount_before_vat" type="number" min="0.01" step="0.01" value="${escapeHtml(values.cash_amount_before_vat || "")}" aria-label="מחיר לפני מע״מ"><span class="gross-hint" data-gross></span></td>
+      <td class="cell-credits" data-label="קרדיטים *"><input name="credits_used" type="number" min="0.01" step="0.01" value="${escapeHtml(values.credits_used || "")}" aria-label="קרדיטים"></td>
       <td class="cell-status" data-label="סטטוס תשלום"><select name="payment_status" aria-label="סטטוס תשלום"><option value="pending">עדיין לא</option><option value="paid" ${values.payment_status === "paid" ? "selected" : ""}>שולם</option><option value="credits" hidden>ללא חיוב כספי</option></select></td>
       <td class="cell-due" data-label="מועד פירעון"><input name="due_on" type="date" value="${escapeHtml(values.due_on || "")}" aria-label="מועד פירעון"></td>
       <td class="cell-notes" data-label="הערות"><input name="notes" maxlength="300" value="${escapeHtml(values.notes || "")}" aria-label="הערות"></td>
@@ -1725,6 +1753,14 @@
       $("#new-order-result").hidden = true;
       resetNewOrder(clientId);
       body.querySelector('[name="sheet_number"]').value = sheet;
+    } else if (state.loaded && body.children.length === 1 && !(clientId && $("#new-order-client").value !== clientId)
+      && Object.values(rowValues(body.firstElementChild)).every((value) => !value || value === "pending")
+      && ((!body.firstElementChild.querySelector('[name="sheet_number"]').value && defaultSheet())
+        || ((state.priceList || []).length && v3() && !body.firstElementChild.querySelector("[data-row-pick]")))) {
+      // A single untouched row made before the data arrived: rebuild it with the nearest open sheet and the
+      // price list. The client and any message of the last save stay.
+      body.innerHTML = "";
+      addOrderRow();
     } else if (!body.children.length || (clientId && $("#new-order-client").value !== clientId)) {
       $("#new-order-result").hidden = true;
       resetNewOrder(clientId);
@@ -1742,7 +1778,17 @@
     const rows = $$("#new-order-rows [data-order-row]");
     rows.forEach((row, index) => {
       row.querySelector(".row-number").textContent = String(index + 1);
-      const credits = Number(row.querySelector('[name="credits_used"]').value) > 0;
+      // Billing type of the row: what is filled in decides; with nothing filled in, the type last chosen.
+      const cashValue = Number(row.querySelector('[name="cash_amount_before_vat"]').value);
+      const creditValue = Number(row.querySelector('[name="credits_used"]').value);
+      const mode = cashValue > 0 && creditValue > 0 ? "both" : creditValue > 0 ? "credits" : cashValue > 0 ? "cash" : (row.dataset.mode === "credits" ? "credits" : "cash");
+      if (mode !== "both") row.dataset.mode = mode;
+      row.classList.toggle("is-credits", mode === "credits");
+      row.classList.toggle("is-both", mode === "both");
+      row.querySelectorAll("[data-billing]").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.billing === (mode === "both" ? row.dataset.mode : mode))));
+      const grossBox = row.querySelector("[data-gross]");
+      if (grossBox) grossBox.innerHTML = cashValue > 0 ? `כולל מע״מ: <b>${escapeHtml(money.format(gross(cashValue)))}</b>` : "";
+      const credits = creditValue > 0;
       const status = row.querySelector('[name="payment_status"]');
       // A credits row has no cash charge. Its payment status is not defined by the business yet, so the form
       // claims nothing ("ללא חיוב כספי"); when the row switches back to cash it returns to an explicit "not yet".
@@ -1762,7 +1808,9 @@
     const credits = values.reduce((sum, row) => sum + (Number(row.credits_used) || 0), 0);
     const clientId = $("#new-order-client").value;
     const balance = state.balances.get(clientId) ?? 0;
-    $("#new-order-credit-note").textContent = clientId ? `יתרת קרדיטים נוכחית: ${number.format(balance)}${activePackage(clientId) ? " · לקוח פרימיום" : ""}` : "";
+    const note = $("#new-order-credit-note");
+    note.innerHTML = clientId ? `<span>יתרת קרדיטים${activePackage(clientId) ? " · לקוח פרימיום" : ""}</span><strong>${escapeHtml(number.format(balance))}</strong>` : "";
+    note.classList.toggle("is-negative", balance < 0);
     $("#new-order-summary").innerHTML = `
       <div><span>הזמנות</span><strong>${escapeHtml(number.format(rows.length))}</strong></div>
       <div><span>לפני מע"מ</span><strong>${escapeHtml(money.format(cash))}</strong></div>
@@ -2062,6 +2110,11 @@
         : order.cancelledAt ? `<span class="cell-muted" title="${escapeHtml(order.cancelReason)}">בוטלה</span>` : ""}</td>
     </tr>`).join("");
     $("#empty-state").hidden = orders.length !== 0;
+    // More filters (file, placement, type, cancelled): one click away; open by themselves when one is in use.
+    const advanced = ["#orders-file-filter", "#orders-placement-filter", "#orders-type-filter"].filter((id) => $(id).value).length + ($("#orders-show-cancelled").checked ? 1 : 0);
+    $("#orders-filters-count").textContent = advanced ? String(advanced) : "";
+    if (advanced) $(".orders-toolbar").classList.add("show-advanced");
+    $("#orders-filters-toggle").setAttribute("aria-expanded", String($(".orders-toolbar").classList.contains("show-advanced")));
     $("#orders-clear-filters").hidden = !(["#orders-sheet-filter", "#orders-file-filter", "#orders-placement-filter", "#orders-type-filter"].some((id) => $(id).value)
       || $("#payment-filter").value !== "all" || $("#search-input").value.trim() || $("#orders-show-cancelled").checked);
     const hidden = modelV3 && !$("#orders-show-cancelled").checked ? app().orders().filter((order) => order.cancelledAt).length : 0;
@@ -2496,6 +2549,17 @@
   });
   $("#new-order-client").addEventListener("change", updateNewOrder);
   $("#new-order-add-row").addEventListener("click", () => { addOrderRow()?.querySelector('[name="ad_description"], [name="product_id"]')?.focus(); });
+  // Billing type of a row: choosing it shows the right amount field (the other one is cleared) and moves the focus there.
+  $("#new-order-rows").addEventListener("click", (event) => {
+    const choice = event.target.closest("[data-billing]");
+    if (!choice) return;
+    const row = choice.closest("[data-order-row]");
+    const credits = choice.dataset.billing === "credits";
+    row.dataset.mode = credits ? "credits" : "cash";
+    row.querySelector(credits ? '[name="cash_amount_before_vat"]' : '[name="credits_used"]').value = "";
+    updateNewOrder();
+    row.querySelector(credits ? '[name="credits_used"]' : '[name="cash_amount_before_vat"]').focus();
+  });
   $("#new-order-rows").addEventListener("change", (event) => {
     const pick = event.target.closest("[data-row-pick]");
     if (!pick) return;
@@ -2521,7 +2585,9 @@
     if (!row || event.target.matches("select")) return;
     event.preventDefault();
     // Enter moves on: the next field of the row, or a new row after the last field of the last row.
-    const fields = [...row.querySelectorAll("input:not([disabled]), select:not([disabled])")].filter((field) => !field.matches("[data-row-pick]"));
+    // Only the fields this row shows (a credits row hides the price, status and due date).
+    const fields = [...row.querySelectorAll("input:not([disabled]), select:not([disabled])")]
+      .filter((field) => !field.matches("[data-row-pick]") && field.offsetParent !== null && getComputedStyle(field.closest("td")).visibility !== "hidden");
     const next = fields[fields.indexOf(event.target) + 1];
     if (next) next.focus();
     else if (row === $("#new-order-rows").lastElementChild) addOrderRow()?.querySelector('[name="ad_description"], [name="product_id"]')?.focus();
@@ -2541,6 +2607,12 @@
   $("#payments-search").addEventListener("input", renderPaymentsPage);
   $("#payments-filter").addEventListener("change", renderPaymentsPage);
   for (const id of ["#report-kind", "#report-from", "#report-to", "#report-sheet"]) $(id).addEventListener("change", renderReportBuilder);
+  $(".report-picker").addEventListener("click", (event) => {
+    const pick = event.target.closest("[data-report-kind]");
+    if (!pick) return;
+    $("#report-kind").value = pick.dataset.reportKind;
+    $("#report-kind").dispatchEvent(new Event("change", { bubbles: true }));
+  });
   $("#report-export").addEventListener("click", () => {
     const report = buildReport();
     downloadCsv(`${report.name}.csv`, report.headers, report.rows);
@@ -2616,6 +2688,10 @@
   // ----- orders table -----
   const ORDER_FILTERS = ["#orders-sheet-filter", "#orders-file-filter", "#orders-placement-filter", "#orders-type-filter"];
   for (const id of [...ORDER_FILTERS, "#orders-show-cancelled"]) $(id).addEventListener("change", renderOrdersPage);
+  $("#orders-filters-toggle").addEventListener("click", () => {
+    $(".orders-toolbar").classList.toggle("show-advanced");
+    renderOrdersPage();
+  });
   $("#orders-clear-filters").addEventListener("click", () => {
     for (const id of ORDER_FILTERS) $(id).value = "";
     $("#payment-filter").value = "all";

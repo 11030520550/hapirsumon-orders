@@ -48,7 +48,7 @@ async function ensurePglite() {
 
 const types = { ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8",
   ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".svg": "image/svg+xml", ".sql": "text/plain; charset=utf-8",
-  ".wasm": "application/wasm", ".data": "application/octet-stream", ".txt": "text/plain; charset=utf-8" };
+  ".wasm": "application/wasm", ".data": "application/octet-stream", ".txt": "text/plain; charset=utf-8", ".woff2": "font/woff2", ".webp": "image/webp" };
 const SITE_FILES = new Set(["styles.css", "app.js", "business-app.js", "business-preview.js", "supabase-config.js"]);
 
 function resolve(p) {
@@ -56,7 +56,7 @@ function resolve(p) {
   if (p.startsWith("/__local/package/")) return path.join(pgliteDir, p.slice("/__local/package/".length));
   if (p.startsWith("/__local/")) return path.join(here, p.slice("/__local/".length));
   const name = p.slice(1);
-  if (SITE_FILES.has(name) || /^supabase-[a-z0-9-]+\.sql$/.test(name) || /^(assets|vendor)\/[A-Za-z0-9._-]+$/.test(name)) return path.join(root, name);
+  if (SITE_FILES.has(name) || /^supabase-[a-z0-9-]+\.sql$/.test(name) || /^(assets(\/(fonts|photos))?|vendor)\/[A-Za-z0-9._-]+$/.test(name)) return path.join(root, name);
   return null;
 }
 

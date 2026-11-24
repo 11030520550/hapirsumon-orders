@@ -567,11 +567,13 @@ async function run() {
   check("G14 desktop 1440, laptops 1366/1280, tablet 1024/768 (Saturday, large amounts and long notes): the banner and the list fit; the sheet's summary banner fits with every figure whole",
     made.every((r) => !r.error) && intakeOf("125") === "סגור להזמנות" && Object.values(widths).every((ok) => ok === true),
     JSON.stringify({ widths, err: made.map((r) => r.error?.message).filter(Boolean) }));
-  // Compact header (owner decision 22/11): the title "גיליונות" and the current sheet on one line; no photograph, no hero.
+  // Compact header. V4 (owner decision 25/11, replaces 22/11): the header carries one photograph slot
+  // (.page-photo, a compact strip, never a hero); the rows and the table have no images.
   const headHeight = $(".sheets-head").getBoundingClientRect().height;
-  const noImages = !$$('[data-page="sheets"] img').length && $$('[data-page="sheets"] *').every((el) => w.getComputedStyle(el).backgroundImage === "none" || /^url\("data:/.test(w.getComputedStyle(el).backgroundImage));
-  check("G16 compact header: title 'גיליונות', under 90px high, no photographs or background images on the sheets screen",
-    text(".sheets-head-title") === "גיליונות" && headHeight < 90 && noImages, JSON.stringify({ headHeight, noImages }));
+  const photoSlots = $$('[data-page="sheets"] .page-photo');
+  const noOtherImages = !$$('[data-page="sheets"] img').length && $$('[data-page="sheets"] .sheets-list *').every((el) => !/url\((?!"data:)/.test(w.getComputedStyle(el).backgroundImage)); // gradients are not photographs
+  check("G16 compact header: title 'גיליונות', under 90px high, one photograph slot in the header only; no images in the list",
+    text(".sheets-head-title") === "גיליונות" && headHeight < 90 && photoSlots.length === 1 && !!photoSlots[0].closest(".sheets-head") && noOtherImages, JSON.stringify({ headHeight, photoSlots: photoSlots.length, noOtherImages }));
   // Editorial language: square corners on both sheets screens (banner, list frame, search, buttons, sheet summary, order table).
   const squares = [".sheets-list", ".sheets-search", "#sheets-add", ".sheets-banner-link", ".sheet-hero", ".sheet-orders", "#sheet-new-order", "#sheet-toggle-status", "#sheet-page-status .payment-select"]
     .map((sel) => [sel, $(sel) ? w.getComputedStyle($(sel)).borderTopLeftRadius : "missing"]).filter(([, radius]) => radius !== "0px");

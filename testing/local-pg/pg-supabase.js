@@ -246,7 +246,7 @@
     const bar = document.createElement("div");
     bar.id = "local-test-notice";
     bar.setAttribute("role", "status");
-    bar.style.cssText = "position:fixed;inset:auto 0 0 0;z-index:99999;display:flex;gap:12px;align-items:center;justify-content:center;padding:5px 12px;background:#7a1f1f;color:#fff;font:13px/1.4 system-ui,sans-serif;direction:rtl";
+    bar.style.cssText = "position:fixed;inset:auto 0 0 0;z-index:99999;display:flex;gap:12px;align-items:center;justify-content:center;padding:5px 12px;background:#5B3A26;border-top:2px solid #C18B49;color:#fff;font:13px/1.4 system-ui,sans-serif;direction:rtl";
     const span = document.createElement("span");
     const reset = document.createElement("button");
     reset.type = "button";

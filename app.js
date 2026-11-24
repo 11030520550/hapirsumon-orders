@@ -37,7 +37,7 @@
   const NAV_PARENT = { "new-order": "orders", sheet: "sheets", client: "clients" };
   // Sidebar group of each screen, shown as the first breadcrumb.
   const VIEW_SECTIONS = {
-    dashboard: "מודעת", orders: "עבודה שוטפת", "new-order": "עבודה שוטפת", sheets: "עבודה שוטפת", sheet: "עבודה שוטפת",
+    dashboard: "הפרסומון", orders: "עבודה שוטפת", "new-order": "עבודה שוטפת", sheets: "עבודה שוטפת", sheet: "עבודה שוטפת",
     clients: "עבודה שוטפת", client: "עבודה שוטפת", payments: "כספים", packages: "כספים", reports: "ניהול", settings: "ניהול"
   };
   let currentView = { name: "dashboard", param: "" };
@@ -801,7 +801,8 @@
     const name = VIEW_TITLES[viewName] ? viewName : "dashboard";
     const changed = name !== currentView.name || param !== currentView.param;
     if (name !== currentView.name) clearListFilters();
-    if (name === "client" && param !== currentView.param) selectClientTab("orders");
+    // A client file opens on its overview (with the business schema); without it, on the orders.
+    if (name === "client" && param !== currentView.param) selectClientTab(businessSchema ? "overview" : "orders");
     currentView = { name, param };
     document.querySelectorAll("#app-shell .page-view[data-page]").forEach((page) => {
       page.hidden = page.dataset.page !== name;
@@ -814,7 +815,7 @@
       else link.removeAttribute("aria-current");
     });
     $("#page-title").textContent = VIEW_TITLES[name];
-    $("#page-section").textContent = VIEW_SECTIONS[name] || "מודעת";
+    $("#page-section").textContent = VIEW_SECTIONS[name] || "הפרסומון";
     if (name === "client") renderClientPage();
     if (changed) window.scrollTo(0, 0);
     document.dispatchEvent(new CustomEvent("modaat:view", { detail: { name, param } }));
@@ -1216,6 +1217,8 @@
     }
     const tabButton = event.target.closest('[data-page="client"] [data-tab]');
     if (tabButton) selectClientTab(tabButton.dataset.tab);
+    const tabGo = event.target.closest("[data-client-tab-go]");
+    if (tabGo) selectClientTab(tabGo.dataset.clientTabGo);
     if (event.target.closest('[data-client-page-action="edit"]')) openClientForm(currentView.param);
     const openButton = event.target.closest("[data-open-modal]");
     if (openButton) openModal(openButton.dataset.openModal);
