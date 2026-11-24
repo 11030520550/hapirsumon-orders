@@ -96,7 +96,16 @@
     state.products = products.filter((item) => item.is_active && item.base_price_before_vat != null && item.credit_cost != null);
   }
 
-  async function loadBusinessData() {
+  // A newer load supersedes an older one; the older caller (for example afterSave) then waits for the newer load,
+  // so it never renders or edits with the versions from before its own save. Tokens only grow: no self-wait.
+  let latestBusinessLoad = { token: 0, promise: null };
+  function loadBusinessData() {
+    const token = state.loadToken + 1; // loadBusinessDataOnce takes exactly this token before its first await
+    const promise = loadBusinessDataOnce();
+    latestBusinessLoad = { token, promise };
+    return promise;
+  }
+  async function loadBusinessDataOnce() {
     const token = ++state.loadToken;
     // Every list is read page by page (fetchAllRows) so nothing is silently cut at the API row limit.
     const all = (build) => q(app().fetchAllRows(build));
@@ -111,7 +120,7 @@
       all(() => sb().from("business_payment_events").select(`id,obligation_id,event_type,amount,event_at,notes${modelV3 ? ",received_on,reverses_event_id" : ""}`).order("event_at").order("id"))
     ]);
     const sheets = await loadSheetStatus();
-    if (token !== state.loadToken) return false;
+    if (token !== state.loadToken) return latestBusinessLoad.token > token ? latestBusinessLoad.promise : false;
     Object.assign(state, { packages, installments, obligations, events, loaded: true, loadFailed: false });
     state.summary = new Map(summary.map((row) => [row.item_id, row]));
     state.sheetModel = sheets.model;
@@ -980,7 +989,9 @@
     $("#sheet-page-subtitle").hidden = !subtitle;
 
     const toggle = $("#sheet-toggle-status");
-    toggle.hidden = !state.sheetsInstalled || !group;
+    // A sheet that exists in the database can be closed or reopened even before it has orders (sheets v2 creates
+    // future sheets empty, e.g. a holiday week without an edition).
+    toggle.hidden = !state.sheetsInstalled || !(group || state.sheetStatus.has(sheetNumber));
     toggle.textContent = closed ? "פתיחה מחדש של הגיליון" : "סגירת הגיליון";
     toggle.dataset.closed = closed ? "1" : "0";
     // New orders only for a sheet that is open for orders.

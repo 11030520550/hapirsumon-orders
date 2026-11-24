@@ -325,7 +325,18 @@
     }
   }
 
-  async function fetchCloudData() {
+  // A save awaits refresh() and then edits again. If a newer fetch started meanwhile (for example the realtime
+  // refresh after that same save), this one's result is dropped; the caller then waits for the newer fetch, so it
+  // never continues with the version from before its own save. Ids only grow, so a fetch never waits for itself.
+  let latestCloudFetch = { id: 0, promise: null };
+  function fetchCloudData() {
+    const id = cloudFetchRequest + 1; // loadCloudData takes exactly this id before its first await
+    const promise = loadCloudData();
+    latestCloudFetch = { id, promise };
+    return promise;
+  }
+
+  async function loadCloudData() {
     const requestId = ++cloudFetchRequest;
     const [clientsResult, ordersResult] = await Promise.all([
       fetchAllRows(() => supabaseClient.from("clients").select("id,name,phone,email,updated_at").order("name").order("id")),
@@ -333,7 +344,7 @@
         .select(!businessSchema ? BASE_ORDER_COLUMNS : ordersV3 ? ORDER_V3_COLUMNS : BUSINESS_ORDER_COLUMNS)
         .order("publication_date", { ascending: false }).order("id"))
     ]);
-    if (requestId !== cloudFetchRequest) return false;
+    if (requestId !== cloudFetchRequest) return latestCloudFetch.id > requestId ? latestCloudFetch.promise : false;
     if (clientsResult.error) throw clientsResult.error;
     if (ordersResult.error) throw ordersResult.error;
     data = {
