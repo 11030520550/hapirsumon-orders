@@ -60,8 +60,35 @@ function resolve(p) {
   return null;
 }
 
+// --supabase-test: the real site with the real supabase-js against a separate Supabase TEST project. The address
+// and the publishable key come from testing/supabase-test-config.json (git-ignored); the production project is refused.
+const PRODUCTION_REF = "sndaeogseawtwzwxiqst";
+const supabaseTest = process.argv.includes("--supabase-test") ? await loadTestConfig() : null;
+async function loadTestConfig() {
+  const file = path.join(root, "testing", "supabase-test-config.json");
+  let config;
+  try { config = JSON.parse(await readFile(file, "utf8")); }
+  catch { console.error(`--supabase-test: copy testing/supabase-test-config.example.json to testing/supabase-test-config.json and fill in the TEST project (see testing/supabase-test/README.md).`); process.exit(1); }
+  const ref = String(config.projectRef || "");
+  const url = String(config.url || "");
+  const key = String(config.publishableKey || "");
+  if (config.environment !== "test" || !/^[a-z0-9]{10,}$/.test(ref) || url !== `https://${ref}.supabase.co` || !key || /REPLACE/.test(`${ref}${url}${key}`)) {
+    console.error("--supabase-test: testing/supabase-test-config.json is incomplete (environment \"test\", projectRef, url https://<ref>.supabase.co, publishableKey)."); process.exit(1);
+  }
+  if (ref === PRODUCTION_REF || url.includes(PRODUCTION_REF)) { console.error("--supabase-test: this is the PRODUCTION project. Refused."); process.exit(1); }
+  if (/service_role|sb_secret/i.test(key) || /^eyJ/.test(key) && JSON.parse(Buffer.from(key.split(".")[1] || "", "base64url").toString() || "{}").role === "service_role") {
+    console.error("--supabase-test: that is a secret key. Only the publishable (anon) key belongs here."); process.exit(1);
+  }
+  return { ref, url, key };
+}
+
 async function indexPage() {
   let html = await readFile(path.join(root, "index.html"), "utf8");
+  if (supabaseTest) {
+    // Real site, real supabase-js (with its SRI hash); only the config file is the test project's, plus a notice.
+    html = html.replace('<script src="supabase-config.js"></script>', '<script src="/__local/test-config.js"></script><script src="/__local/test-notice.js" defer></script>');
+    return Buffer.from(html.replace(/(src|href)="(?!https?:|\/|#|data:)/g, '$1="/'), "utf8");
+  }
   // The only change: the Supabase library is replaced by the local PostgreSQL client. Cache versions are dropped.
   html = html.replace(/<script src="vendor\/supabase-js-[^"]+"[^>]*><\/script>/, '<script src="/__local/pg-supabase.js"></script>');
   html = html.replace(/(src|href)="([a-z-]+\.(?:js|css))\?v=[^"]*"/g, '$1="/$2"').replace(/(src|href)="(?!https?:|\/|#|data:)/g, '$1="/');
@@ -74,6 +101,11 @@ http.createServer(async (req, res) => {
     const p = decodeURIComponent(new URL(req.url, "http://local").pathname);
     let body, type;
     if (p === "/" || p === "/index.html") { body = await indexPage(); type = types[".html"]; }
+    else if (supabaseTest && p === "/__local/test-config.js") {
+      body = Buffer.from(`"use strict";\nwindow.MODAAT_SUPABASE_CONFIG = Object.freeze(${JSON.stringify({ url: supabaseTest.url, publishableKey: supabaseTest.key })});\n`); type = types[".js"];
+    } else if (supabaseTest && p === "/__local/test-notice.js") {
+      body = Buffer.from(`"use strict";\n(function () { const bar = document.createElement("div"); bar.setAttribute("role", "status"); bar.textContent = ${JSON.stringify(`פרויקט הבדיקות של Supabase (${supabaseTest.ref}) · לא הייצור · נתוני בדיקה בלבד`)}; bar.style.cssText = "position:fixed;inset:auto 0 0 0;z-index:99999;padding:5px 12px;background:#1f4f7a;color:#fff;font:13px/1.4 system-ui,sans-serif;text-align:center;direction:rtl"; document.body.append(bar); })();\n`); type = types[".js"];
+    }
     else {
       const file = resolve(p);
       const ext = file ? path.extname(file).toLowerCase() : "";
@@ -88,7 +120,14 @@ http.createServer(async (req, res) => {
   }
 }).listen(port, "127.0.0.1", () => {
   console.log("");
-  console.log("  Local test version (test data only, not Supabase, not production)");
+  if (supabaseTest) {
+    console.log(`  The real site against the Supabase TEST project ${supabaseTest.ref} (not production)`);
+    console.log(`  Open:     http://127.0.0.1:${port}/   (sign in with the test project's approved test user)`);
+    console.log("  Stop:     Ctrl+C");
+    console.log("");
+    return;
+  }
+  console.log("  Local demo version (fictional data only, not Supabase, not production)");
   console.log(`  Open:     http://127.0.0.1:${port}/`);
   console.log("  Sign in:  staff@local.test / test1234   (not approved: pending@local.test / test1234)");
   console.log(`  E2E run:  http://127.0.0.1:${port}/__local/e2e.html`);
