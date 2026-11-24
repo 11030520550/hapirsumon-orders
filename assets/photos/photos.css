@@ -1,20 +1,15 @@
 /* =====================================================================
-   Photograph slots of the screens (V4 Editorial Blue & Honey).
-   Each screen header has a slot (.page-photo[data-photo=…]). Until a photograph is supplied, the slot shows
-   the editorial blue-and-honey plate defined in styles.css; the layout is the same either way (no shift).
+   Photographs of the screens (V5). Each screen header has a slot (.page-photo[data-photo=…]); a slot is shown
+   only when its photograph is listed here, otherwise the header stays a clean title (no placeholder).
+   The url() lives in this file so it resolves next to the photographs.
 
-   To add a photograph: put the file in this folder (name and size in IMAGE-ASSETS.md at the project root),
-   record its source and licence in assets/CREDITS.md, and remove the comment marks around its line below.
-   Nothing else changes. A line stays commented while its file does not exist (no failed requests).
+   To add a photograph: put the WebP file in this folder (sizes in IMAGE-ASSETS.md), record its source in
+   assets/CREDITS.md, then add one line below. Nothing else changes.
    ===================================================================== */
-:root {
-  /* --photo-home: url("home.webp"); */
-  /* --photo-orders: url("orders.webp"); */
-  /* --photo-clients: url("clients.webp"); */
-  /* --photo-client: url("client.webp"); */
-  /* --photo-sheets: url("sheets.webp"); */
-  /* --photo-packages: url("packages.webp"); */
-  /* --photo-payments: url("payments.webp"); */
-  /* --photo-reports: url("reports.webp"); */
-  /* --photo-settings: url("settings.webp"); */
-}
+.page-photo[data-photo="home"] { display: block; }
+.page-photo[data-photo="home"]::after { background-image: url("home.webp"); }       /* newspapers and a vase in morning sun (owner's image, 24/11/2026) */
+.page-photo[data-photo="orders"] { display: block; }
+.page-photo[data-photo="orders"]::after { background-image: url("orders.webp"); }   /* an open notebook and a pen (owner's image, 24/11/2026) */
+.page-photo[data-photo="clients"] { display: block; }
+.page-photo[data-photo="clients"]::after { background-image: url("clients.webp"); } /* a study with a walnut desk (owner's image, 24/11/2026) */
+/* not yet photographed: client, sheets, packages, payments, reports, settings */

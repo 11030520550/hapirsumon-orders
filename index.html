@@ -5,10 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#233E50">
   <title>הפרסומון — ניהול הזמנות ופרסום</title>
-  <link rel="preload" href="assets/fonts/heebo-hebrew.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="preload" href="assets/fonts/frank-ruhl-libre-hebrew.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="styles.css?v=20261125-1">
-  <link rel="stylesheet" href="assets/photos/photos.css?v=20261125-1">
+  <link rel="preload" href="assets/fonts/rubik-hebrew.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="styles.css?v=20261126-1">
+  <link rel="stylesheet" href="assets/photos/photos.css?v=20261126-1">
   <!-- supabase-js pinned to 2.119.0 and served locally (vendor/); SHA-384 verified against jsDelivr's published hash. -->
   <script src="vendor/supabase-js-2.119.0.js" integrity="sha384-uteMfOloLDGt042uDz+xHGF3ym63/WQ6rFq7murQRG8Ih7QrXGEGNtWd8688sb4O"></script>
   <script src="supabase-config.js"></script>
@@ -28,7 +27,7 @@
   </svg>
   <main class="auth-screen" id="auth-screen">
     <section class="auth-panel" aria-labelledby="login-title">
-      <!-- Brand: the owner's round emblem (local asset, see assets/CREDITS.md) + wordmark + slogan. -->
+      <!-- Brand: the owner's round emblem (loca l asset, see assets/CREDITS.md) + wordmark + slogan. -->
       <header class="auth-brand">
         <img class="auth-mark" src="assets/logo-emblem.png" width="56" height="56" alt="" decoding="async">
         <span class="auth-brand-text">
@@ -69,40 +68,37 @@
     </aside>
   </main>
   <div class="app-shell" id="app-shell" hidden>
-    <aside class="sidebar" aria-label="ניווט ראשי">
+    <header class="sidebar appbar" aria-label="ניווט ראשי">
       <a class="brand" href="#/dashboard" aria-label="הפרסומון — היום">
         <img class="brand-emblem" src="assets/logo-emblem.png" width="42" height="42" alt="" decoding="async">
         <span class="brand-copy"><strong>הפרסומון</strong><small>ניהול הזמנות ופרסום</small></span>
       </a>
       <button class="sidebar-cta" type="button" data-go="new-order"><span aria-hidden="true">＋</span> הזמנה חדשה</button>
       <nav class="main-nav">
-        <button class="nav-link" type="button" data-view="dashboard"><span class="nav-icon"><svg><use href="#i-today"/></svg></span>היום</button>
-        <p class="nav-group">עבודה שוטפת</p>
-        <button class="nav-link" type="button" data-view="orders"><span class="nav-icon"><svg><use href="#i-orders"/></svg></span>הזמנות</button>
-        <button class="nav-link" type="button" data-view="sheets"><span class="nav-icon"><svg><use href="#i-issues"/></svg></span>גיליונות</button>
-        <button class="nav-link" type="button" data-view="clients"><span class="nav-icon"><svg><use href="#i-clients"/></svg></span>לקוחות</button>
-        <p class="nav-group">כספים</p>
-        <button class="nav-link" type="button" data-view="payments"><span class="nav-icon"><svg><use href="#i-payments"/></svg></span>תשלומים וחובות</button>
-        <button class="nav-link" type="button" data-view="packages"><span class="nav-icon"><svg><use href="#i-packages"/></svg></span>חבילות וקרדיטים</button>
-        <p class="nav-group">ניהול</p>
-        <button class="nav-link" type="button" data-view="reports"><span class="nav-icon"><svg><use href="#i-reports"/></svg></span>דוחות</button>
-        <button class="nav-link" type="button" data-view="settings"><span class="nav-icon"><svg><use href="#i-settings"/></svg></span>הגדרות ומוצרים</button>
+        <button class="nav-link" type="button" data-view="dashboard">דף הבית</button>
+        <button class="nav-link" type="button" data-view="orders">הזמנות</button>
+        <button class="nav-link" type="button" data-view="sheets">גיליונות</button>
+        <button class="nav-link" type="button" data-view="clients">לקוחות</button>
+        <button class="nav-link" type="button" data-view="payments">גבייה</button>
+        <button class="nav-link" type="button" data-view="packages">חבילות</button>
+        <button class="nav-link" type="button" data-view="reports">דוחות</button>
+        <button class="nav-link" type="button" data-view="settings">הגדרות</button>
       </nav>
       <div class="sidebar-bottom">
         <span class="storage-note" role="status" aria-live="polite"><span class="storage-dot"></span><span id="sync-status">מתחבר למסד הנתונים המשותף</span></span>
       </div>
-    </aside>
+      <div class="topbar-actions">
+        <button class="button button-ghost import-button" id="open-import" type="button">גיבוי</button>
+        <button class="avatar" type="button" aria-label="המשתמש המחובר">מ</button>
+        <button class="button button-ghost sign-out-button" id="sign-out" type="button">יציאה</button>
+      </div>
+    </header>
 
     <main class="main-content" id="dashboard">
-      <header class="topbar">
+      <div class="topbar">
         <div class="breadcrumbs"><span class="crumb-parent" id="page-section">הפרסומון</span><span class="crumb-parent" aria-hidden="true">/</span><strong id="page-title">היום</strong></div>
-        <div class="topbar-actions">
-          <span class="today-label" id="today-label"></span>
-          <button class="button button-ghost import-button" id="open-import" type="button">גיבוי וייבוא</button>
-          <button class="avatar" type="button" aria-label="המשתמש המחובר">מ</button>
-          <button class="button button-outline sign-out-button" id="sign-out" type="button">התנתקות</button>
-        </div>
-      </header>
+        <span class="today-label" id="today-label"></span>
+      </div>
 
       <div class="page-content">
         <!-- Dashboard: the daily desk -->
@@ -110,25 +106,20 @@
           <header class="masthead home-hero">
             <div class="hero-main">
               <div class="masthead-dateline"><span id="masthead-date"></span><span id="masthead-hebrew-date" hidden></span><span class="masthead-edition" id="masthead-edition" hidden></span></div>
-              <div class="hero-head">
-                <div>
-                  <h1 class="masthead-title" id="masthead-greeting">שלום</h1>
-                  <p class="masthead-lede">הגיליון של השבוע, מה דורש טיפול, ומה נכנס לאחרונה.</p>
-                </div>
-                <div class="page-actions">
-                  <button class="button button-outline" type="button" data-open-modal="client-modal"><span class="button-plus">＋</span> לקוח חדש</button>
-                  <button class="button button-primary" type="button" data-go="new-order"><span class="button-plus">＋</span> הזמנה חדשה</button>
-                </div>
-              </div>
-              <div class="hero-kpis" aria-label="מצב כספי">
-                <div class="is-key"><span>יתרה לתשלום</span><strong id="stat-balance">₪0</strong></div>
-                <div><span>חיובים פתוחים</span><strong id="stat-pending">0</strong></div>
-                <div><span>התקבל</span><strong id="stat-paid">₪0</strong></div>
-                <div><span id="stat-orders-label">הזמנות פעילות</span><strong id="stat-orders">0</strong></div>
+              <h1 class="masthead-title" id="masthead-greeting">שלום</h1>
+              <div class="page-actions">
+                <button class="button button-primary" type="button" data-go="new-order"><span class="button-plus">＋</span> הזמנה חדשה</button>
+                <button class="button button-outline" type="button" data-open-modal="client-modal"><span class="button-plus">＋</span> לקוח חדש</button>
               </div>
             </div>
             <div class="page-photo hero-photo" data-photo="home" aria-hidden="true"></div>
           </header>
+          <section class="hero-kpis" aria-label="מצב כספי">
+            <div class="is-key"><span>יתרה לתשלום</span><strong id="stat-balance">₪0</strong></div>
+            <div><span>חיובים פתוחים</span><strong id="stat-pending">0</strong></div>
+            <div><span>התקבל</span><strong id="stat-paid">₪0</strong></div>
+            <div><span id="stat-orders-label">הזמנות פעילות</span><strong id="stat-orders">0</strong></div>
+          </section>
 
           <div class="desk-grid">
             <section class="desk-panel is-sheets" aria-labelledby="desk-sheets-title">

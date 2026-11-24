@@ -1,0 +1,40 @@
+/* Typography and palette showcase for V5 (local only). Uses the real styles.css; this file only lays out the page. */
+.ty { width: min(1240px, 100% - 48px); margin: 0 auto; padding: 40px 0 80px; }
+.ty-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
+.ty-head p { margin: 6px 0 0; color: var(--ink-3); font-weight: 300; }
+.ty section { padding: 30px 0; border-bottom: 1px solid var(--line); }
+.ty h2.ty-sec { margin: 0 0 18px; color: var(--honey-text); font-size: 13px; font-weight: 400; letter-spacing: .08em; }
+.ty-weights { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; }
+.ty-weights > div { padding: 0 20px; }
+.ty-weights > div:first-child { padding-right: 0; }
+.ty-weights > div + div { border-right: 1px solid var(--line); }
+.ty-weights .w { color: var(--ink-3); font-size: 12.5px; }
+.ty-weights .big { margin: 8px 0 4px; color: var(--walnut); font-size: 34px; line-height: 1.2; }
+.ty-weights .mid { font-size: 16px; line-height: 1.6; }
+.ty-weights .num { margin-top: 8px; font-size: 22px; }
+.ty-weights .use { margin-top: 10px; color: var(--ink-3); font-size: 13px; font-weight: 300; }
+.w300 { font-weight: 300; } .w400 { font-weight: 400; } .w500 { font-weight: 500; } .w600 { font-weight: 600; }
+.ty-scale { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 14px 24px; align-items: baseline; }
+.ty-scale dt { color: var(--ink-3); font-size: 13px; font-weight: 400; }
+.ty-scale dd { margin: 0; }
+.ty-scale .s-display { color: var(--walnut); font-size: 42px; font-weight: 300; line-height: 1.1; }
+.ty-scale .s-h1 { color: var(--walnut); font-size: 28px; font-weight: 300; }
+.ty-scale .s-h2 { color: var(--walnut); font-size: 19px; font-weight: 400; }
+.ty-scale .s-h3 { font-size: 18px; font-weight: 500; }
+.ty-scale .s-body { font-size: 15px; font-weight: 400; line-height: 1.65; max-width: 62ch; }
+.ty-scale .s-small { color: var(--ink-3); font-size: 13px; font-weight: 300; }
+.ty-scale .s-kpi { font-size: 28px; font-weight: 300; }
+.ty-scale .s-amount { font-size: 15px; font-weight: 500; }
+.ty-swatches { display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 0; border: 1px solid var(--line); }
+.ty-swatches > div { padding: 0 0 10px; }
+.ty-swatches > div + div { border-right: 1px solid var(--line); }
+.ty-swatches i { display: block; height: 64px; margin-bottom: 8px; }
+.ty-swatches strong, .ty-swatches small { display: block; padding: 0 10px; }
+.ty-swatches strong { font-size: 13px; font-weight: 500; }
+.ty-swatches small { color: var(--ink-3); font-size: 12px; font-weight: 300; direction: ltr; text-align: right; }
+.sw-1 { background: #527A92; } .sw-2 { background: #8EAFC0; } .sw-3 { background: #DCE7EC; } .sw-4 { background: #B78350; }
+.sw-5 { background: #95613D; } .sw-6 { background: #603C29; } .sw-7 { background: #F5F2ED; } .sw-8 { background: #FFFFFF; box-shadow: inset 0 -1px 0 var(--line); } .sw-9 { background: #26333A; }
+.ty-ui { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 40px; }
+.ty-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 16px; }
+.ty-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.ty table { width: 100%; }
