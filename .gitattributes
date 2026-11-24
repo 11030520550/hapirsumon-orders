@@ -13,3 +13,7 @@ archive/data-exports-2026-11-11/*.json -text
 
 # Windows batch files need CRLF line endings on every machine.
 *.cmd text eol=crlf
+
+# Fonts and photographs (V4): binary, never converted.
+*.woff2 binary
+*.webp binary

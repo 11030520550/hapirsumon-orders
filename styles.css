@@ -1418,3 +1418,6 @@ tbody th { background: transparent; border-bottom: 0; color: var(--ink); font-si
 .home-hero .hero-photo::after { inset: 0; width: auto; height: auto; background: var(--photo) center / cover no-repeat; }
 .desk-sheet .desk-item { grid-template-columns: 70px minmax(0, 1fr) auto; }
 .desk-sheet .prod-meter, .desk-sheet .desk-chips { padding-inline-start: 102px; }
+/* A required mark stays on the label's line (all forms). */
+.field-label:has(> span:not(.optional):not(.password-field):not(.sheets-add-closing):not(.confirm-reason-label)) { grid-template-columns: auto 1fr; justify-content: start; column-gap: 4px; }
+.field-label:has(> span:not(.optional):not(.password-field):not(.sheets-add-closing):not(.confirm-reason-label)) > :is(input, select, textarea, .password-field) { grid-column: 1 / -1; }
