@@ -12,6 +12,16 @@ const file = async (name) => { const r = await fetch(`/${name}`, { cache: "no-st
 const STAFF = "00000000-0000-4000-8000-0000000000a1";
 const OTHER = "00000000-0000-4000-8000-0000000000b2";
 const uuid = () => crypto.randomUUID();
+const STAND_INS = `
+    create role anon nologin; create role authenticated nologin; create role service_role nologin;
+    create schema auth;
+    create table auth.users (id uuid primary key, email text, raw_user_meta_data jsonb not null default '{}');
+    create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
+    create function auth.jwt() returns jsonb language sql stable as $$ select coalesce(nullif(current_setting('request.jwt.claims', true), ''), '{}')::jsonb $$;
+    grant usage on schema auth to anon, authenticated;
+    grant execute on function auth.uid(), auth.jwt() to anon, authenticated;
+    create publication supabase_realtime;
+    insert into auth.users (id, email) values ('${STAFF}', 'staff@example.invalid'), ('${OTHER}', 'other@example.invalid');`;
 let db;
 const q = async (sql, params = []) => (await db.query(sql, params)).rows;
 const one = async (sql, params = []) => (await q(sql, params))[0];
@@ -46,16 +56,7 @@ async function run() {
   }
 
   // ----- Supabase stand-ins: only what the project SQL uses -----
-  await db.exec(`
-    create role anon nologin; create role authenticated nologin; create role service_role nologin;
-    create schema auth;
-    create table auth.users (id uuid primary key, email text, raw_user_meta_data jsonb not null default '{}');
-    create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
-    create function auth.jwt() returns jsonb language sql stable as $$ select coalesce(nullif(current_setting('request.jwt.claims', true), ''), '{}')::jsonb $$;
-    grant usage on schema auth to anon, authenticated;
-    grant execute on function auth.uid(), auth.jwt() to anon, authenticated;
-    create publication supabase_realtime;
-    insert into auth.users (id, email) values ('${STAFF}', 'staff@example.invalid'), ('${OTHER}', 'other@example.invalid');`);
+  await db.exec(STAND_INS);
 
   // ----- production history, in the documented order -----
   await db.exec(await file("supabase-schema.sql"));
@@ -216,6 +217,19 @@ async function run() {
     check("credits: the balance view equals the ledger", Number(credTotals.ledger) === Number(credTotals.balances), JSON.stringify(credTotals));
   });
 
+  // ----- the business day is the date in Israel, whatever the server's time zone -----
+  // At any moment UTC-12 or UTC+14 is on a different date than Israel, so this fails if a date comes from current_date.
+  const israelToday = (await one("select ((now() at time zone 'Asia/Jerusalem')::date)::text as d")).d;
+  const zoneDates = [];
+  for (const zone of ["Etc/GMT+12", "Etc/GMT-14"]) {
+    await db.exec(`set timezone = '${zone}'`);
+    const made = await as(STAFF, () => rpc("create_orders_batch", { p_client_id: "c-1", p_orders: [{ sheet_number: "126", ad_description: `אזור זמן ${zone}`, cash_amount_before_vat: 10 }], p_idempotency_key: uuid() }));
+    zoneDates.push((await one("select entered_at::text as d, current_date::text as server from public.orders where id = $1", [made[0].id])));
+  }
+  await db.exec("reset timezone");
+  check("dates: an order's date is the Israel date even when the server's date differs (UTC-12 and UTC+14)",
+    zoneDates.every((x) => x.d === israelToday) && zoneDates.some((x) => x.server !== israelToday), `${israelToday} ← ${JSON.stringify(zoneDates)}`);
+
   // ----- permissions -----
   const notApproved = await as(OTHER, () => fails(() => rpc("create_orders_batch", { p_client_id: "c-1", p_orders: [{ sheet_number: "1", ad_description: "x", cash_amount_before_vat: 1 }], p_idempotency_key: uuid() })));
   const anonCall = await (async () => { await db.exec("set role anon"); try { return await fails(() => q("select public.cancel_business_order('x', null, 'xyz', gen_random_uuid())")); } finally { await db.exec("reset role"); } })();
@@ -288,6 +302,26 @@ async function run() {
   for (const name of ["BASE_ORDER_COLUMNS", "BUSINESS_ORDER_COLUMNS", "ORDER_V3_COLUMNS"]) reads.push(["orders", expand(consts[name] || "")]);
   for (const [table, list] of reads) for (const col of list.split(",").map((c) => c.trim()).filter(Boolean)) if (!colSet.has(`${table}.${col}`)) colProblems.push(`${table}.${col}`);
   check("contract: every column the UI reads exists (orders v3 + sheets v2 installed)", colProblems.length === 0 && reads.length > 10, colProblems.join(", ") || `${reads.length} reads checked`);
+
+  // ----- a real rollback, on a fresh database where v3 was installed but not used yet -----
+  const main = db;
+  db = await PGlite.create();
+  try {
+    await db.exec(STAND_INS);
+    for (const name of ["supabase-schema.sql", "supabase-reliability-migration.sql", "supabase-business-upgrade.sql", "supabase-sheets-and-order-numbers.sql", "supabase-orders-v3.sql"]) await db.exec(await file(name));
+    await db.exec(`insert into private.approved_users (user_id) values ('${STAFF}'); insert into public.clients (id, name) values ('c-r', 'לקוח בדיקה');
+      insert into public.product_catalog (name, dimensions, base_price_before_vat, credit_cost, is_active) values ('מוצר בדיקה', '', 500, 1, true);`);
+    const rbErr = await fails(async () => db.exec(await file("supabase-orders-v3-rollback.sql")));
+    const left = await one(`select to_regprocedure('private.business_today()') is null as helper_gone, to_regprocedure('public.cancel_business_order(text, timestamp with time zone, text, uuid)') is null as v3_gone,
+      (select column_default from information_schema.columns where table_schema = 'public' and table_name = 'orders' and column_name = 'entered_at') as entered_default`);
+    const productId = (await one("select id from public.product_catalog limit 1")).id;
+    const oldSite = await as(STAFF, () => fails(() => rpc("create_orders_batch", { p_client_id: "c-r", p_orders: [{ sheet_number: "1", product_id: productId, publication_date: "2026-11-22", cash_amount_before_vat: 100, payment_status: "pending" }], p_idempotency_key: uuid() })));
+    check("rollback of an unused v3 completes: v3 functions and the date helper removed, defaults restored, the live site's order flow works",
+      rbErr === null && left.helper_gone && left.v3_gone && /CURRENT_DATE/i.test(left.entered_default || "") && oldSite === null, `${rbErr} | ${JSON.stringify(left)} | ${oldSite}`);
+  } finally {
+    await db.close();
+    db = main;
+  }
 }
 
 run().catch((e) => log(`ERROR ${e && (e.stack || e.message) || e}`)).finally(() => {

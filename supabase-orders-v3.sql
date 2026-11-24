@@ -242,6 +242,25 @@ revoke all on function private.obligation_received(uuid) from public, anon, auth
 revoke all on function private.refresh_obligation_status(uuid) from public, anon, authenticated;
 revoke all on function private.require_approved_user() from public, anon, authenticated;
 
+-- The business day is the date in Israel. Supabase runs in UTC, so current_date is still "yesterday" between
+-- 00:00 and 02:00/03:00 Israel time: an order entered then would get yesterday's date, and a charge due today
+-- would not yet count as due. Every date decision in this file uses this function instead of current_date.
+create or replace function private.business_today()
+returns date
+language sql
+stable
+set search_path = ''
+as $function$
+  select (pg_catalog.now() at time zone 'Asia/Jerusalem')::date
+$function$;
+revoke all on function private.business_today() from public, anon;
+-- The financial views run with the caller's rights (security_invoker), so signed-in users may call it.
+grant execute on function private.business_today() to authenticated;
+
+-- Direct inserts (clients from the UI; orders only until the cut-over) get the Israel date too.
+alter table public.orders alter column entered_at set default private.business_today();
+alter table public.clients alter column joined_at set default private.business_today();
+
 -- ---------- 6. create_orders_batch: free description, product optional ----------
 -- Same signature and result as before. New rule: every row needs ad_description (1–500 characters).
 -- Backward compatible: a row that names an active product but no description (the current live site) still
@@ -336,7 +355,7 @@ begin
     end if;
     -- The legacy column is still NOT NULL; the newspaper has no per-order publication date, so the order
     -- date is used when none is sent.
-    v_publication_date := coalesce(nullif(v_row ->> 'publication_date', '')::date, current_date);
+    v_publication_date := coalesce(nullif(v_row ->> 'publication_date', '')::date, private.business_today());
     v_status := coalesce(v_row ->> 'payment_status', 'pending');
     if v_status not in ('paid', 'pending') then
       raise exception 'סטטוס התשלום בשורה % אינו תקין.', v_count;
@@ -388,7 +407,7 @@ begin
       v_amount,
       v_status,
       coalesce(v_row ->> 'notes', ''),
-      current_date,
+      private.business_today(),
       auth.uid(),
       v_actor_label,
       v_sheet,
@@ -439,7 +458,7 @@ begin
         )
         values (
           v_obligation_id, 'payment', v_amount, 'סומן כשולם בעת יצירת ההזמנה',
-          current_date, gen_random_uuid(), auth.uid()
+          private.business_today(), gen_random_uuid(), auth.uid()
         );
       end if;
       v_result := v_result || jsonb_build_array(jsonb_build_object(
@@ -764,7 +783,7 @@ begin
   if p_amount is null or p_amount <= 0 or p_amount > 99999999 or round(p_amount, 2) <> p_amount then
     raise exception 'סכום התקבול חייב להיות חיובי, עם עד שתי ספרות אחרי הנקודה.';
   end if;
-  if p_received_on is null or p_received_on > current_date + 1 then
+  if p_received_on is null or p_received_on > private.business_today() + 1 then
     raise exception 'תאריך התקבול אינו תקין.';
   end if;
   if length(coalesce(p_notes, '')) > 500 then
@@ -866,7 +885,7 @@ begin
     obligation_id, event_type, amount, received_on, notes, reverses_event_id, idempotency_key, created_by
   )
   values (
-    v_event.obligation_id, 'reversal', -v_event.amount, current_date, v_reason, p_event_id,
+    v_event.obligation_id, 'reversal', -v_event.amount, private.business_today(), v_reason, p_event_id,
     gen_random_uuid(), auth.uid()
   );
   v_status := private.refresh_obligation_status(v_event.obligation_id);
@@ -1169,11 +1188,11 @@ select
   greatest(orders.cash_due - orders.cash_received, 0)::numeric(12, 2) as cash_outstanding,
   orders.due_on,
   orders.payment_status,
-  case when greatest(orders.cash_due - orders.cash_received, 0) > 0 and orders.due_on < current_date
+  case when greatest(orders.cash_due - orders.cash_received, 0) > 0 and orders.due_on < private.business_today()
        then greatest(orders.cash_due - orders.cash_received, 0) else 0::numeric end::numeric(12, 2) as overdue_amount,
-  case when greatest(orders.cash_due - orders.cash_received, 0) > 0 and orders.due_on > current_date
+  case when greatest(orders.cash_due - orders.cash_received, 0) > 0 and orders.due_on > private.business_today()
        then greatest(orders.cash_due - orders.cash_received, 0) else 0::numeric end::numeric(12, 2) as future_amount,
-  case when greatest(orders.cash_due - orders.cash_received, 0) > 0 and orders.due_on = current_date
+  case when greatest(orders.cash_due - orders.cash_received, 0) > 0 and orders.due_on = private.business_today()
        then greatest(orders.cash_due - orders.cash_received, 0) else 0::numeric end::numeric(12, 2) as due_today_amount,
   case when greatest(orders.cash_due - orders.cash_received, 0) > 0 and orders.due_on is null
        then greatest(orders.cash_due - orders.cash_received, 0) else 0::numeric end::numeric(12, 2) as no_due_date_amount,
@@ -1202,11 +1221,11 @@ select
   greatest(x.cash_due - x.received, 0)::numeric(12, 2),
   obligations.due_on,
   (case when x.is_cancelled then 'cancelled' else obligations.status end)::text,
-  case when greatest(x.cash_due - x.received, 0) > 0 and obligations.due_on < current_date
+  case when greatest(x.cash_due - x.received, 0) > 0 and obligations.due_on < private.business_today()
        then greatest(x.cash_due - x.received, 0) else 0::numeric end::numeric(12, 2),
-  case when greatest(x.cash_due - x.received, 0) > 0 and obligations.due_on > current_date
+  case when greatest(x.cash_due - x.received, 0) > 0 and obligations.due_on > private.business_today()
        then greatest(x.cash_due - x.received, 0) else 0::numeric end::numeric(12, 2),
-  case when greatest(x.cash_due - x.received, 0) > 0 and obligations.due_on = current_date
+  case when greatest(x.cash_due - x.received, 0) > 0 and obligations.due_on = private.business_today()
        then greatest(x.cash_due - x.received, 0) else 0::numeric end::numeric(12, 2),
   0::numeric(12, 2),
   false,

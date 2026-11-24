@@ -26,7 +26,8 @@ funcs as (
     ('public.reverse_obligation_payment(uuid, text, uuid)'),
     ('public.update_installment_schedule(uuid, timestamptz, jsonb, text, uuid)'),
     ('private.obligation_received(uuid)'),
-    ('private.refresh_obligation_status(uuid)')
+    ('private.refresh_obligation_status(uuid)'),
+    ('private.business_today()')
   ) as f(sig) where to_regprocedure(f.sig) is not null
 ),
 grants as (
@@ -52,7 +53,8 @@ t as (select * from public.business_financial_totals)
 select 'columns: orders (6)' as check_name, case when cols.orders_cols = 6 then 'PASS' else 'FAIL ' || cols.orders_cols end as result from cols
 union all select 'columns: financial_obligations (5)', case when cols.obligation_cols = 5 then 'PASS' else 'FAIL ' || cols.obligation_cols end from cols
 union all select 'columns: business_payment_events (2)', case when cols.event_cols = 2 then 'PASS' else 'FAIL ' || cols.event_cols end from cols
-union all select 'functions present (9)', case when funcs.n = 9 then 'PASS' else 'FAIL ' || funcs.n end from funcs
+union all select 'functions present (10)', case when funcs.n = 10 then 'PASS' else 'FAIL ' || funcs.n end from funcs
+union all select 'order date = Israel date (entered_at default uses private.business_today)', case when (select column_default from information_schema.columns where table_schema = 'public' and table_name = 'orders' and column_name = 'entered_at') like '%business_today%' then 'PASS' else 'FAIL' end
 union all select 'functions: authenticated may execute', case when grants.auth_ok then 'PASS' else 'FAIL' end from grants
 union all select 'functions: anon blocked', case when grants.anon_blocked then 'PASS' else 'FAIL' end from grants
 union all select 'views readable', case when to_regclass('public.business_financial_summary') is not null

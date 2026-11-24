@@ -481,6 +481,11 @@ drop function if exists private.refresh_obligation_status(uuid);
 drop function if exists private.obligation_received(uuid);
 drop function if exists private.require_approved_user();
 
+-- The Israel-date defaults go back to the defaults of the business upgrade, then the helper is removed.
+alter table public.orders alter column entered_at set default current_date;
+alter table public.clients alter column joined_at set default current_date;
+drop function if exists private.business_today();
+
 commit;
 
 -- ===================== PART 2 (optional; separate approval) =====================
