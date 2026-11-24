@@ -328,6 +328,114 @@ async function run() {
   check("E20 the dashboard, the payments screen and the reports show the same open balance as the database",
     money(dashBalance) === Math.round(num(tot.o) * 100) / 100 && payFooter.endsWith(dashBalance) && dashBalance === text("#report-outstanding"), `${dashBalance} | ${payFooter} | ${text("#report-outstanding")} | db ${tot.o}`);
 
+  // ----- E24: the whole flow for a new client, from the screens -----
+  await nav("clients");
+  $('[data-page="clients"] [data-open-modal="client-modal"]').click(); await until(() => $("#client-modal").open, 3000);
+  $("#client-form").elements.name.value = "סדנת קרמיקה (בדיקת זרימה)"; $("#client-form").elements.phone.value = "050-7654321";
+  $("#client-form").requestSubmit();
+  const flowClient = await until(() => one("select id from public.clients where name = 'סדנת קרמיקה (בדיקת זרימה)'"), 8000);
+  const cid = flowClient && flowClient.id;
+  w.location.hash = `#/client/${cid}`;
+  await until(() => w.ModaatApp.route().param === cid && visible('[data-client-page-action="package"]'), 8000);
+  const flowTpl = await one("select id, credits from public.package_catalog where is_active order by credits limit 1");
+  $('[data-client-page-action="package"]').click(); await until(() => $("#biz-package-modal")?.open || $("#biz-package-select"), 3000);
+  setVal($("#biz-package-select"), flowTpl.id); await sleep(100);
+  $("#biz-package-submit").click();
+  const flowPkg = await until(() => one("select id from public.customer_packages where client_id = $1", [cid]), 8000);
+  // A new order from the client file: the client is already chosen; one credits row and one cash row.
+  w.location.hash = `#/client/${cid}`; await until(() => w.ModaatApp.route().param === cid && visible('[data-client-page-action="order"]'), 8000);
+  $('[data-client-page-action="order"]').click();
+  const preset = await until(() => w.ModaatApp.route().name === "new-order" && $("#new-order-client").value === cid, 5000);
+  const firstRow = $$("#new-order-rows [data-order-row]")[0];
+  const startSheet = firstRow.querySelector('[name="sheet_number"]').value;
+  setVal(firstRow.querySelector('[name="ad_description"]'), "רבע עמוד — סדנה פתוחה"); setVal(firstRow.querySelector('[name="credits_used"]'), "2");
+  const creditStatus = firstRow.querySelector('[name="payment_status"]');
+  const noPaidClaim = creditStatus.disabled && creditStatus.value === "credits" && creditStatus.selectedOptions[0].textContent === "ללא חיוב כספי";
+  $("#new-order-add-row").click(); await sleep(60);
+  const secondRow = $$("#new-order-rows [data-order-row]")[1];
+  const sameSheet = secondRow.querySelector('[name="sheet_number"]').value === startSheet;
+  setVal(secondRow.querySelector('[name="ad_description"]'), "חצי עמוד — הרשמה לחוגים"); setVal(secondRow.querySelector('[name="cash_amount_before_vat"]'), "300");
+  const maxBefore = num((await one("select coalesce(max(order_number), 0) as n from public.orders")).n);
+  $("#new-order-form").dispatchEvent(new w.KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true }));
+  const flowOrders = await until(async () => { const r = await sql("select id, billing_mode, sheet_number, payment_status from public.orders where client_id = $1 and order_number > $2 order by order_number", [cid, maxBefore]); return r.length === 2 && r; }, 8000);
+  const defaultSheet = (await one("select sheet_number from public.sheet_overview where not is_closed and closes_at > now() order by closes_at, sheet_number limit 1")).sheet_number;
+  check("E24a new client → package from the client file → two orders from the client file (client preset, nearest open sheet, the second row continues on the same sheet, Ctrl+Enter saves); a credits row claims no payment",
+    !!cid && !!flowPkg && !!preset && startSheet === defaultSheet && sameSheet && noPaidClaim && !!flowOrders && flowOrders[0].billing_mode === "credits" && flowOrders[1].billing_mode === "cash",
+    JSON.stringify({ cid, startSheet, defaultSheet, sameSheet, noPaidClaim, flowOrders }));
+  const [creditOrder, cashOrder] = flowOrders || [{}, {}];
+  await until(() => w.ModaatApp.orders().some((o) => o.id === cashOrder.id), 8000);
+  // Move the cash order to the next sheet, then take the payment from the client file, then cancel the credits order.
+  const nextSheet = (await one("select sheet_number from public.sheet_overview where not is_closed and sheet_number <> $1 order by closes_at limit 1", [startSheet])).sheet_number;
+  const moved = await editCell(cashOrder.id, "sheet", nextSheet);
+  const flowOb = await obOf(cashOrder.id);
+  w.location.hash = `#/client/${cid}`; await until(() => w.ModaatApp.route().param === cid, 5000);
+  $('[data-tab="orders"]').click();
+  const payButton = await until(() => $(`#client-orders-body [data-biz-pay-open="${flowOb.id}"]`), 5000);
+  payButton && payButton.click(); await until(() => $("#biz-pay-modal").open, 3000);
+  $("#biz-pay-form").requestSubmit();
+  const paid = await until(async () => (await one("select status from public.financial_obligations where id = $1", [flowOb.id])).status === "paid", 8000);
+  await nav("orders");
+  (await until(() => rowOf(creditOrder.id)?.querySelector("[data-order-cancel]"), 5000))?.click();
+  await answerDialog({ reason: "הלקוח ויתר על המודעה" });
+  const cancelledFlow = await until(async () => (await one("select cancelled_at is not null as c from public.orders where id = $1", [creditOrder.id])).c, 8000);
+  const flowDb = await one(`select (select coalesce(sum(delta), 0) from public.credit_ledger where client_id = $1) as credits,
+    (select sheet_number from public.orders where id = $2) as sheet, (select coalesce(sum(cash_outstanding), 0) from public.business_financial_summary where client_id = $1) as open`, [cid, cashOrder.id]);
+  check("E24b the order moves to the next sheet; the full payment from the client file closes its charge; cancelling the credits order returns its 2 credits (balance = package credits)",
+    !moved.error && flowDb.sheet === nextSheet && !!paid && !!cancelledFlow && num(flowDb.credits) === num(flowTpl.credits), JSON.stringify({ moved, flowDb, paid, cancelledFlow }));
+  w.location.hash = `#/client/${cid}`; await until(() => w.ModaatApp.route().param === cid, 5000); await sleep(400);
+  const kpiOpen = money(text("#client-kpi-overdue"));
+  check("E24c the client file shows the database's figures: credit balance and open cash debt (package installments only now)",
+    text("#client-kpi-credits") === new Intl.NumberFormat("he-IL", { maximumFractionDigits: 2 }).format(num(flowDb.credits)) && Math.abs(kpiOpen - num(flowDb.open)) < 0.01,
+    `${text("#client-kpi-credits")} / ${text("#client-kpi-overdue")} vs db ${flowDb.credits} / ${flowDb.open}`);
+
+  // ----- E25: orders filters and the CSV export are the same rows -----
+  async function captureCsv(button) {
+    let blob = null;
+    const original = w.URL.createObjectURL;
+    w.URL.createObjectURL = (value) => { blob = value; return original.call(w.URL, value); };
+    try { button.click(); await until(() => blob, 3000); } finally { w.URL.createObjectURL = original; }
+    if (!blob) return null;
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    return { bom: bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF, lines: new TextDecoder().decode(bytes).split("\r\n").filter(Boolean) };
+  }
+  await nav("orders");
+  setVal($("#orders-type-filter"), "credits"); await sleep(150);
+  const shownCredits = $$("#orders-body tr[data-order-row-id]").map((tr) => tr.dataset.orderRowId);
+  const csv = await captureCsv($("#orders-export"));
+  const dbCredits = num((await one("select count(*) as n from public.orders where billing_mode = 'credits' and cancelled_at is null")).n);
+  check("E25 type filter 'קרדיטים' shows exactly the database's active credits orders; the CSV has a UTF-8 BOM, a header and the same rows",
+    shownCredits.length === dbCredits && !!csv && csv.bom && csv.lines.length === shownCredits.length + 1 && csv.lines[0].startsWith("מס׳ הזמנה"),
+    `${shownCredits.length} / db ${dbCredits} / csv ${csv && csv.lines.length}`);
+  $("#orders-clear-filters").click(); await sleep(100);
+
+  // ----- E26: production status changed from the sheet page -----
+  const prodOrder = await one("select id, sheet_number from public.orders where cancelled_at is null and file_status = 'not_received' and sheet_number is not null order by order_number limit 1");
+  w.location.hash = `#/sheet/${prodOrder.sheet_number}`;
+  const fileSelect = await until(() => $(`#sheet-orders-body select[data-sheet-status="file"][data-order="${prodOrder.id}"]`), 8000);
+  if (fileSelect) { fileSelect.value = "received"; fileSelect.dispatchEvent(new w.Event("change", { bubbles: true })); }
+  const prodSaved = await until(async () => (await one("select file_status from public.orders where id = $1", [prodOrder.id])).file_status === "received", 8000);
+  check("E26 a file status changed right in the sheet page is saved (version-checked function)", !!fileSelect && !!prodSaved);
+
+  // ----- E27: the home screen counts what the database holds -----
+  await nav("dashboard"); await sleep(300);
+  const deskCount = (title) => Number($$("#desk-attention .desk-item").find((b) => b.textContent.includes(title))?.querySelector(".desk-count").textContent.replace(/[^\d]/g, "") || -1);
+  const dbProd = await one(`select count(*) filter (where o.file_status = 'not_received') as nofile, count(*) filter (where o.placement_status = 'not_placed') as notplaced
+    from public.orders o join public.sheet_overview s on s.sheet_number = o.sheet_number
+    where o.cancelled_at is null and coalesce(s.publication_date >= (now() at time zone 'Asia/Jerusalem')::date, not s.is_closed)`);
+  check("E27 home: 'files not received' and 'ads not placed' equal the database counts for sheets not yet published",
+    deskCount("מודעות שהקובץ שלהן לא התקבל") === num(dbProd.nofile) && deskCount("מודעות שטרם שובצו") === num(dbProd.notplaced),
+    `${deskCount("מודעות שהקובץ שלהן לא התקבל")}/${dbProd.nofile} · ${deskCount("מודעות שטרם שובצו")}/${dbProd.notplaced}`);
+
+  // ----- E28: reports equal the database; the report CSV is the table -----
+  await nav("reports"); await sleep(300);
+  setVal($("#report-kind"), "debts"); await sleep(200);
+  const debtRows = $$("#report-body tr").length;
+  const dbDebts = await one("select count(distinct client_id) as n, coalesce(sum(cash_outstanding), 0) as total from public.business_financial_summary where cash_outstanding > 0 and payment_status <> 'cancelled'");
+  const reportCsv = await captureCsv($("#report-export"));
+  check("E28 report 'open debts per client': one row per client with debt, total = the database's open balance; the CSV has the same rows",
+    debtRows === num(dbDebts.n) && $("#report-summary").textContent.includes(new Intl.NumberFormat("he-IL", { style: "currency", currency: "ILS" }).format(num(dbDebts.total)))
+    && !!reportCsv && reportCsv.lines.length === debtRows + 1, `${debtRows}/${dbDebts.n} · db ${dbDebts.total} · csv ${reportCsv && reportCsv.lines.length} · ${text("#report-summary")}`);
+
   // ----- E21, E22: persistence and sign-out -----
   const ordersNow = num((await one("select count(*) as n from public.orders")).n);
   await load("db=e2e", "#/orders");

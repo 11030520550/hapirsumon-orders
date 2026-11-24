@@ -8,12 +8,12 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@500;700&family=Heebo:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20261122-1">
+  <link rel="stylesheet" href="styles.css?v=20261124-1">
   <!-- supabase-js pinned to 2.119.0 and served locally (vendor/); SHA-384 verified against jsDelivr's published hash. -->
   <script src="vendor/supabase-js-2.119.0.js" integrity="sha384-uteMfOloLDGt042uDz+xHGF3ym63/WQ6rFq7murQRG8Ih7QrXGEGNtWd8688sb4O"></script>
   <script src="supabase-config.js"></script>
-  <script src="app.js?v=20261122-1" defer></script>
-  <script src="business-app.js?v=20261122-1" defer></script>
+  <script src="app.js?v=20261124-1" defer></script>
+  <script src="business-app.js?v=20261124-1" defer></script>
 </head>
 <body>
   <svg class="svg-defs" width="0" height="0" aria-hidden="true">
@@ -384,7 +384,7 @@
             </div>
             <div class="table-wrap">
               <table>
-                <thead><tr><th scope="col">שם הלקוח</th><th scope="col">טלפון</th><th scope="col">דואר אלקטרוני</th><th scope="col"><span class="sr-only">פעולות</span></th></tr></thead>
+                <thead id="clients-head"><tr><th scope="col">שם הלקוח</th><th scope="col">טלפון</th><th scope="col">דואר אלקטרוני</th><th scope="col"><span class="sr-only">פעולות</span></th></tr></thead>
                 <tbody id="clients-body"></tbody>
               </table>
               <div class="empty-state" id="clients-empty-state" hidden>

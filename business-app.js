@@ -2730,6 +2730,25 @@
   window.ModaatBusiness = Object.freeze({
     isPremium: (clientId) => state.ready && Boolean(activePackage(clientId)),
     setOrderPaid, deleteOrder, renderOrdersPage, renderClientOrders,
+    // Per client: open cash debt, of it overdue, and credit balance (formatted), from the same rows as the client file.
+    clientMoney: () => {
+      if (!state.loaded) return null;
+      const result = new Map();
+      for (const row of obligationRows()) {
+        if (row.cancelled || row.outstanding <= 0) continue;
+        const item = result.get(row.clientId) || { openValue: 0, overdueValue: 0 };
+        item.openValue = roundMoney(item.openValue + row.outstanding);
+        if (row.kind === "overdue") item.overdueValue = roundMoney(item.overdueValue + row.outstanding);
+        result.set(row.clientId, item);
+      }
+      for (const client of app().clients()) {
+        const item = result.get(client.id) || { openValue: 0, overdueValue: 0 };
+        const balance = state.balances.get(client.id) ?? 0;
+        result.set(client.id, { open: item.openValue ? money.format(item.openValue) : "", overdue: item.overdueValue ? money.format(item.overdueValue) : "",
+          credits: number.format(balance), negative: balance < 0 });
+      }
+      return result;
+    },
     // The payment state of an order as every business screen shows it (partial payments and cancellations included).
     payPill: (order) => (state.loaded ? pill(PAY_TONE[orderPayState(order)] || "neutral", PAY_TEXT[orderPayState(order)] || "") : null)
   });

@@ -646,10 +646,18 @@
       .sort((left, right) => left.name.localeCompare(right.name, "he"))
       .filter((client) => `${client.name} ${client.phone || ""}`.toLocaleLowerCase("he").includes(query));
 
+    // With the business schema: open cash debt and credit balance per client (the same figures as the client file).
+    const money = businessSchema && window.ModaatBusiness?.clientMoney ? window.ModaatBusiness.clientMoney() : null;
+    $("#clients-head").innerHTML = `<tr><th scope="col">שם הלקוח</th><th scope="col">טלפון</th><th scope="col">דואר אלקטרוני</th>${money ? '<th scope="col">יתרת חוב</th><th scope="col">קרדיטים</th>' : ""}<th scope="col"><span class="sr-only">פעולות</span></th></tr>`;
     $("#clients-body").innerHTML = clients.map((client) => `<tr>
       <td class="client-name">${escapeHtml(client.name)}${window.ModaatBusiness && window.ModaatBusiness.isPremium(client.id) ? ' <span class="premium-badge">פרימיום</span>' : ""}${hasEncodingDamage(client.name) ? ' <span class="payment-select pending" title="השם נשמר בקידוד שגוי. ראי supabase-hebrew-encoding-preview.sql">קידוד שגוי</span>' : ""}</td>
       <td>${escapeHtml(client.phone || "—")}</td>
       <td>${escapeHtml(client.email || "—")}</td>
+      ${money ? (() => {
+        const m = money.get(client.id) || { open: "", overdue: "", credits: "0" };
+        return `<td class="amount-cell${m.overdue ? " is-due" : ""}" ${m.overdue ? `title="מתוכה באיחור ${escapeHtml(m.overdue)}"` : ""}>${escapeHtml(m.open || "—")}${m.overdue ? ' <span class="due-text">· באיחור</span>' : ""}</td>
+        <td class="amount-cell${m.negative ? " negative" : ""}" dir="ltr">${escapeHtml(m.credits)}</td>`;
+      })() : ""}
       <td class="client-actions">
         <button class="button button-outline client-action" type="button" data-client-view="${escapeHtml(client.id)}" aria-label="תיק הלקוח ${escapeHtml(client.name)}">תיק לקוח</button>
         <button class="button button-outline client-action" type="button" data-client-edit="${escapeHtml(client.id)}" aria-label="עריכת ${escapeHtml(client.name)}">עריכה</button>
