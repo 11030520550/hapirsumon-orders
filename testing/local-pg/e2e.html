@@ -118,7 +118,7 @@ async function payUI(obligationId, amount, date = null) {
 async function run() {
   // ----- E1: build, sign-in rules -----
   const t0 = Date.now();
-  await load("db=e2e&reset=1");
+  await load("db=e2e&seed=basic&reset=1");
   check("E1a the database is built from the project SQL (8 files + verify) with test data", w.__localpg.status.phase === "ready", `${w.__localpg.status.phase} ${w.__localpg.status.detail} ${Date.now() - t0}ms`);
   const installed = await one(`select to_regprocedure('public.cancel_business_order(text, timestamp with time zone, text, uuid)') is not null as v3,
     to_regclass('public.sheet_overview') is not null as sheets_v2, exists (select 1 from pg_trigger where tgname = 'orders_enforce_open_sheet') as enforce,
@@ -145,7 +145,7 @@ async function run() {
   const israel = (await one("select ((now() at time zone 'Asia/Jerusalem')::date)::text as d")).d;
   check("E2 new cash order from the screen: saved in PostgreSQL with 1,000 + 18% = 1,180, a charge of 1,180, the next number after the counter, the Israel date, 'לא התקבל / לא שובץ'",
     !!cash && num(cash.amount) === 1180 && num(cash.cash_amount_before_vat) === 1000 && num(cashOb.amount_due) === 1180 && num(cash.order_number) === counterBefore + 1
-    && cash.entered === israel && cash.file_status === "not_received" && cash.placement_status === "not_placed" && cash.ad_description === "חצי עמוד — בדיקת קצה לקצה" && cash.entered_by_name === "בודקת מקומית",
+    && cash.entered === israel && cash.file_status === "not_received" && cash.placement_status === "not_placed" && cash.ad_description === "חצי עמוד — בדיקת קצה לקצה" && cash.entered_by_name === "צוות מזכירות",
     cash ? `#${cash.order_number} ${cash.amount} ${cash.entered} by ${cash.entered_by_name}` : "not saved");
   await nav("orders");
   await until(() => cells(cashId).length > 9, 8000);
