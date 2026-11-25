@@ -621,13 +621,72 @@
   function renderStats() {
     // With the business schema the figures come from the financial views (business-app.js renderDashboard).
     if (businessSchema) return;
-    const paidOrders = data.orders.filter((order) => order.paymentStatus === "paid");
+    // Without it only the order status and the order date are known: receipts and due dates are not.
     const pendingOrders = data.orders.filter((order) => order.paymentStatus !== "paid");
-    $("#stat-orders").textContent = numberFormat.format(data.orders.length);
-    $("#stat-paid").textContent = formatCurrency(paidOrders.reduce((sum, order) => sum + Number(order.amount), 0));
-    $("#stat-pending").textContent = numberFormat.format(pendingOrders.length);
-    $("#stat-balance").textContent = formatCurrency(pendingOrders.reduce((sum, order) => sum + Number(order.amount), 0));
+    const month = localMonth();
+    setKpi("stat-receipts-month", null);
+    setKpi("stat-balance", pendingOrders.reduce((sum, order) => sum + Number(order.amount), 0));
+    setKpi("stat-overdue", null);
+    setKpi("stat-income-month", data.orders.filter((order) => String(order.orderDate || "").slice(0, 7) === month)
+      .reduce((sum, order) => sum + Number(order.amount || 0), 0));
   }
+
+  // ---------- home figures: the true value at once, a counting copy over it ----------
+  // The figure's own text is always the real value (screen readers, copy, tests). On entering the home screen a
+  // copy laid over it counts up from zero (about 1.3 s, easing out); the real text keeps its place, so nothing
+  // moves. Hovering a figure replays it, at most once per entry and not within 1.5 s of the last run.
+  // prefers-reduced-motion: no counting at all.
+  const reducedMotion = window.matchMedia ? window.matchMedia("(prefers-reduced-motion: reduce)") : { matches: false };
+  const KPI_DURATION = 1350;
+  let homeVisit = 0;
+  function localMonth() {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  }
+  function setKpi(id, value) {
+    const final = document.getElementById(id);
+    if (!final) return;
+    const known = value != null && Number.isFinite(Number(value));
+    final.textContent = known ? formatCurrency(value) : "—";
+    final.dataset.value = known ? String(Number(value)) : "";
+    // Counted only where it is seen: the home screen, after sign-in.
+    if (known && currentView.name === "dashboard" && !$("#app-shell").hidden && Number(final.dataset.visit) !== homeVisit) countKpi(final);
+  }
+  function countKpi(final) {
+    final.dataset.visit = String(homeVisit);
+    const target = Number(final.dataset.value);
+    const copy = final.nextElementSibling;
+    if (!copy || !final.dataset.value || reducedMotion.matches || target === 0) return;
+    if (final.dataset.counting === "1") return;
+    final.dataset.counting = "1";
+    final.classList.add("is-counting");
+    const started = performance.now();
+    const ease = (t) => 1 - Math.pow(1 - t, 3);
+    const frame = (now) => {
+      const t = Math.min((now - started) / KPI_DURATION, 1);
+      // The target is read on every frame: a refresh during the count lands on the new value.
+      const goal = Number(final.dataset.value) || 0;
+      copy.textContent = formatCurrency(Math.round(goal * ease(t) * 100) / 100);
+      if (t < 1 && final.isConnected) { requestAnimationFrame(frame); return; }
+      final.classList.remove("is-counting");
+      copy.textContent = "";
+      final.dataset.counting = "";
+      final.dataset.ended = String(Date.now());
+    };
+    requestAnimationFrame(frame);
+  }
+  function playHomeFigures() {
+    homeVisit += 1;
+    document.querySelectorAll("#home-kpis .kpi-final").forEach((final) => { if (final.dataset.value) countKpi(final); });
+  }
+  document.addEventListener("mouseover", (event) => {
+    const kpi = event.target.closest("#home-kpis .kpi");
+    if (!kpi || kpi.contains(event.relatedTarget)) return;
+    const final = kpi.querySelector(".kpi-final");
+    if (!final || final.dataset.counting === "1" || Date.now() - Number(final.dataset.ended || 0) < 1500) return;
+    final.dataset.visit = "";
+    countKpi(final);
+  });
 
   function renderClients() {
     const select = $("#order-client");
@@ -816,8 +875,10 @@
     });
     $("#page-title").textContent = VIEW_TITLES[name];
     $("#page-section").textContent = VIEW_SECTIONS[name] || "הפרסומון";
+    setSidenavOpen(false);
     if (name === "client") renderClientPage();
     if (changed) window.scrollTo(0, 0);
+    if (name === "dashboard" && changed) { setMasthead(); playHomeFigures(); }
     document.dispatchEvent(new CustomEvent("modaat:view", { detail: { name, param } }));
   }
 
@@ -878,6 +939,8 @@
   }
 
   function renderRecentOrders() {
+    // The home screen no longer lists orders (V6); the function stays for a screen that brings the table back.
+    if (!$("#recent-orders-body")) return;
     const clientsById = new Map(data.clients.map((client) => [client.id, client]));
     const recent = [...data.orders].sort(compareOrdersNewestFirst).slice(0, 8);
     $("#recent-orders-body").innerHTML = recent.length ? recent.map((order) => {
@@ -1210,6 +1273,7 @@
       event.preventDefault();
       navigate(viewButton.dataset.view || viewButton.dataset.go);
     }
+    if (event.target.closest("#sidenav-toggle")) setSidenavOpen(!$("#sidenav").classList.contains("is-open"));
     const brandLink = event.target.closest("#app-shell .brand");
     if (brandLink) {
       event.preventDefault();
@@ -1578,8 +1642,17 @@
       importPlan.conflicts.length > 0 || (!importPlan.newClients.length && !importPlan.newOrders.length);
   });
   $("#today-label").textContent = new Intl.DateTimeFormat("he-IL", { weekday: "long", day: "numeric", month: "long" }).format(new Date());
-  // Dashboard masthead: full Hebrew dateline and a time-of-day greeting.
-  (function setMasthead() {
+  // Small screens: the menu folds under a "תפריט" button (desktop: always open, the button is hidden).
+  function setSidenavOpen(open) {
+    const nav = $("#sidenav");
+    if (!nav) return;
+    nav.classList.toggle("is-open", open);
+    $("#sidenav-toggle").setAttribute("aria-expanded", String(open));
+  }
+  document.addEventListener("keydown", (event) => { if (event.key === "Escape") setSidenavOpen(false); });
+  // Dashboard masthead: full Hebrew dateline and a time-of-day greeting (refreshed on every entry to the home screen).
+  setMasthead();
+  function setMasthead() {
     const now = new Date();
     const hour = now.getHours();
     $("#masthead-date").textContent = new Intl.DateTimeFormat("he-IL", { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(now);
@@ -1589,7 +1662,7 @@
       $("#masthead-hebrew-date").hidden = false;
     } catch { /* calendar not supported by this browser: the civil date alone is shown */ }
     $("#masthead-greeting").textContent = hour >= 5 && hour < 12 ? "בוקר טוב" : hour >= 12 && hour < 17 ? "צהריים טובים" : hour >= 17 && hour < 22 ? "ערב טוב" : "לילה טוב";
-  })();
+  }
 
   async function initialize() {
     const config = window.MODAAT_SUPABASE_CONFIG;
@@ -1652,6 +1725,7 @@
     hasEncodingDamage,
     formatOrderDate,
     formatCurrency,
+    setKpi,
     fetchAllRows,
     compareOrdersNewestFirst
   });

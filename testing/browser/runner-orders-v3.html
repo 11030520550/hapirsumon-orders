@@ -322,14 +322,13 @@ async function run() {
   // ----- 20: one source for money: dashboard = payments = reports -----
   await nav("dashboard"); await sleep(200);
   const dashBalance = text("#stat-balance");
-  const dashReceived = text("#stat-paid");
+  const dashOverdue = text("#stat-overdue");
   await nav("payments"); setVal($("#payments-filter"), "all"); await sleep(100);
   const payFooter = text("#payments-count");
-  const payReceived = text("#payments-paid");
   await nav("reports"); await sleep(300);
-  check("O20 the same open balance and received total on the dashboard, the payments screen and the reports (cancelled charges are not debt)",
-    dashBalance === text("#report-outstanding") && payFooter.endsWith(dashBalance) && dashReceived === payReceived && payReceived === text("#report-received"),
-    `${dashBalance} | ${payFooter} | ${text("#report-outstanding")} | ${dashReceived} | ${text("#report-received")}`);
+  check("O20 the same open balance and overdue debt on the dashboard, the payments screen and the reports (cancelled charges are not debt)",
+    dashBalance === text("#report-outstanding") && payFooter.endsWith(dashBalance) && dashOverdue === text("#report-overdue"),
+    `${dashBalance} | ${payFooter} | ${text("#report-outstanding")} | ${dashOverdue} | ${text("#report-overdue")}`);
 
   // ----- 21: RTL and a narrower office screen -----
   await load("session=1&business=1&orders=3&sheets=2", "#/orders", 1024); await sleep(400);

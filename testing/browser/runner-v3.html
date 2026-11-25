@@ -59,7 +59,9 @@ async function run() {
   await load("session=0&business=0");
   await login();
   check("L1 dashboard after login", page() === "dashboard" && w.location.hash === "#/dashboard");
-  check("L2 recent orders: 8 rows", $$("#recent-orders-body tr").length === 8);
+  // Owner's decision (V6 "Quiet Editorial"): the home screen shows four money figures, no orders table.
+  check("L2 home: four money figures, the open balance from the orders, no orders table on the home screen",
+    $$("#home-kpis .kpi").length === 4 && !$("#recent-orders-body") && /\d/.test(text("#stat-balance")) && text("#stat-overdue") === "—");
   const views = ["orders", "sheets", "clients", "packages", "payments", "reports", "settings", "dashboard"];
   let allOk = true;
   for (const v of views) { await nav(v); if (page() !== v || !$(`.main-nav [data-view="${v}"]`).classList.contains("active")) allOk = false; }
@@ -610,8 +612,9 @@ async function run() {
   const entryWrap = $("#new-order-form .table-wrap");
   check("S4 order form fits without horizontal scroll", entryWrap.scrollWidth <= entryWrap.clientWidth + 1, `${entryWrap.scrollWidth}/${entryWrap.clientWidth}`);
   await nav("dashboard"); await sleep(200);
-  $('[data-desk-go="payments"][data-desk-value="undated"]').click(); await sleep(300);
-  check("S5 dashboard shortcut opens payments with its filter", page() === "payments" && $("#payments-filter").value === "undated");
+  // V6: the home tasks are the three production counts (needs the sheets model; this mock has none), no payment shortcuts.
+  check("S5 home tasks: no payment shortcuts; without the sheets model the tasks say so",
+    !$('#desk-attention [data-desk-go="payments"]') && text("#desk-attention").includes("מודול הגיליונות"), text("#desk-attention"));
 
   // ===== login screen
   const fillLogin = (password) => { $('#login-form [name="email"]').value = "user@example.invalid"; $('#login-form [name="password"]').value = password; };
@@ -620,13 +623,15 @@ async function run() {
     !$("#open-business-preview") && !$("#download-prelogin-backup") && $$("#auth-screen .button-primary").length === 1);
   check("A11 login branding: mark + הפרסומון + motto above the form, no card/old ornaments or old name",
     text(".auth-wordmark") === "הפרסומון" && text(".auth-tagline") === "ניהול חכם. פרסום מדויק." && !!$(".auth-brand .auth-mark")
-    && text(".auth-lede") === "הכניסה למערכת מיועדת לחשבונות שהוזמנו ואושרו מראש." && !$(".auth-footnote")
-    && (d.querySelector("#auth-screen").innerText.match(/אושרו מראש/g) || []).length === 1
+    && text(".auth-lede") === "כניסה לחשבון מאושר במערכת הפרסומון." && !$(".auth-footnote")
+    && (d.querySelector("#auth-screen").innerText.match(/חשבון מאושר/g) || []).length === 1
     && w.getComputedStyle($('#login-form [name="email"]')).direction === "ltr" && w.getComputedStyle($('#login-form [name="password"]')).direction === "ltr"
     && $("#password-toggle").getBoundingClientRect().left >= $('#login-form [name="password"]').getBoundingClientRect().left
+    // V6: the form sits directly on white (no card frame, as in the approved Figma); fields and button have square corners.
     && (() => { const cs = w.getComputedStyle($(".auth-body")); const h1 = w.getComputedStyle($("#login-title"), "::before");
-      return ["borderTopLeftRadius", "borderTopRightRadius", "borderBottomLeftRadius", "borderBottomRightRadius"].every((k) => cs[k] === "0px")
-        && cs.borderTopStyle === "solid" && parseFloat(cs.borderTopWidth) >= 1 && (h1.content === "none" || h1.content === "normal"); })()
+      const square = (el) => ["borderTopLeftRadius", "borderTopRightRadius", "borderBottomLeftRadius", "borderBottomRightRadius"].every((k) => w.getComputedStyle(el)[k] === "0px");
+      return parseFloat(cs.borderTopWidth) === 0 && cs.boxShadow === "none" && square($('#login-form [name="email"]')) && square($("#login-submit"))
+        && (h1.content === "none" || h1.content === "normal"); })()
     && (() => { const logo = $(".auth-brand img.auth-mark"); return !!logo && logo.complete && logo.naturalWidth >= 150
       && new URL(logo.src).origin === w.location.origin && /\/assets\/logo-emblem\.png$/.test(new URL(logo.src).pathname); })()
     && !$(".auth-body .auth-brand") && !$(".auth-rule") && !$("#auth-screen .brand-mark") && !text("#auth-screen").includes("מודעת")
@@ -716,10 +721,12 @@ async function run() {
     const button = $("#login-submit").getBoundingClientRect().width;
     const field = $('#login-form [name="email"]').getBoundingClientRect().width;
     const img = $(".auth-photo"); const photo = img.getBoundingClientRect();
-    // Desktop/tablet-landscape: the whole 3:2 photograph is shown (not cropped) and the screen does not scroll vertically.
+    // V6 (approved Figma "01 — Login"): on desktop the photograph fills its panel (cover, no distortion) and the
+    // screen does not scroll vertically.
     const desktop = width >= 1024;
     const ratio = photo.width / photo.height;
-    const uncropped = !desktop || Math.abs(ratio - 1.5) < 0.02;
+    const panel = $(".auth-visual").getBoundingClientRect();
+    const uncropped = !desktop || (w.getComputedStyle(img).objectFit === "cover" && Math.abs(photo.height - panel.height) <= 1 && Math.abs(photo.width - panel.width) <= 1);
     const noVerticalScroll = !desktop || $("#auth-screen").scrollHeight <= w.innerHeight + 1;
     loginLayout.push({ width, ok: overflowX <= 1 && button >= 260 && field >= 260 && img.complete && img.naturalWidth > 0 && photo.width > 0 && photo.height > 0 && uncropped && noVerticalScroll,
       overflowX, button: Math.round(button), field: Math.round(field), photo: img.naturalWidth, ratio: Number(ratio.toFixed(2)), noVerticalScroll });
@@ -736,7 +743,10 @@ async function run() {
   w.location.hash = "#/client/c-test-0"; await sleep(500); const ov3 = overflow();
   await nav("payments"); await sleep(200); const ov4 = overflow();
   check("M1 mobile: no page-level horizontal overflow", ov1 <= 1 && ov2 <= 1 && ov3 <= 1 && ov4 <= 1, `${ov1},${ov2},${ov3},${ov4}`);
-  check("M2 mobile: nav visible", visible('.main-nav [data-view="payments"]'));
+  // V6: on a narrow screen the menu folds under "תפריט"; opening it shows every item.
+  const foldedClosed = !visible('.main-nav [data-view="payments"]');
+  $("#sidenav-toggle").click(); await sleep(100);
+  check("M2 mobile: the menu opens from 'תפריט' and shows every item", foldedClosed && visible('.main-nav [data-view="payments"]') && $("#sidenav-toggle").getAttribute("aria-expanded") === "true");
 }
 run().catch((e) => out.push("ERROR " + (e && e.stack || e))).finally(() => {
   const fails = out.filter((l) => !l.startsWith("PASS")).length;

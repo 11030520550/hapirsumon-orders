@@ -423,8 +423,8 @@ async function run() {
     from public.orders o join public.sheet_overview s on s.sheet_number = o.sheet_number
     where o.cancelled_at is null and coalesce(s.publication_date >= (now() at time zone 'Asia/Jerusalem')::date, not s.is_closed)`);
   check("E27 home: 'files not received' and 'ads not placed' equal the database counts for sheets not yet published",
-    deskCount("מודעות שהקובץ שלהן לא התקבל") === num(dbProd.nofile) && deskCount("מודעות שטרם שובצו") === num(dbProd.notplaced),
-    `${deskCount("מודעות שהקובץ שלהן לא התקבל")}/${dbProd.nofile} · ${deskCount("מודעות שטרם שובצו")}/${dbProd.notplaced}`);
+    deskCount("מודעות שטרם התקבלו") === num(dbProd.nofile) && deskCount("מודעות שטרם שובצו") === num(dbProd.notplaced),
+    `${deskCount("מודעות שטרם התקבלו")}/${dbProd.nofile} · ${deskCount("מודעות שטרם שובצו")}/${dbProd.notplaced}`);
 
   // ----- E28: reports equal the database; the report CSV is the table -----
   await nav("reports"); await sleep(300);

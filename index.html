@@ -6,13 +6,13 @@
   <meta name="theme-color" content="#233E50">
   <title>הפרסומון — ניהול הזמנות ופרסום</title>
   <link rel="preload" href="assets/fonts/rubik-hebrew.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="styles.css?v=20261126-1">
+  <link rel="stylesheet" href="styles.css?v=20261127-1">
   <link rel="stylesheet" href="assets/photos/photos.css?v=20261126-1">
   <!-- supabase-js pinned to 2.119.0 and served locally (vendor/); SHA-384 verified against jsDelivr's published hash. -->
   <script src="vendor/supabase-js-2.119.0.js" integrity="sha384-uteMfOloLDGt042uDz+xHGF3ym63/WQ6rFq7murQRG8Ih7QrXGEGNtWd8688sb4O"></script>
   <script src="supabase-config.js"></script>
-  <script src="app.js?v=20261125-1" defer></script>
-  <script src="business-app.js?v=20261125-1" defer></script>
+  <script src="app.js?v=20261127-1" defer></script>
+  <script src="business-app.js?v=20261127-1" defer></script>
 </head>
 <body>
   <svg class="svg-defs" width="0" height="0" aria-hidden="true">
@@ -37,7 +37,7 @@
       </header>
       <div class="auth-body">
         <h1 id="login-title">ברוכים השבים</h1>
-        <p class="auth-lede">הכניסה למערכת מיועדת לחשבונות שהוזמנו ואושרו מראש.</p>
+        <p class="auth-lede">כניסה לחשבון מאושר במערכת הפרסומון.</p>
         <form id="login-form" class="auth-form" aria-describedby="login-message">
           <label class="field-label">כתובת דואר אלקטרוני
             <input name="email" type="email" autocomplete="username" required maxlength="254" placeholder="name@example.com" dir="ltr" spellcheck="false">
@@ -53,7 +53,7 @@
             </span>
           </label>
           <p class="auth-status" id="login-message" role="status" aria-live="polite" data-tone=""></p>
-          <button class="button button-primary auth-submit" id="login-submit" type="submit"><span class="auth-spinner" aria-hidden="true"></span><span class="auth-submit-label">התחברות</span></button>
+          <button class="button button-primary auth-submit" id="login-submit" type="submit"><span class="auth-spinner" aria-hidden="true"></span><span class="auth-submit-label">כניסה למערכת</span></button>
         </form>
         <div class="auth-secondary-actions">
           <button class="button button-outline" id="auth-retry" type="button" hidden>ניסיון חוזר</button>
@@ -62,35 +62,39 @@
       </div>
     </section>
     <aside class="auth-visual" aria-hidden="true">
-      <!-- The full photograph is shown uncropped; a blurred copy of the same image fills the space around it. -->
-      <img class="auth-photo-ambient" src="assets/login-photo.jpg" alt="" width="1536" height="1024" decoding="async">
-      <img class="auth-photo" src="assets/login-photo.jpg" alt="" width="1536" height="1024" decoding="async" fetchpriority="high">
+      <!-- The photograph fills the panel (cover). To replace it: assets/photos/login.jpg, see IMAGE-ASSETS.md. -->
+      <img class="auth-photo" src="assets/photos/login.jpg" alt="" width="1536" height="1024" decoding="async" fetchpriority="high">
     </aside>
   </main>
   <div class="app-shell" id="app-shell" hidden>
-    <header class="sidebar appbar" aria-label="ניווט ראשי">
-      <a class="brand" href="#/dashboard" aria-label="הפרסומון — היום">
-        <img class="brand-emblem" src="assets/logo-emblem.png" width="42" height="42" alt="" decoding="async">
-        <span class="brand-copy"><strong>הפרסומון</strong><small>ניהול הזמנות ופרסום</small></span>
-      </a>
-      <button class="sidebar-cta" type="button" data-go="new-order"><span aria-hidden="true">＋</span> הזמנה חדשה</button>
-      <nav class="main-nav">
-        <button class="nav-link" type="button" data-view="dashboard">דף הבית</button>
-        <button class="nav-link" type="button" data-view="orders">הזמנות</button>
-        <button class="nav-link" type="button" data-view="sheets">גיליונות</button>
-        <button class="nav-link" type="button" data-view="clients">לקוחות</button>
-        <button class="nav-link" type="button" data-view="payments">גבייה</button>
-        <button class="nav-link" type="button" data-view="packages">חבילות</button>
-        <button class="nav-link" type="button" data-view="reports">דוחות</button>
-        <button class="nav-link" type="button" data-view="settings">הגדרות</button>
-      </nav>
-      <div class="sidebar-bottom">
-        <span class="storage-note" role="status" aria-live="polite"><span class="storage-dot"></span><span id="sync-status">מתחבר למסד הנתונים המשותף</span></span>
+    <header class="sidebar sidenav" id="sidenav" aria-label="ניווט ראשי">
+      <div class="sidenav-head">
+        <a class="brand" href="#/dashboard" aria-label="הפרסומון — בית">
+          <img class="brand-emblem" src="assets/logo-emblem.png" width="44" height="44" alt="" decoding="async">
+          <span class="brand-copy"><strong>הפרסומון</strong><small>ניהול חכם. פרסום מדויק.</small></span>
+        </a>
+        <button class="sidenav-toggle" id="sidenav-toggle" type="button" aria-controls="sidenav-body" aria-expanded="false">תפריט</button>
       </div>
-      <div class="topbar-actions">
-        <button class="button button-ghost import-button" id="open-import" type="button">גיבוי</button>
-        <button class="avatar" type="button" aria-label="המשתמש המחובר">מ</button>
-        <button class="button button-ghost sign-out-button" id="sign-out" type="button">יציאה</button>
+      <div class="sidenav-body" id="sidenav-body">
+        <nav class="main-nav">
+          <button class="nav-link" type="button" data-view="dashboard">בית</button>
+          <button class="nav-link" type="button" data-view="orders">הזמנות</button>
+          <button class="nav-link" type="button" data-view="clients">לקוחות</button>
+          <button class="nav-link" type="button" data-view="sheets">גיליונות</button>
+          <button class="nav-link" type="button" data-view="packages">חבילות</button>
+          <button class="nav-link" type="button" data-view="payments">גבייה</button>
+          <button class="nav-link" type="button" data-view="reports">דוחות</button>
+          <button class="nav-link" type="button" data-view="settings">הגדרות</button>
+        </nav>
+        <button class="sidebar-cta" type="button" data-go="new-order"><span aria-hidden="true">＋</span> הזמנה חדשה</button>
+        <div class="sidebar-bottom">
+          <span class="storage-note" role="status" aria-live="polite"><span class="storage-dot"></span><span id="sync-status">מתחבר למסד הנתונים המשותף</span></span>
+          <div class="topbar-actions">
+            <button class="avatar" type="button" aria-label="המשתמש המחובר">מ</button>
+            <button class="button button-ghost import-button" id="open-import" type="button">גיבוי וייבוא</button>
+          </div>
+          <button class="button button-ghost sign-out-button" id="sign-out" type="button">יציאה מהמערכת</button>
+        </div>
       </div>
     </header>
 
@@ -105,55 +109,32 @@
         <section class="page-view" data-page="dashboard" id="dashboard-view">
           <header class="masthead home-hero">
             <div class="hero-main">
-              <div class="masthead-dateline"><span id="masthead-date"></span><span id="masthead-hebrew-date" hidden></span><span class="masthead-edition" id="masthead-edition" hidden></span></div>
               <h1 class="masthead-title" id="masthead-greeting">שלום</h1>
-              <div class="page-actions">
-                <button class="button button-primary" type="button" data-go="new-order"><span class="button-plus">＋</span> הזמנה חדשה</button>
-                <button class="button button-outline" type="button" data-open-modal="client-modal"><span class="button-plus">＋</span> לקוח חדש</button>
-              </div>
+              <div class="masthead-dateline"><span id="masthead-date"></span><span id="masthead-hebrew-date" hidden></span><span class="masthead-edition" id="masthead-edition" hidden></span></div>
             </div>
             <div class="page-photo hero-photo" data-photo="home" aria-hidden="true"></div>
           </header>
-          <section class="hero-kpis" aria-label="מצב כספי">
-            <div class="is-key"><span>יתרה לתשלום</span><strong id="stat-balance">₪0</strong></div>
-            <div><span>חיובים פתוחים</span><strong id="stat-pending">0</strong></div>
-            <div><span>התקבל</span><strong id="stat-paid">₪0</strong></div>
-            <div><span id="stat-orders-label">הזמנות פעילות</span><strong id="stat-orders">0</strong></div>
+
+          <!-- Each figure: the true value (read by screen readers and tests) and, on top of it, the counting copy. -->
+          <section class="hero-kpis" id="home-kpis" aria-label="מצב כספי">
+            <div class="kpi"><span class="kpi-label">תקבולים החודש</span><strong class="kpi-value"><span class="kpi-final" id="stat-receipts-month">—</span><span class="kpi-count" aria-hidden="true"></span></strong></div>
+            <div class="kpi"><span class="kpi-label">חובות פתוחים</span><strong class="kpi-value"><span class="kpi-final" id="stat-balance">—</span><span class="kpi-count" aria-hidden="true"></span></strong></div>
+            <div class="kpi"><span class="kpi-label">חובות באיחור</span><strong class="kpi-value"><span class="kpi-final" id="stat-overdue">—</span><span class="kpi-count" aria-hidden="true"></span></strong></div>
+            <div class="kpi"><span class="kpi-label">הכנסות החודש</span><strong class="kpi-value"><span class="kpi-final" id="stat-income-month">—</span><span class="kpi-count" aria-hidden="true"></span></strong></div>
           </section>
 
-          <div class="desk-grid">
-            <section class="desk-panel is-sheets" aria-labelledby="desk-sheets-title">
-              <div class="desk-panel-head"><h2 id="desk-sheets-title">הגיליון הנוכחי והבא</h2><button class="link-button" type="button" data-go="sheets">כל הגיליונות</button></div>
-              <ul class="desk-list" id="desk-sheets"><li class="desk-empty">טוען נתונים…</li></ul>
+          <div class="home-desk">
+            <section class="next-sheet" aria-labelledby="next-sheet-kicker">
+              <p class="next-sheet-kicker" id="next-sheet-kicker">הגיליון הקרוב לפרסום</p>
+              <div id="desk-sheets"><p class="desk-empty">טוען נתונים…</p></div>
               <p class="desk-note" id="desk-sheets-note" hidden></p>
             </section>
-            <section class="desk-panel" aria-labelledby="desk-attention-title">
-              <div class="desk-panel-head"><h2 id="desk-attention-title">דורש תשומת לב</h2><p id="desk-attention-source"></p></div>
+            <section class="home-tasks" aria-labelledby="desk-attention-title">
+              <h2 id="desk-attention-title">משימות לטיפול</h2>
               <ul class="desk-list" id="desk-attention"><li class="desk-empty">טוען נתונים…</li></ul>
               <p class="desk-note" id="desk-attention-note" hidden></p>
+              <button class="link-button home-tasks-all" type="button" data-go="orders">כל ההזמנות <span aria-hidden="true">←</span></button>
             </section>
-          </div>
-
-          <div class="home-lower">
-            <section class="orders-section">
-              <div class="section-heading">
-                <div><h2>נכנסו לאחרונה</h2></div>
-                <button class="link-button" type="button" data-go="orders">לכל ההזמנות</button>
-              </div>
-              <div class="table-wrap">
-                <table>
-                  <thead><tr><th scope="col">מספר הזמנה</th><th scope="col">תאריך הזמנה</th><th scope="col">לקוח</th><th scope="col">גיליון</th><th scope="col">מוצר</th><th scope="col">חיוב</th><th scope="col">סטטוס</th></tr></thead>
-                  <tbody id="recent-orders-body"></tbody>
-                </table>
-              </div>
-            </section>
-            <nav class="quick-actions" aria-label="פעולות מהירות">
-              <h2 class="quick-actions-title">פעולות מהירות</h2>
-              <button class="quick-action biz-only" type="button" data-desk-go="payments" data-desk-select="#payments-filter" data-desk-value="open"><span class="nav-icon"><svg><use href="#i-payments"/></svg></span><span><strong>רישום תקבול</strong><small>חיוב פתוח, גם תשלום חלקי</small></span></button>
-              <button class="quick-action biz-only" type="button" data-go="packages"><span class="nav-icon"><svg><use href="#i-packages"/></svg></span><span><strong>רכישת חבילה</strong><small>קרדיטים ופריסת תשלומים</small></span></button>
-              <button class="quick-action" type="button" id="quick-current-sheet" data-go="sheets"><span class="nav-icon"><svg><use href="#i-issues"/></svg></span><span><strong id="quick-current-sheet-title">הגיליון הנוכחי</strong><small id="quick-current-sheet-text">ההזמנות והמודעות של השבוע</small></span></button>
-              <button class="quick-action" type="button" data-go="clients"><span class="nav-icon"><svg><use href="#i-clients"/></svg></span><span><strong>לקוחות</strong><small>חיפוש ותיק לקוח</small></span></button>
-            </nav>
           </div>
         </section>
 

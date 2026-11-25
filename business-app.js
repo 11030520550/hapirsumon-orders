@@ -340,29 +340,74 @@
     const noFile = orders.filter((order) => order.fileStatus === "not_received");
     const toApprove = orders.filter((order) => order.fileStatus === "received");
     const notPlaced = orders.filter((order) => order.placementStatus === "not_placed");
-    const item = (list, title, hint, select, value) => deskItem({ count: list.length, title, hint, meta: list.length ? `גיליון ${sheetsOf(list)}` : "",
+    const item = (list, title, hint, select, value) => taskItem({ count: list.length, title, hint: list.length ? `${hint} · גיליון ${sheetsOf(list)}` : hint,
       attrs: deskLink("orders", list.length && new Set(list.map((order) => order.sheetNumber)).size === 1 ? `#orders-sheet-filter|${select}` : select,
         list.length && new Set(list.map((order) => order.sheetNumber)).size === 1 ? `${list[0].sheetNumber}|${value}` : value) });
     return [
-      item(noFile, "מודעות שהקובץ שלהן לא התקבל", "בגיליונות שטרם פורסמו", "#orders-file-filter", "not_received"),
-      item(toApprove, "קבצים שהתקבלו וממתינים לאישור", "בגיליונות שטרם פורסמו", "#orders-file-filter", "received"),
+      item(noFile, "מודעות שטרם התקבלו", "בגיליונות שטרם פורסמו", "#orders-file-filter", "not_received"),
+      item(toApprove, "מודעות שממתינות לאישור", "בגיליונות שטרם פורסמו", "#orders-file-filter", "received"),
       item(notPlaced, "מודעות שטרם שובצו", "בגיליונות שטרם פורסמו", "#orders-placement-filter", "not_placed")
     ];
+  }
+  // A task line of the home screen: the title and the number only (the number opens the filtered list).
+  function taskItem({ count, title, hint, attrs = "" }) {
+    return `<li><button class="desk-item task-item${count > 0 ? "" : " is-calm"}" type="button" title="${escapeHtml(hint)}" ${attrs}>
+      <span class="desk-text"><strong>${escapeHtml(title)}</strong></span>
+      <span class="desk-count">${escapeHtml(number.format(count))}</span>
+    </button></li>`;
   }
 
   function deskLink(view, select = "", value = "") {
     return `data-desk-go="${escapeHtml(view)}" data-desk-select="${escapeHtml(select)}" data-desk-value="${escapeHtml(value)}"`;
   }
 
-  // The money strip of the dashboard: the same rows and sums as the payments screen and the reports.
+  // The money line of the home screen, from the same sources as the payments screen and the reports:
+  // - receipts this month: net of the receipts and reversals dated this month (the "receipts" report);
+  // - open debt and overdue debt: the open charges (the payments screen; the reports' "יתרה פתוחה" and "באיחור");
+  // - income this month: the cash charged, VAT included, on the orders dated this month, cancelled orders excluded
+  //   (the "orders" report for this month).
   function renderMoneyStrip(rows) {
-    const active = app().orders().filter((order) => !order.cancelledAt).length;
+    const month = localDateValue().slice(0, 7);
     const open = rows.filter((row) => !row.cancelled && row.outstanding > 0);
-    $("#stat-orders").textContent = number.format(active);
-    $("#stat-paid").textContent = money.format(roundMoney(rows.reduce((total, row) => total + row.received, 0)));
-    $("#stat-pending").textContent = number.format(open.length);
-    $("#stat-balance").textContent = money.format(roundMoney(open.reduce((total, row) => total + row.outstanding, 0)));
+    const receipts = state.events.filter((event) => ["payment", "reversal"].includes(event.event_type)
+      && String(event.received_on || String(event.event_at).slice(0, 10)).slice(0, 7) === month);
+    const income = app().orders().filter((order) => !order.cancelledAt && order.billingMode !== "credits" && String(order.orderDate).slice(0, 7) === month);
+    const setKpi = app().setKpi;
+    setKpi("stat-receipts-month", roundMoney(receipts.reduce((total, event) => total + Number(event.amount), 0)));
+    setKpi("stat-balance", roundMoney(open.reduce((total, row) => total + row.outstanding, 0)));
+    setKpi("stat-overdue", roundMoney(open.filter((row) => row.kind === "overdue").reduce((total, row) => total + row.outstanding, 0)));
+    setKpi("stat-income-month", roundMoney(income.reduce((total, order) => total + orderMoney(order).due, 0)));
   }
+
+  // The countdown to the closing of orders for the sheet on the home screen: the real closing time of the sheet
+  // (closes_at, which carries manual changes and holidays). Updated every 30 seconds while the home screen is open.
+  function countdownText(sheet) {
+    if (!sheet.closesAt || sheet.closed) return "";
+    const left = Date.parse(sheet.closesAt) - serverMs();
+    if (left <= 0) return "";
+    const minutes = Math.floor(left / 60000);
+    const days = Math.floor(minutes / 1440), hours = Math.floor((minutes % 1440) / 60), mins = minutes % 60;
+    const part = (n, one, many) => `<b>${escapeHtml(number.format(n))}</b> ${n === 1 ? one : many}`;
+    const parts = [days ? part(days, "יום", "ימים") : "", days || hours ? part(hours, "שעה", "שעות") : "", part(mins, "דקה", "דקות")].filter(Boolean);
+    return parts.join(" ");
+  }
+  function renderCountdown() {
+    const box = $("#next-sheet-countdown");
+    if (!box) return;
+    const sheet = sheetBoard().find((item) => item.number === box.dataset.sheet);
+    if (!sheet) return;
+    const text = countdownText(sheet);
+    if (!text && !sheet.closed && sheet.closesAt) { renderDashboard(); return; } // the moment it closed
+    const deadline = sheet.closesAt ? orderDeadline(sheet.closesAt) : null;
+    box.title = deadline ? deadline.title : "";
+    box.innerHTML = text
+      ? `<span class="countdown-label">ההזמנות נסגרות בעוד</span> <span class="countdown-time">${text}</span>${deadline ? `<span class="countdown-at">${escapeHtml(deadline.label)}</span>` : ""}`
+      : sheet.closed
+        ? `<span class="countdown-label">ההזמנות לגיליון נסגרו</span>${sheet.closedKind === "manual" && sheet.phase !== "historical" ? '<span class="countdown-at">נסגר ידנית</span>' : ""}`
+        : "";
+    box.hidden = box.innerHTML === "";
+  }
+  setInterval(() => { if (app() && app().route().name === "dashboard" && !document.hidden) renderCountdown(); }, 30000);
 
   function renderDashboard() {
     const attention = $("#desk-attention");
@@ -375,69 +420,54 @@
     if (!state.ready) {
       // Without the business schema only the order status is known.
       const pending = app().orders().filter((order) => order.billingMode !== "credits" && order.paymentStatus !== "paid");
-      $("#desk-attention-source").textContent = "לפי סטטוס ההזמנות";
       attention.innerHTML = deskItem({
         count: pending.length, title: "הזמנות שטרם שולמו", hint: "סטטוס התשלום בהזמנה הוא \"ממתין לתשלום\"",
         meta: "לרשימה", attrs: deskLink("orders", "#payment-filter", "pending")
       });
       attentionNote.hidden = false;
       attentionNote.textContent = "מעקב מועדי פירעון וחובות בפיגור זמין לאחר התקנת הסכימה העסקית.";
-      sheetsList.innerHTML = '<li class="desk-empty">מספרי גיליון נשמרים בהזמנות לאחר התקנת הסכימה העסקית.</li>';
+      sheetsList.innerHTML = '<p class="desk-empty">מספרי גיליון נשמרים בהזמנות לאחר התקנת הסכימה העסקית.</p>';
       sheetsNote.hidden = true;
       return;
     }
     if (!state.loaded) {
       attention.innerHTML = '<li class="desk-empty">טוען נתונים מהמסד…</li>';
-      sheetsList.innerHTML = '<li class="desk-empty">טוען נתונים מהמסד…</li>';
+      sheetsList.innerHTML = '<p class="desk-empty">טוען נתונים מהמסד…</p>';
       return;
     }
 
     const rows = obligationRows();
-    const weekAhead = localDateValue(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
-    const overdue = rows.filter((row) => row.kind === "overdue");
-    const dueSoon = rows.filter((row) => row.kind === "future" && row.dueOn <= weekAhead);
-    const undated = rows.filter((row) => row.kind === "undated");
-    const negative = app().clients().filter((client) => (state.balances.get(client.id) ?? 0) < 0);
-    $("#desk-attention-source").textContent = "לפי החיובים במסך התשלומים";
-    attention.innerHTML = [
-      deskItem({ count: overdue.length, title: "תשלומים באיחור", hint: "מועד הפירעון עבר והחיוב עדיין פתוח", meta: sum(overdue), tone: "alert", attrs: deskLink("payments", "#payments-filter", "overdue") }),
-      deskItem({ count: dueSoon.length, title: "לפירעון בשבוע הקרוב", hint: "חיובים שמועד הפירעון שלהם בשבעת הימים הקרובים", meta: sum(dueSoon), attrs: deskLink("payments", "#payments-filter", "week") }),
-      deskItem({ count: undated.length, title: "חיובים פתוחים ללא מועד פירעון", hint: "לא ייחשבו באיחור עד שייקבע להם מועד", meta: sum(undated), attrs: deskLink("payments", "#payments-filter", "undated") }),
-      deskItem({ count: negative.length, title: "לקוחות ביתרת קרדיטים שלילית", hint: "ניצלו יותר קרדיטים ממה שהוקצה להם", meta: "לבדיקה", attrs: deskLink("packages") }),
-      ...productionDesk()
-    ].join("");
+    const tasks = productionDesk();
+    attention.innerHTML = tasks.join("") || '<li class="desk-empty">מעקב הקבצים והשיבוץ זמין לאחר הפעלת מודול הגיליונות.</li>';
     attentionNote.hidden = true;
     renderMoneyStrip(rows);
 
-    // The sheet of the week (next to be published, also after it closed for orders) and the one after it.
+    // One sheet only: the one next to be published (also after it closed for orders, until it comes out).
     const board = sheetBoard();
-    const upcoming = state.sheetModel === "v2"
-      ? sheetHighlights(board).planned.slice(0, 2)
-      : board.filter((sheet) => !sheet.closed && sheet.orders > 0).sort((a, b) => compareSheets(a.number, b.number)).slice(0, 2);
+    const sheet = state.sheetModel === "v2"
+      ? sheetHighlights(board).next
+      : board.filter((item) => !item.closed && item.orders > 0).sort((a, b) => compareSheets(a.number, b.number))[0] || null;
     const edition = $("#masthead-edition");
-    if (edition) {
-      edition.hidden = upcoming.length === 0;
-      edition.textContent = upcoming.length ? `הגיליון הנוכחי · ${upcoming[0].number}` : "";
-    }
-    const current = upcoming[0];
-    const quick = $("#quick-current-sheet");
-    if (current) { delete quick.dataset.go; quick.dataset.sheetView = current.number; }
-    else { quick.dataset.go = "sheets"; delete quick.dataset.sheetView; }
-    $("#quick-current-sheet-title").textContent = current ? `גיליון ${current.number}` : "הגיליון הנוכחי";
-    $("#quick-current-sheet-text").textContent = current ? `${current.publication ? `${weekdayDate(current.publication)} · ` : ""}${number.format(current.orders)} הזמנות` : "ההזמנות והמודעות של השבוע";
-    sheetsList.innerHTML = upcoming.length ? upcoming.map((sheet, index) => {
+    if (edition) { edition.hidden = true; edition.textContent = ""; }
+    if (!sheet) {
+      sheetsList.innerHTML = '<p class="desk-empty">אין גיליון מתוכנן לפרסום. אפשר להוסיף גיליונות במסך "גיליונות".</p>';
+    } else {
       const p = sheetProduction(sheet.number);
-      const intake = sheetIntake(sheet);
-      return `<li class="desk-sheet">
-        <button class="desk-item sheet-item" type="button" data-sheet-view="${escapeHtml(sheet.number)}">
-          <span class="desk-count">${escapeHtml(sheet.number)}</span>
-          <span class="desk-text"><strong>${index === 0 ? "הגיליון הנוכחי" : "הגיליון הבא"}${sheet.publication ? ` · ${escapeHtml(weekdayDate(sheet.publication))}` : ""}</strong><small>${escapeHtml(`${number.format(p.orders)} הזמנות · ${number.format(sheet.clients.size)} לקוחות${intake.note ? ` · ${intake.note}` : ""}`)}</small></span>
-          <span class="desk-meta">${pill(sheet.closed ? "neutral" : "open", sheet.closed ? "סגור להזמנות" : "פתוח")}</span>
-        </button>
-        ${v3() && p.orders ? productionMeter(p) : ""}
-        ${v3() && p.orders ? `<div class="prod-chips desk-chips">${productionChips(sheet.number, p, { withPlaced: false }) || '<span class="prod-done">כל המודעות התקבלו, אושרו ושובצו.</span>'}</div>` : ""}
-      </li>`;
-    }).join("") : '<li class="desk-empty">אין גיליונות מתוכננים. אפשר להוסיף במסך "גיליונות".</li>';
+      // Ready = the file was approved (approved, placed or published), out of the sheet's active orders.
+      const ready = Math.max(p.orders - p.noFile - p.unknown - p.toApprove, 0);
+      const share = p.orders ? Math.round((ready / p.orders) * 100) : 0;
+      sheetsList.innerHTML = `<div class="next-sheet-body">
+        <h2 class="next-sheet-number"><button type="button" data-sheet-view="${escapeHtml(sheet.number)}">גיליון ${escapeHtml(sheet.number)}</button></h2>
+        <p class="next-sheet-date">${escapeHtml(sheet.publication ? weekdayDate(sheet.publication) : "ללא תאריך פרסום")}</p>
+        ${v3() ? `<div class="next-sheet-progress">
+          <span class="next-sheet-bar" role="progressbar" aria-valuemin="0" aria-valuemax="${p.orders}" aria-valuenow="${ready}" aria-label="מודעות מוכנות"><i data-share="${share}"></i></span>
+          <p>${p.orders ? `${escapeHtml(number.format(ready))} מתוך ${escapeHtml(number.format(p.orders))} מודעות מוכנות` : "אין עדיין הזמנות לגיליון"}</p>
+        </div>` : `<p class="next-sheet-meta">${escapeHtml(number.format(p.orders))} הזמנות</p>`}
+        <p class="next-sheet-countdown" id="next-sheet-countdown" data-sheet="${escapeHtml(sheet.number)}" hidden></p>
+        <button class="button button-primary next-sheet-enter" type="button" data-sheet-view="${escapeHtml(sheet.number)}">כניסה לגיליון</button>
+      </div>`;
+      renderCountdown();
+    }
     // Bar widths through the CSSOM (the CSP allows no inline style attributes).
     sheetsList.querySelectorAll("[data-share]").forEach((bar) => { bar.style.width = `${Number(bar.dataset.share) || 0}%`; });
     const notes = [];
