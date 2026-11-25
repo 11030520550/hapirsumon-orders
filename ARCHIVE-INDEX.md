@@ -71,6 +71,23 @@
 
 **עותק ZIP:** נמצא מחוץ ל-Repository, ב-`Desktop\hapirsumon-orders\ui-screenshots-v5-editorial-refined.zip`, ועותק נוסף ב-`Downloads`.
 
+## `archive/ui-screenshots-v6-editorial-implementation/`
+
+צילומי מסך של V6 (מימוש העיצוב מהפיגמה) מתאריך 25/11/2026: מסך הכניסה, התפריט הכחול בצד ימין ומסך הבית "Quiet Editorial".
+
+**מה יש בתיקייה:**
+- **14 צילומים:**
+  - כניסה.
+  - בית ב-1280, ב-1440 וב-1920.
+  - פריים מאמצע אנימציית המספרים.
+  - בית ותפריט פתוח במסך צר.
+  - שבעת יעדי הניווט.
+- **`before-after/`:** שתי השוואות בין V5 ל-V6, של הכניסה ושל הבית.
+
+**מקור הנתונים:** גרסת ההדגמה המקומית, עם **נתונים פיקטיביים בלבד**.
+
+**עותק ZIP:** נמצא מחוץ ל-Repository, ב-`Desktop\hapirsumon-orders\ui-screenshots-v6-editorial-implementation.zip`.
+
 ## כלים פעילים (לא בארכיון)
 
 `testing/browser/` — שרת מקומי, Supabase מדומה ובדיקות עדכניות. ראו `INSTALL.md`.
