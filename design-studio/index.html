@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>הפרסומון · Design Studio</title>
+  <meta name="description" content="סביבת העיצוב של מערכת ההזמנות של הפרסומון: מערכת רכיבים, צילום, מסכים ותנועה. נתוני דמה בלבד.">
+  <link rel="icon" href="../assets/logo-emblem.png">
+  <link rel="preload" href="../assets/fonts/rubik-hebrew.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="css/tokens.css">
+  <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/screens.css">
+  <link rel="stylesheet" href="css/studio.css">
+</head>
+<body>
+  <!-- The studio's own frame: neutral, thin, and visibly not part of the product. -->
+  <header class="studio-bar" id="studio-bar">
+    <a class="studio-mark" href="#/home">
+      <img src="../assets/logo-emblem.png" alt="" width="26" height="26">
+      <span><b>הפרסומון</b> Design Studio</span>
+    </a>
+    <nav class="studio-tabs" aria-label="תצוגות הסטודיו">
+      <a href="#/system" data-view="system">מערכת עיצוב</a>
+      <a href="#/photos" data-view="photos">צילום</a>
+      <a href="#/login" data-view="login">התחברות</a>
+      <a href="#/home" data-view="home">בית</a>
+      <a href="#/sheets" data-view="sheets">גיליונות</a>
+      <a href="#/motion" data-view="motion">תנועה</a>
+    </nav>
+    <div class="studio-tools">
+      <label class="switch studio-switch" title="מציג היכן ישולבו הצילומים שעוד חסרים">
+        <input type="checkbox" id="toggle-slots"> מקומות לצילום
+      </label>
+      <div class="studio-device" role="group" aria-label="גודל מסך">
+        <button type="button" data-device="desktop" aria-pressed="true">מחשב</button>
+        <button type="button" data-device="mobile" aria-pressed="false">נייד</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="studio-stage" id="stage" aria-live="polite"></div>
+
+  <div class="studio-phone" id="phone" hidden>
+    <div class="studio-phone-frame"><iframe id="phone-frame" title="תצוגת נייד" width="390" height="844"></iframe></div>
+    <p class="studio-phone-note">390×844 · אותה תצוגה, באותו קוד</p>
+  </div>
+
+  <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+  <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
+
+  <script src="js/data.js"></script>
+  <script src="js/studio.js"></script>
+</body>
+</html>

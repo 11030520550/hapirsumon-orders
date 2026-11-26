@@ -88,6 +88,19 @@
 
 **עותק ZIP:** נמצא מחוץ ל-Repository, ב-`Desktop\hapirsumon-orders\ui-screenshots-v6-editorial-implementation.zip`.
 
+## `archive/ui-screenshots-design-studio/`
+
+צילומי מסך של סביבת ה־Design Studio (Premium Editorial) מתאריך 26/11/2026.
+
+**מה יש בתיקייה (16 צילומים):**
+- **ב־1440 בחדות כפולה (@2x):** התחברות, בית, גיליונות (גם עם המקום המתוכנן לצילום), מערכת העיצוב, ספריית הצילום ותנועה.
+- **ב־1280 וב־1920:** בית, גיליונות והתחברות.
+- **בנייד, 390 (@2x):** בית, גיליונות והתחברות.
+
+**מקור הנתונים:** נתוני הדמה של הסטודיו, פיקטיביים בלבד.
+
+**עותק ZIP:** נמצא מחוץ ל־Repository, ב־`Desktop\hapirsumon-orders\ui-screenshots-design-studio.zip`.
+
 ## כלים פעילים (לא בארכיון)
 
 `testing/browser/` — שרת מקומי, Supabase מדומה ובדיקות עדכניות. ראו `INSTALL.md`.

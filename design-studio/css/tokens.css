@@ -1,0 +1,116 @@
+/* =====================================================================
+   HAPIRSUMON — Design Tokens (Design Studio, Premium Editorial)
+   The single source for colour, type, space, lines and motion.
+   Raw palette first, then roles. Components use roles only.
+   ===================================================================== */
+
+@font-face { font-family: "Rubik"; font-style: normal; font-weight: 300 600; font-display: swap;
+  src: url("../../assets/fonts/rubik-hebrew.woff2") format("woff2");
+  unicode-range: U+0307-0308, U+0590-05FF, U+200C-2010, U+20AA, U+25CC, U+FB1D-FB4F; }
+@font-face { font-family: "Rubik"; font-style: normal; font-weight: 300 600; font-display: swap;
+  src: url("../../assets/fonts/rubik-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+
+:root {
+  /* ---- Raw palette: the approved materials ---- */
+  --deep-blue: #36586C;     /* navigation, headings, large figures */
+  --smoky-blue: #527A92;    /* primary action, active item, progress */
+  --soft-blue: #8EAFC0;     /* lines and secondary text on deep blue; empty progress */
+  --honey: #D6B384;         /* a single warm hairline; highlights; never as text on white */
+  --caramel: #B78350;       /* attention: deadlines, awaiting */
+  --walnut: #795239;        /* small warm text: captions, dates, folios */
+  --white: #FFFFFF;
+  --cream: #FBF8F3;         /* the page under white sheets */
+  --linen: #F4EEE5;         /* one tonal block per screen at most */
+  --sand: #EADFCF;          /* warm hairline on cream */
+
+  /* ---- Derived neutrals (cool ink tinted by the deep blue) ---- */
+  --ink: #1F303B;           /* body text: 13.6:1 on white */
+  --ink-2: #4E5F69;         /* secondary text: 6.4:1 on white */
+  --ink-3: #74838C;         /* tertiary, placeholders: 4.0:1 (large or non-essential text only) */
+  --mist: #EEF3F5;          /* cool tint: hover rows, selected chips */
+  --mist-2: #DCE6EB;        /* cool hairline */
+
+  /* ---- Feedback (kept inside the palette's temperature) ---- */
+  --success: #4B735F;       /* moss, for "saved", "ready" */
+  --success-tint: #EBF1ED;
+  --danger: #A3473A;        /* brick, for errors only */
+  --danger-tint: #F7ECE9;
+  --attention: var(--caramel);  /* marks and indicators; 3.3:1 so not for small text */
+  --attention-text: #8A5A2B;    /* caramel deepened for small text: 5.6:1 */
+  --attention-tint: #F8EFE4;
+
+  /* ---- Roles ---- */
+  --surface: var(--white);
+  --surface-page: var(--white);
+  --surface-quiet: var(--cream);
+  --surface-feature: var(--linen);
+  --surface-nav: var(--deep-blue);
+  --text: var(--ink);
+  --text-2: var(--ink-2);
+  --text-3: var(--ink-3);
+  --text-heading: var(--deep-blue);
+  --text-warm: var(--walnut);
+  --text-on-blue: #FFFFFF;
+  --text-on-blue-2: #C9D9E1;
+  --action: var(--smoky-blue);
+  --action-hover: #46697E;
+  --action-press: var(--deep-blue);
+  --line: #E6E0D6;          /* default hairline: warm grey */
+  --line-strong: #CFC6B8;
+  --line-ink: var(--deep-blue);
+  --line-accent: var(--honey);
+  --focus: #527A92;
+
+  /* ---- Typography ---- */
+  --font: "Rubik", "Segoe UI", system-ui, sans-serif;
+  --w-light: 300;           /* headings, figures */
+  --w-text: 400;            /* reading */
+  --w-medium: 500;          /* buttons, labels, emphasis */
+
+  --fs-display: clamp(44px, 4.2vw, 64px);
+  --fs-h1: clamp(32px, 2.7vw, 40px);
+  --fs-h2: 28px;
+  --fs-h3: 20px;
+  --fs-lede: 19px;
+  --fs-body: 15.5px;
+  --fs-small: 14px;
+  --fs-label: 13px;
+  --fs-micro: 12px;
+  --fs-figure-xl: clamp(76px, 7.4vw, 112px);
+  --fs-figure-l: clamp(36px, 3.1vw, 46px);
+  --fs-figure-m: 30px;
+
+  --lh-tight: 1.08;
+  --lh-head: 1.2;
+  --lh-body: 1.62;
+
+  /* ---- Space (4-point, with editorial jumps) ---- */
+  --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 24px;
+  --s-6: 32px; --s-7: 48px; --s-8: 64px; --s-9: 96px; --s-10: 128px;
+  --gutter: clamp(24px, 3.6vw, 56px);
+  --measure: 62ch;
+
+  /* ---- Lines, corners, depth ---- */
+  --hair: 1px;
+  --radius: 0;              /* sharp corners throughout */
+  --shadow-dialog: 0 30px 70px -34px rgba(31, 48, 59, .38);
+  --shadow-pop: 0 14px 30px -18px rgba(31, 48, 59, .35);
+
+  /* ---- Layout ---- */
+  --nav-w: 248px;
+  --control-h: 44px;
+  --control-h-s: 36px;
+
+  /* ---- Motion ---- */
+  --ease: cubic-bezier(.2, .7, .2, 1);
+  --ease-in-out: cubic-bezier(.6, 0, .25, 1);
+  --t-fast: 140ms;
+  --t-base: 220ms;
+  --t-slow: 380ms;
+  --t-count: 1350ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --t-fast: 0ms; --t-base: 0ms; --t-slow: 0ms; --t-count: 0ms; }
+}
