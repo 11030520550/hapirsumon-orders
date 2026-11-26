@@ -163,8 +163,8 @@
 
   /* ---------- The product's navigation (shared by home and sheets) ---------- */
   const NAV = [["home", "בית"], ["orders", "הזמנות"], ["clients", "לקוחות"], ["sheets", "גיליונות"], ["packages", "חבילות"], ["payments", "גבייה"], ["reports", "דוחות"], ["settings", "הגדרות"]];
-  function shell(active, content) {
-    return `<div class="app">
+  function shell(active, content, cls = "") {
+    return `<div class="app${cls ? " " + cls : ""}">
       <aside class="sidenav" aria-label="ניווט ראשי">
         <div class="sidenav-head">
           <a class="brand" href="#/home"><img src="../assets/logo-emblem.png" alt="" width="44" height="44"><span><b>הפרסומון</b><small>ניהול חכם. פרסום מדויק.</small></span></a>
@@ -329,19 +329,9 @@
           <div class="disclose" id="sp-more"><div><div class="disclose-inner"><dl class="sp-more">${fig(overdue, "is-small is-attention")}${fig(income, "is-small")}</dl></div></div></div>
           <button type="button" class="sp-toggle" aria-expanded="false" aria-controls="sp-more"><span>עוד נתוני החודש</span>${icon("chevron", "icon-s chevron")}</button>
         </section>
+      </section>
 
-        <section class="sp-block sp-sheet" aria-labelledby="sp-sheet-title">
-          <h2 class="sp-label" id="sp-sheet-title">הגיליון הקרוב</h2>
-          <div class="sp-sheet-row">
-            <p class="sp-sheet-no num">${s.number}</p>
-            <p class="sp-sheet-date">${dayName(s.date)}<br><span class="num">${shortDate(s.date)}</span></p>
-          </div>
-          ${segmentsHTML(s)}
-          <p class="sp-ready"><span><b class="num">${r.ready}</b> מתוך <b class="num">${r.total}</b> מודעות מוכנות</span><span class="sp-pct num">${r.pct}%</span></p>
-          <p class="sp-close" id="sp-close" role="timer">${closingPhrase(s)}<small>${dayName(s.closes)} ${dm(s.closes)}, ${hm(s.closes)}</small></p>
-          <a class="link-quiet sp-enter" href="#/sheets">כניסה לגיליון ${icon("arrow", "icon-s")}</a>
-        </section>
-
+      <section class="split-paper split-paper-foot" aria-label="משימות">
         <section class="sp-block sp-tasks" aria-labelledby="sp-tasks-title">
           <h2 class="sp-label" id="sp-tasks-title">משימות לטיפול</h2>
           <ul>${D.tasks.map((t) => `<li><a class="sp-task${t.count ? "" : " is-clear"}" href="#/sheets" data-say="נפתחת רשימת ההזמנות המסוננת: ${t.title}"><span class="num">${t.count}</span><small>${t.title.replace("מודעות ", "")}</small></a></li>`).join("")}</ul>
@@ -349,10 +339,28 @@
       </section>
 
       <figure class="split-photo">
-        <img src="${SPLIT_PHOTO}" alt="סלון עם שתי כורסאות קטיפה כחולות, ציור שמן במסגרת מוזהבת, שולחן קונסולה ורצפת עץ">
-        <figcaption class="split-plate"><span>${icon("image")}צילום אדריכלי לגובה מלא · 3:4</span><small>הקובץ הפרטי לא נמצא ב־<span class="latin">design-studio/private/</span></small></figcaption>
+        <div class="split-frame"><img src="${SPLIT_PHOTO}" width="982" height="737" alt="סלון עם שתי כורסאות קטיפה כחולות, ציור שמן במסגרת מוזהבת, שולחן קונסולה, דלת פתוחה לחדר הסמוך ורצפת עץ"></div>
+        <figcaption class="split-caption">אור צהריים בסלון הקריאה</figcaption>
+        <div class="split-plate"><span>${icon("image")}צילום אדריכלי · 4:3</span><small>הקובץ הפרטי לא נמצא ב־<span class="latin">design-studio/private/</span></small></div>
       </figure>
-    </div>`);
+
+        <section class="sp-strip sp-sheet" aria-labelledby="sp-sheet-title">
+          <div class="sp-s-id">
+            <h2 class="sp-label" id="sp-sheet-title">הגיליון הקרוב</h2>
+            <p class="sp-sheet-no num">${s.number}</p>
+            <p class="sp-sheet-date">${dayName(s.date)} · <span class="num">${shortDate(s.date)}</span></p>
+          </div>
+          <div class="sp-s-ready">
+            <p class="sp-ready"><span><b class="num">${r.ready}</b> מתוך <b class="num">${r.total}</b> מודעות מוכנות</span><span class="sp-pct num">${r.pct}%</span></p>
+            ${segmentsHTML(s)}
+          </div>
+          <div class="sp-s-close">
+            <p class="sp-close" id="sp-close" role="timer">${closingPhrase(s)}<small>${dayName(s.closes)} ${dm(s.closes)}, ${hm(s.closes)}</small></p>
+            <a class="link-quiet sp-enter" href="#/sheets">כניסה לגיליון ${icon("arrow", "icon-s")}</a>
+          </div>
+        </section>
+
+    </div>`, "app-split");
   }
   function bindHomeSplit(root) {
     setTimeout(() => playCounts(root), 120);
