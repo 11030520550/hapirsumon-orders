@@ -85,4 +85,3 @@
 **פרומפט:**
 
 > Editorial photograph of neatly stacked paper folders and printed pages with softly blurred tables, reading glasses, a walnut desk, a desk lamp switched off, daylight, orderly and professional, natural colour, no readable text, 4:1 banner
-
