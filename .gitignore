@@ -69,5 +69,8 @@ orders-netlify-ready/
 # Design inspiration (screenshots from stock-photo sites; not licensed for use) stays local only.
 design-references/inspiration/
 
+# Design Studio private review assets (rights not yet cleared): local only, never pushed.
+design-studio/private/
+
 # PGlite package for testing/postgres (downloaded from npm, see testing/postgres/README.md).
 testing/postgres/package/

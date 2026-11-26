@@ -301,6 +301,75 @@
     $$(".task", root).forEach((a) => a.addEventListener("click", () => toast(a.dataset.say, { icon: "info" })));
   }
 
+  /* ---------- Screen: Home, Editorial Split (experiment beside V1; V1 above is unchanged) ----------
+     Three vertical bands: the blue navigation, a quiet paper column, and a full-height photograph.
+     The photograph is a private review asset (design-studio/private/, never pushed); without it the band
+     shows a plain plate, so a fresh clone still works. */
+  const SPLIT_PHOTO = "private/editorial-split.png";
+  function closingPhrase(s) {
+    const c = countdownParts(s.closes);
+    if (c.over) return "ההזמנות לגיליון נסגרו";
+    const unit = (n, one, many) => (n === 1 ? one : `${n} ${many}`);
+    const parts = c.d ? [unit(c.d, "יום", "ימים"), unit(c.h, "שעה", "שעות")] : [unit(c.h, "שעה", "שעות"), unit(c.m, "דקה", "דקות")];
+    return `נסגר בעוד <b>${parts[0]}</b> ו־<b>${parts[1]}</b>`;
+  }
+  function viewHomeSplit() {
+    const now = new Date(); const s = D.next; const r = sheetReadiness(s);
+    const [rec, open, overdue, income] = D.money;
+    const fig = (m, cls = "") => `<div class="sp-figure ${cls}"><dt>${m.label}</dt><dd class="sp-value">${countable(m.value)}</dd></div>`;
+    return shell("home", `<div class="split">
+      <section class="split-paper" aria-label="סקירת היום">
+        <header class="sp-head">
+          <p class="sp-date">${dayName(now)}, ${he({ day: "numeric", month: "long" }).format(now)}<span>${hebrewDate(now)}</span></p>
+          <h1 class="sp-greeting">${greeting(now)}</h1>
+        </header>
+
+        <section class="sp-block sp-money" aria-label="כספי החודש" data-replay>
+          <dl class="sp-figures">${fig(rec)}${fig(open)}</dl>
+          <div class="disclose" id="sp-more"><div><div class="disclose-inner"><dl class="sp-more">${fig(overdue, "is-small is-attention")}${fig(income, "is-small")}</dl></div></div></div>
+          <button type="button" class="sp-toggle" aria-expanded="false" aria-controls="sp-more"><span>עוד נתוני החודש</span>${icon("chevron", "icon-s chevron")}</button>
+        </section>
+
+        <section class="sp-block sp-sheet" aria-labelledby="sp-sheet-title">
+          <h2 class="sp-label" id="sp-sheet-title">הגיליון הקרוב</h2>
+          <div class="sp-sheet-row">
+            <p class="sp-sheet-no num">${s.number}</p>
+            <p class="sp-sheet-date">${dayName(s.date)}<br><span class="num">${shortDate(s.date)}</span></p>
+          </div>
+          ${segmentsHTML(s)}
+          <p class="sp-ready"><span><b class="num">${r.ready}</b> מתוך <b class="num">${r.total}</b> מודעות מוכנות</span><span class="sp-pct num">${r.pct}%</span></p>
+          <p class="sp-close" id="sp-close" role="timer">${closingPhrase(s)}<small>${dayName(s.closes)} ${dm(s.closes)}, ${hm(s.closes)}</small></p>
+          <a class="link-quiet sp-enter" href="#/sheets">כניסה לגיליון ${icon("arrow", "icon-s")}</a>
+        </section>
+
+        <section class="sp-block sp-tasks" aria-labelledby="sp-tasks-title">
+          <h2 class="sp-label" id="sp-tasks-title">משימות לטיפול</h2>
+          <ul>${D.tasks.map((t) => `<li><a class="sp-task${t.count ? "" : " is-clear"}" href="#/sheets" data-say="נפתחת רשימת ההזמנות המסוננת: ${t.title}"><span class="num">${t.count}</span><small>${t.title.replace("מודעות ", "")}</small></a></li>`).join("")}</ul>
+        </section>
+      </section>
+
+      <figure class="split-photo">
+        <img src="${SPLIT_PHOTO}" alt="סלון עם שתי כורסאות קטיפה כחולות, ציור שמן במסגרת מוזהבת, שולחן קונסולה ורצפת עץ">
+        <figcaption class="split-plate"><span>${icon("image")}צילום אדריכלי לגובה מלא · 3:4</span><small>הקובץ הפרטי לא נמצא ב־<span class="latin">design-studio/private/</span></small></figcaption>
+      </figure>
+    </div>`);
+  }
+  function bindHomeSplit(root) {
+    setTimeout(() => playCounts(root), 120);
+    const img = $(".split-photo img", root);
+    const missing = () => root.querySelector(".split-photo").classList.add("is-missing");
+    if (img.complete && !img.naturalWidth) missing(); else img.addEventListener("error", missing);
+    const t = $(".sp-toggle", root); const box = $("#sp-more", root);
+    t.addEventListener("click", () => {
+      const open = box.classList.toggle("is-open"); t.setAttribute("aria-expanded", String(open));
+      $("span", t).textContent = open ? "פחות נתונים" : "עוד נתוני החודש";
+      if (open) setTimeout(() => playCounts(box), 120);
+    });
+    clearInterval(countdownTimer);
+    countdownTimer = setInterval(() => { const el = $("#sp-close", root); if (el && el.isConnected) el.innerHTML = `${closingPhrase(D.next)}<small>${dayName(D.next.closes)} ${dm(D.next.closes)}, ${hm(D.next.closes)}</small>`; else clearInterval(countdownTimer); }, 30000);
+    $$(".sp-task", root).forEach((a) => a.addEventListener("click", () => toast(a.dataset.say, { icon: "info" })));
+  }
+
   /* ---------- Screen: Sheets ---------- */
   function sheetStatus(s) {
     if (s.status === "published") return { tone: "published", text: "פורסם" };
@@ -625,7 +694,7 @@
   }
 
   /* ---------- Router ---------- */
-  const VIEWS = { system: [viewSystem, bindSystem], photos: [viewPhotos, bindPhotos], login: [viewLogin, bindLogin], home: [viewHome, bindHome], sheets: [viewSheets, bindSheets], motion: [viewMotion, (r) => bindDemos(r)] };
+  const VIEWS = { system: [viewSystem, bindSystem], photos: [viewPhotos, bindPhotos], login: [viewLogin, bindLogin], home: [viewHome, bindHome], split: [viewHomeSplit, bindHomeSplit], sheets: [viewSheets, bindSheets], motion: [viewMotion, (r) => bindDemos(r)] };
   const stage = $("#stage");
   let current = null;
   function route() {

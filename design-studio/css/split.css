@@ -1,0 +1,103 @@
+/* =====================================================================
+   Home — Editorial Split (experiment). Three vertical bands:
+   blue navigation | a quiet paper column | a full-height architectural photograph.
+   Uses the V1 tokens and components; nothing here changes V1.
+   ===================================================================== */
+
+.split {
+  --paper: #F5F3EE;          /* stone-cream: a shade greyer than --cream, so the photograph's cool walls sit beside it */
+  --rule: #DCCFBA;           /* honey hairline, deepened to read on the stone-cream paper */
+  --photo-h: calc(100vh - var(--bar-h));
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) min(calc(var(--photo-h) * .75), 54%);
+  min-height: var(--photo-h);
+  background: var(--paper);
+}
+
+/* ---------- The paper column ---------- */
+.split-paper { display: flex; flex-direction: column; padding: clamp(28px, 4.4vh, 56px) clamp(32px, 4.4vw, 72px) 28px; }
+.split-paper > * { width: 100%; max-width: 500px; margin-inline: auto; }
+.sp-head { padding-bottom: clamp(18px, 2.8vh, 28px); }
+.sp-date { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: var(--fs-small); color: var(--text-warm); }
+.sp-date span { display: inline-flex; align-items: center; gap: 10px; color: var(--text-3); }
+.sp-date span::before { content: ""; width: 3px; height: 3px; background: var(--honey); }
+.sp-greeting { margin-top: 8px; font-size: clamp(34px, 3vw, 44px); font-weight: var(--w-light); line-height: 1.1; color: var(--deep-blue); }
+
+.sp-block { padding-block: clamp(16px, 2.6vh, 26px); border-top: var(--hair) solid var(--rule); }
+.sp-label { font-size: 16px; font-weight: var(--w-text); color: var(--text-warm); }
+
+/* Money: two figures lead; the other two open on request */
+.sp-figures { display: grid; gap: clamp(10px, 1.8vh, 18px); }
+.sp-figure dt { font-size: 16px; color: var(--text-2); }
+.sp-value { margin-top: 4px; font-size: clamp(34px, 2.9vw, 42px); font-weight: var(--w-light); line-height: 1.12; color: var(--deep-blue); }
+.sp-more { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; padding-top: 22px; }
+.sp-figure.is-small dt { font-size: var(--fs-label); }
+.sp-figure.is-small .sp-value { font-size: 26px; }
+.sp-figure.is-attention dt { display: flex; align-items: center; gap: 7px; }
+.sp-figure.is-attention dt::before { content: ""; width: 6px; height: 6px; background: var(--caramel); }
+.sp-toggle {
+  display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; padding: 4px 0; border: 0; background: none;
+  font-size: var(--fs-label); color: var(--smoky-blue); transition: color var(--t-fast) var(--ease);
+}
+.sp-toggle:hover { color: var(--deep-blue); }
+
+/* The next sheet */
+.sp-sheet-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-top: 6px; }
+.sp-sheet-no { font-size: clamp(50px, 4.2vw, 62px); font-weight: var(--w-light); line-height: .95; color: var(--deep-blue); letter-spacing: -.015em; }
+.sp-sheet-date { font-size: var(--fs-label); color: var(--text-2); text-align: end; line-height: 1.5; }
+.sp-sheet .segments { height: 5px; gap: 3px; margin-top: 14px; }
+.sp-sheet .segments > span:hover { transform: scaleY(2); }
+.sp-ready { display: flex; justify-content: space-between; gap: 12px; margin-top: 12px; font-size: var(--fs-small); color: var(--text); }
+.sp-ready b { font-weight: var(--w-medium); color: var(--deep-blue); }
+.sp-pct { color: var(--text-2); }
+.sp-close { margin-top: 14px; font-size: var(--fs-body); color: var(--ink); }
+.sp-close b { font-weight: var(--w-medium); color: var(--deep-blue); }
+.sp-close small { display: block; margin-top: 3px; font-size: var(--fs-micro); color: var(--text-warm); }
+.sp-enter { margin-top: 10px; }
+
+/* Tasks: three counts in a row, each opens the filtered list */
+.sp-tasks ul { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 12px; }
+.sp-tasks li + li { border-inline-start: var(--hair) solid var(--rule); padding-inline-start: 16px; }
+.sp-tasks li:not(:last-child) { padding-inline-end: 12px; }
+.sp-task { display: grid; gap: 4px; color: inherit; text-decoration: none; }
+.sp-task .num { font-size: 30px; font-weight: var(--w-light); line-height: 1; color: var(--deep-blue); transition: color var(--t-fast) var(--ease); }
+.sp-task small { font-size: var(--fs-micro); line-height: 1.4; color: var(--text-2); }
+.sp-task:hover .num { color: var(--smoky-blue); }
+.sp-task:hover small { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--rule); }
+.sp-task.is-clear .num { color: var(--text-3); }
+
+/* ---------- The photograph ---------- */
+.split-photo { position: sticky; top: var(--bar-h); align-self: start; height: var(--photo-h); margin: 0; overflow: hidden; background: #DDE2E1; }
+.split-photo img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: 50% 50%; }
+.split-plate { display: none; }
+.split-photo.is-missing img { display: none; }
+.split-photo.is-missing { background: var(--linen); border-inline-start: var(--hair) solid var(--sand); }
+.split-photo.is-missing .split-plate { display: grid; place-content: center; justify-items: center; gap: 6px; height: 100%; color: var(--text-warm); font-size: var(--fs-micro); }
+.split-plate span { display: inline-flex; align-items: center; gap: 8px; }
+.split-plate small { color: var(--text-3); }
+
+/* Entry: the photograph settles in slowly; the paper column follows the view's own fade */
+.view.is-entering .split-photo img { transform: scale(1.03); }
+.split-photo img { transition: transform 1.4s var(--ease); }
+@media (prefers-reduced-motion: reduce) { .split-photo img { transition: none; } }
+
+/* ---------- Responsive ---------- */
+@media (max-width: 1180px) {
+  .split { grid-template-columns: minmax(0, 1fr) min(calc(var(--photo-h) * .75), 46%); }
+}
+@media (max-height: 760px) and (min-width: 761px) {
+  .sp-sheet-no { font-size: 52px; }
+  .sp-value { font-size: 32px; }
+}
+@media (max-width: 1024px) {
+  .split { --photo-h: calc(100vh - var(--bar-h) - 62px); }
+  .split-photo { top: calc(var(--bar-h) + 62px); }
+}
+@media (max-width: 760px) {
+  .split { grid-template-columns: 1fr; }
+  .split-photo { order: -1; position: static; height: auto; aspect-ratio: 3 / 4; max-height: 72vh; }
+  .split-photo.is-missing { aspect-ratio: 16 / 9; }
+  .split-paper { padding: 28px 20px 40px; }
+  .split-paper > * { max-width: none; }
+  .sp-greeting { font-size: 34px; }
+}
