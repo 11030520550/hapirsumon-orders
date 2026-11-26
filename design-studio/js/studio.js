@@ -378,6 +378,69 @@
     $$(".sp-task", root).forEach((a) => a.addEventListener("click", () => toast(a.dataset.say, { icon: "info" })));
   }
 
+  /* ---------- Screen: Home, Full Height Editorial (third experiment; V1 and Editorial Split are unchanged) ----------
+     From right to left: the photograph at half the screen's width and its full height | the content | the navigation.
+     Nothing above or below the photograph. The 4:3 picture is cropped at the sides only (object-fit: cover, never
+     stretched), positioned so both armchairs, the painting and the console stay whole. Same private file as Split. */
+  function viewFullHeight() {
+    const now = new Date(); const s = D.next; const r = sheetReadiness(s);
+    const [rec, open, overdue, income] = D.money;
+    const fig = (m, cls = "") => `<div class="fh-figure ${cls}"><dt>${m.label}</dt><dd class="fh-value">${countable(m.value)}</dd></div>`;
+    return shell("home", `<div class="fh">
+      <section class="fh-content" aria-label="סקירת היום">
+        <header class="fh-head">
+          <p class="fh-date">${dayName(now)}, ${he({ day: "numeric", month: "long" }).format(now)}<span>${hebrewDate(now)}</span></p>
+          <h1 class="fh-greeting">${greeting(now)}</h1>
+        </header>
+
+        <section class="fh-block fh-money" aria-label="כספי החודש" data-replay>
+          <dl class="fh-figures">${fig(rec)}${fig(open)}</dl>
+          <div class="disclose" id="fh-more"><div><div class="disclose-inner"><dl class="fh-more">${fig(overdue, "is-small is-attention")}${fig(income, "is-small")}</dl></div></div></div>
+          <button type="button" class="fh-toggle" aria-expanded="false" aria-controls="fh-more"><span>עוד נתוני החודש</span>${icon("chevron", "icon-s chevron")}</button>
+        </section>
+
+        <section class="fh-block fh-sheet" aria-labelledby="fh-sheet-title">
+          <h2 class="fh-label" id="fh-sheet-title">הגיליון הקרוב</h2>
+          <div class="fh-sheet-row">
+            <p class="fh-sheet-no num">${s.number}</p>
+            <p class="fh-sheet-date">${dayName(s.date)}<br><span class="num">${shortDate(s.date)}</span></p>
+          </div>
+          ${segmentsHTML(s)}
+          <p class="fh-ready"><span><b class="num">${r.ready}</b> מתוך <b class="num">${r.total}</b> מודעות מוכנות</span><span class="fh-pct num">${r.pct}%</span></p>
+          <div class="fh-close-row">
+            <p class="fh-close" id="fh-close" role="timer">${closingPhrase(s)}<small>${dayName(s.closes)} ${dm(s.closes)}, ${hm(s.closes)}</small></p>
+            <a class="link-quiet" href="#/sheets">כניסה לגיליון ${icon("arrow", "icon-s")}</a>
+          </div>
+        </section>
+
+        <section class="fh-block fh-tasks" aria-labelledby="fh-tasks-title">
+          <h2 class="fh-label" id="fh-tasks-title">משימות לטיפול</h2>
+          <ul>${D.tasks.map((t) => `<li><a class="fh-task${t.count ? "" : " is-clear"}" href="#/sheets" data-say="נפתחת רשימת ההזמנות המסוננת: ${t.title}"><span class="num">${t.count}</span><small>${t.title.replace("מודעות ", "")}</small></a></li>`).join("")}</ul>
+        </section>
+      </section>
+
+      <figure class="fh-photo">
+        <img src="${SPLIT_PHOTO}" width="982" height="737" alt="סלון עם שתי כורסאות קטיפה כחולות, ציור שמן במסגרת מוזהבת ושולחן קונסולה">
+        <div class="fh-plate"><span>${icon("image")}צילום לגובה מלא</span><small>הקובץ הפרטי לא נמצא ב־<span class="latin">design-studio/private/</span></small></div>
+      </figure>
+    </div>`, "app-fh");
+  }
+  function bindFullHeight(root) {
+    setTimeout(() => playCounts(root), 120);
+    const img = $(".fh-photo img", root);
+    const missing = () => root.querySelector(".fh-photo").classList.add("is-missing");
+    if (img.complete && !img.naturalWidth) missing(); else img.addEventListener("error", missing);
+    const t = $(".fh-toggle", root); const box = $("#fh-more", root);
+    t.addEventListener("click", () => {
+      const open = box.classList.toggle("is-open"); t.setAttribute("aria-expanded", String(open));
+      $("span", t).textContent = open ? "פחות נתונים" : "עוד נתוני החודש";
+      if (open) setTimeout(() => playCounts(box), 120);
+    });
+    clearInterval(countdownTimer);
+    countdownTimer = setInterval(() => { const el = $("#fh-close", root); if (el && el.isConnected) el.innerHTML = `${closingPhrase(D.next)}<small>${dayName(D.next.closes)} ${dm(D.next.closes)}, ${hm(D.next.closes)}</small>`; else clearInterval(countdownTimer); }, 30000);
+    $$(".fh-task", root).forEach((a) => a.addEventListener("click", () => toast(a.dataset.say, { icon: "info" })));
+  }
+
   /* ---------- Screen: Sheets ---------- */
   function sheetStatus(s) {
     if (s.status === "published") return { tone: "published", text: "פורסם" };
@@ -702,7 +765,7 @@
   }
 
   /* ---------- Router ---------- */
-  const VIEWS = { system: [viewSystem, bindSystem], photos: [viewPhotos, bindPhotos], login: [viewLogin, bindLogin], home: [viewHome, bindHome], split: [viewHomeSplit, bindHomeSplit], sheets: [viewSheets, bindSheets], motion: [viewMotion, (r) => bindDemos(r)] };
+  const VIEWS = { system: [viewSystem, bindSystem], photos: [viewPhotos, bindPhotos], login: [viewLogin, bindLogin], home: [viewHome, bindHome], split: [viewHomeSplit, bindHomeSplit], fullheight: [viewFullHeight, bindFullHeight], sheets: [viewSheets, bindSheets], motion: [viewMotion, (r) => bindDemos(r)] };
   const stage = $("#stage");
   let current = null;
   function route() {

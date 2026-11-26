@@ -1,0 +1,120 @@
+/* =====================================================================
+   Home — Full Height Editorial (third experiment). From right to left:
+   the photograph (half the screen's width, its full height) | the content | the blue navigation.
+   Nothing above or below the photograph; it is part of the structure, not a banner.
+   Uses the V1 tokens and components; V1 and Editorial Split are unchanged.
+   ===================================================================== */
+
+/* Navigation on the left, without the 01–08 folios, for this view only. */
+.app-fh { grid-template-columns: minmax(0, 1fr) var(--nav-w); }
+.app-fh .sidenav { order: 2; scrollbar-width: none; }
+.app-fh .sidenav::-webkit-scrollbar { display: none; }
+.app-fh .nav-item small { display: none; }
+
+.fh {
+  --paper: #F5F3EE;          /* the stone-cream of Editorial Split */
+  --rule: #DCCFBA;
+  --view-h: calc(100vh - var(--bar-h));
+  display: grid;
+  grid-template-columns: 50vw minmax(0, 1fr);     /* RTL: the first column is the right one */
+  min-height: var(--view-h);
+  background: var(--paper);
+}
+
+/* ---------- The photograph: half the width, the full height ---------- */
+.fh-photo { order: -1; position: sticky; top: var(--bar-h); align-self: start; height: var(--view-h); margin: 0; overflow: hidden; background: #C9CFCC; }
+.fh-photo img {
+  display: block; width: 100%; height: 100%;
+  object-fit: cover;               /* scaled evenly, never stretched; only the sides fall outside the frame */
+  object-position: 47% 50%;        /* keeps both armchairs, the lamp, the painting and the console whole */
+}
+.fh-plate { display: none; }
+.fh-photo.is-missing img { display: none; }
+.fh-photo.is-missing { background: var(--linen); }
+.fh-photo.is-missing .fh-plate { display: grid; place-content: center; justify-items: center; gap: 6px; height: 100%; color: var(--text-warm); font-size: var(--fs-micro); }
+.fh-plate span { display: inline-flex; align-items: center; gap: 8px; }
+.fh-plate small { color: var(--text-3); }
+
+/* ---------- The content column ---------- */
+.fh-content { display: flex; flex-direction: column; padding: clamp(28px, 4.6vh, 56px) clamp(28px, 3.4vw, 64px) clamp(24px, 3.4vh, 40px); }
+.fh-content > * { width: 100%; max-width: 480px; margin-inline: auto; }
+.fh-head { padding-bottom: clamp(16px, 2.4vh, 24px); }
+.fh-date { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: var(--fs-small); color: var(--text-warm); }
+.fh-date span { display: inline-flex; align-items: center; gap: 10px; color: var(--text-3); }
+.fh-date span::before { content: ""; width: 3px; height: 3px; background: var(--honey); }
+.fh-greeting { margin-top: 6px; font-size: clamp(32px, 2.8vw, 46px); font-weight: var(--w-light); line-height: 1.1; color: var(--deep-blue); }
+
+.fh-block { padding-block: clamp(14px, 2.4vh, 24px); border-top: var(--hair) solid var(--rule); }
+.fh-label { font-size: 16px; font-weight: var(--w-text); color: var(--text-warm); }
+
+/* Money: directly under the greeting; two figures lead, two more on request */
+.fh-figures { display: grid; gap: clamp(8px, 1.6vh, 16px); }
+.fh-figure dt { font-size: 16px; color: var(--text-2); }
+.fh-value { margin-top: 2px; font-size: clamp(32px, 2.7vw, 42px); font-weight: var(--w-light); line-height: 1.12; color: var(--deep-blue); }
+.fh-more { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; padding-top: 18px; }
+.fh-figure.is-small dt { font-size: var(--fs-label); }
+.fh-figure.is-small .fh-value { font-size: 24px; }
+.fh-figure.is-attention dt { display: flex; align-items: center; gap: 7px; }
+.fh-figure.is-attention dt::before { content: ""; width: 6px; height: 6px; background: var(--caramel); }
+.fh-toggle {
+  display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; padding: 4px 0; border: 0; background: none;
+  font-size: var(--fs-label); color: var(--smoky-blue); transition: color var(--t-fast) var(--ease);
+}
+.fh-toggle:hover { color: var(--deep-blue); }
+
+/* The next sheet, back in the content column */
+.fh-sheet-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-top: 4px; }
+.fh-sheet-no { font-size: clamp(48px, 4vw, 62px); font-weight: var(--w-light); line-height: .95; color: var(--deep-blue); letter-spacing: -.015em; }
+.fh-sheet-date { font-size: var(--fs-label); color: var(--text-2); text-align: end; line-height: 1.5; }
+.fh-sheet .segments { height: 5px; gap: 3px; margin-top: 14px; }
+.fh-sheet .segments > span:hover { transform: scaleY(2); }
+.fh-ready { display: flex; justify-content: space-between; gap: 12px; margin-top: 10px; font-size: var(--fs-small); color: var(--text); }
+.fh-ready b { font-weight: var(--w-medium); color: var(--deep-blue); }
+.fh-pct { color: var(--text-2); }
+.fh-close-row { display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; margin-top: 14px; }
+.fh-close { font-size: var(--fs-body); color: var(--ink); }
+.fh-close b { font-weight: var(--w-medium); color: var(--deep-blue); }
+.fh-close small { display: block; margin-top: 2px; font-size: var(--fs-micro); color: var(--text-warm); }
+
+/* Tasks: three counts in a row */
+.fh-tasks { padding-bottom: 0; }
+.fh-tasks ul { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 12px; }
+.fh-tasks li + li { border-inline-start: var(--hair) solid var(--rule); padding-inline-start: 14px; }
+.fh-tasks li:not(:last-child) { padding-inline-end: 10px; }
+.fh-task { display: grid; gap: 4px; color: inherit; text-decoration: none; }
+.fh-task .num { font-size: 30px; font-weight: var(--w-light); line-height: 1; color: var(--deep-blue); transition: color var(--t-fast) var(--ease); }
+.fh-task small { font-size: var(--fs-micro); line-height: 1.4; color: var(--text-2); }
+.fh-task:hover .num { color: var(--smoky-blue); }
+.fh-task:hover small { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--rule); }
+.fh-task.is-clear .num { color: var(--text-3); }
+
+/* ---------- Responsive ---------- */
+@media (max-height: 760px) and (min-width: 761px) {
+  .fh-content { padding-top: 22px; padding-bottom: 18px; }
+  .fh-head { padding-bottom: 12px; }
+  .fh-greeting { font-size: 30px; margin-top: 2px; }
+  .fh-block { padding-block: 11px; }
+  .fh-figure dt { font-size: 14px; }
+  .fh-value { font-size: 28px; }
+  .fh-sheet-no { font-size: 42px; }
+  .fh-sheet .segments { margin-top: 10px; }
+  .fh-ready { margin-top: 8px; }
+  .fh-close-row { margin-top: 8px; }
+  .fh-tasks ul { margin-top: 8px; }
+  .fh-task .num { font-size: 26px; }
+}
+@media (max-width: 1024px) {
+  .app-fh { grid-template-columns: 1fr; }
+  .app-fh .sidenav { order: 0; }
+  .fh { --view-h: calc(100vh - var(--bar-h) - 62px); grid-template-columns: 50% minmax(0, 1fr); }
+  .fh-photo { top: calc(var(--bar-h) + 62px); }
+}
+@media (max-width: 760px) {
+  .fh { grid-template-columns: 1fr; min-height: 0; }
+  .fh-photo { position: static; height: auto; }
+  .fh-photo img { height: auto; aspect-ratio: 982 / 737; object-fit: fill; }   /* the whole picture, at its own ratio */
+  .fh-photo.is-missing { aspect-ratio: 4 / 3; }
+  .fh-content { padding: 24px 20px 36px; }
+  .fh-content > * { max-width: none; }
+  .fh-greeting { font-size: 34px; }
+}
